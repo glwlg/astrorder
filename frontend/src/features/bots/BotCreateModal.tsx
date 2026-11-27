@@ -833,7 +833,7 @@ export function BotCreateModal({
                   required
                   value={workspace}
                   onChange={(e) => setWorkspace(e.target.value)}
-                  placeholder="例如：/home/luwei/workspace/video 或 D:\bots\video"
+                  placeholder="例如：~/Documents/my-project 或 D:\projects\my-bot"
                 />
               </div>
               <div className="bot-field">

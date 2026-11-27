@@ -164,8 +164,10 @@ describe('MobileLearningFeed', () => {
     expect(await screen.findByText('原工作现场线索')).toBeTruthy()
     expect(screen.getByText('会话「怎么会报毒啊」')).toBeTruthy()
 
-    // Save a quick note
-    const quickInput = screen.getByLabelText('快捷速记输入')
+    // Save a quick note (and ensure placeholder uses general copy without geek jargon)
+    const quickInput = screen.getByLabelText('快捷速记输入') as HTMLInputElement
+    expect(quickInput.placeholder).not.toContain('剥离符号表')
+    expect(quickInput.placeholder).not.toContain('PE 熵值')
     fireEvent.change(quickInput, { target: { value: '保留符号表很关键' } })
     fireEvent.click(screen.getByRole('button', { name: '保存快捷速记' }))
 

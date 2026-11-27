@@ -688,3 +688,448 @@
     min-height: 40px;
   }
 }
+
+/* Scheduled reminder creation bar & modal controls */
+.action-inbox-schedule-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--ibx-border, var(--astr-border));
+  background: var(--ibx-rail, var(--astr-surface));
+}
+
+.action-inbox-schedule-bar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.action-inbox-schedule-bar-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ibx-ink, var(--astr-text));
+}
+
+.action-inbox-schedule-bar-copy span {
+  font-size: 12px;
+  color: var(--ibx-muted, var(--astr-muted));
+}
+
+.action-inbox-reminder-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-inbox-reminder-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ibx-body, var(--astr-text));
+}
+
+.action-inbox-reminder-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-inbox-reminder-pill {
+  min-height: 30px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--mantine-color-default-border);
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.action-inbox-reminder-pill.is-active {
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+  border-color: transparent;
+}
+
+.action-inbox-weekday-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.action-inbox-weekday-btn {
+  width: 34px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--mantine-color-default-border);
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.action-inbox-weekday-btn.is-active {
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+  border-color: transparent;
+}
+
+.action-inbox-reminder-native-input {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  color: inherit;
+  font-size: 13px;
+}
+
+.action-inbox-reminder-summary {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--ibx-rail, var(--mantine-color-gray-0));
+  border: 1px solid var(--ibx-border, var(--mantine-color-default-border));
+  font-size: 12.5px;
+  color: var(--ibx-body, var(--mantine-color-text));
+}
+
+.action-inbox-reminder-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(225, 29, 72, 0.08);
+  color: #e11d48;
+  font-size: 12.5px;
+}
+
+/* ============================================================================
+   Mobile & Narrow Viewport Refinement (375px–430px / .mobile-workspace)
+   ============================================================================ */
+@media (max-width: 767px) {
+  .action-inbox-page {
+    padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .action-inbox {
+    min-width: 0;
+    width: 100%;
+    gap: 12px;
+  }
+
+  .action-inbox-title-row h1 {
+    font-size: 18px;
+  }
+
+  .action-inbox-add-bar {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .action-inbox-add-input {
+    flex: 1 1 calc(100% - 26px);
+    min-width: 0;
+    height: 36px;
+    font-size: 15px;
+  }
+
+  .action-inbox-add-select,
+  .action-inbox-add-date {
+    flex: 1 1 112px;
+    min-width: 0;
+    min-height: 36px;
+    height: auto;
+  }
+
+  .action-inbox-add-submit {
+    flex: 1 1 auto;
+    min-height: 36px;
+    height: auto;
+    padding: 0 14px;
+  }
+
+  .action-inbox-toolbar {
+    gap: 8px;
+  }
+
+  .action-inbox-filters {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .action-inbox-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .action-inbox-filter-pill {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 4px 11px;
+    white-space: nowrap;
+  }
+
+  .action-inbox-toolbar-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .action-inbox-search {
+    flex: 1 1 160px;
+    min-width: 0;
+    min-height: 36px;
+    height: auto;
+  }
+
+  .action-inbox-search input {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .action-inbox-clear-btn {
+    min-height: 36px;
+    white-space: nowrap;
+  }
+
+  .action-inbox-card {
+    padding: 12px;
+    min-width: 0;
+  }
+
+  .action-inbox-card-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px 8px;
+  }
+
+  .action-inbox-card-title {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .action-inbox-card-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .action-inbox-open-btn {
+    min-height: 34px;
+    padding: 4px 10px;
+  }
+
+  .action-inbox-todo-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .action-inbox-check-btn {
+    width: 22px;
+    height: 22px;
+    margin-top: 2px;
+  }
+
+  .action-inbox-todo-ops {
+    margin-left: auto;
+  }
+
+  .action-inbox-icon-ghost {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .action-inbox-actions {
+    flex-wrap: wrap;
+  }
+
+  .action-inbox-reply-row {
+    flex-wrap: wrap;
+  }
+
+  .action-inbox-quick-form {
+    flex: 1 1 200px;
+  }
+
+  .action-inbox-schedule-bar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .action-inbox-reminder-pill {
+    min-height: 36px;
+  }
+
+  .action-inbox-weekday-btn {
+    min-width: 38px;
+    min-height: 36px;
+  }
+}
+
+.mobile-workspace .action-inbox-page {
+  padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .m-office-page-scroll > .action-inbox-page,
+.mobile-workspace .m-office-page-scroll > .action-inbox {
+  padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px));
+  height: auto;
+  overflow: visible;
+}
+
+.mobile-workspace .action-inbox {
+  min-width: 0;
+  width: 100%;
+  gap: 12px;
+}
+
+.mobile-workspace .action-inbox-add-input {
+  flex: 1 1 calc(100% - 26px);
+  min-width: 0;
+  height: 36px;
+}
+
+.mobile-workspace .action-inbox-add-select,
+.mobile-workspace .action-inbox-add-date {
+  flex: 1 1 112px;
+  min-width: 0;
+  min-height: 36px;
+  height: auto;
+}
+
+.mobile-workspace .action-inbox-add-submit {
+  flex: 1 1 auto;
+  min-height: 36px;
+  height: auto;
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+}
+
+.mobile-workspace .action-inbox-filters {
+  width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+.mobile-workspace .action-inbox-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-workspace .action-inbox-filter-pill {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.mobile-workspace .action-inbox-filter-pill.is-active {
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+}
+
+.mobile-workspace .action-inbox-toolbar-right {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.mobile-workspace .action-inbox-search {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 36px;
+  height: auto;
+}
+
+.mobile-workspace .action-inbox-search input {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-workspace .action-inbox-card {
+  padding: 12px;
+  min-width: 0;
+}
+
+.mobile-workspace .action-inbox-card-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+}
+
+.mobile-workspace .action-inbox-card-title {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.mobile-workspace .action-inbox-card-right {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.mobile-workspace .action-inbox-open-btn {
+  min-height: 34px;
+  border: 1px solid var(--ibx-border, var(--astr-border));
+  background: var(--ibx-rail, var(--astr-surface-muted));
+}
+
+.mobile-workspace .action-inbox-check-btn {
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--ibx-faint, #a1a1aa);
+}
+
+.mobile-workspace .action-inbox-check-btn.is-checked {
+  border-color: var(--ibx-obsidian, #18181b);
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+}
+
+.mobile-workspace .action-inbox-send-btn {
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+}
+
+.mobile-workspace .action-inbox-read-btn {
+  border: 1px solid var(--ibx-border, var(--astr-border));
+}
+
+.mobile-workspace .action-inbox-clear-btn {
+  min-height: 36px;
+  border: 1px solid var(--ibx-border, var(--astr-border));
+}
+
+.mobile-workspace .action-inbox-reminder-pill {
+  min-height: 36px;
+  border: 1px solid var(--mantine-color-default-border);
+}
+
+.mobile-workspace .action-inbox-reminder-pill.is-active,
+.mobile-workspace .action-inbox-weekday-btn.is-active {
+  background: var(--ibx-obsidian, #18181b);
+  color: var(--ibx-obsidian-text, #ffffff);
+  border-color: transparent;
+}
+
+.mobile-workspace .action-inbox-weekday-btn {
+  min-width: 38px;
+  min-height: 36px;
+  border: 1px solid var(--mantine-color-default-border);
+}

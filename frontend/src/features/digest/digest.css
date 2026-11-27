@@ -516,3 +516,309 @@
 .digest-history-card.is-active {
   background: var(--dg-rail);
 }
+
+/* ============================================================================
+   Mobile & Narrow Viewport Refinement (375px–430px / .mobile-workspace)
+   ============================================================================ */
+@media (max-width: 767px) {
+  .digest-page-shell {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .digest-page-header {
+    height: auto;
+    min-height: 46px;
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .digest-header-left {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+  }
+
+  .digest-header-sub {
+    margin-left: 0;
+    flex-basis: 100%;
+    font-size: 11.5px;
+  }
+
+  .digest-header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .digest-model-trigger {
+    max-width: 100%;
+    flex: 1 1 160px;
+    min-width: 0;
+    min-height: 34px;
+    height: auto;
+    padding: 5px 10px;
+  }
+
+  .digest-ghost-btn {
+    min-height: 34px;
+    height: auto;
+    padding: 5px 10px;
+  }
+
+  .digest-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    overflow: visible;
+  }
+
+  .digest-left-pane {
+    height: auto;
+    overflow-y: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--dg-hairline);
+    padding: 12px 12px 18px;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .digest-left-pane .mantine-SegmentedControl-root {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .digest-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .digest-kpi-card {
+    min-width: 0;
+    padding: 10px 12px;
+  }
+
+  .digest-obsidian-btn {
+    min-height: 40px;
+    height: auto;
+    padding: 8px 14px;
+  }
+
+  .digest-secondary-btn {
+    min-height: 36px;
+    height: auto;
+    padding: 6px 10px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .digest-right-pane {
+    height: auto;
+    min-height: 360px;
+    overflow: visible;
+  }
+
+  .digest-report-toolbar {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .digest-report-toolbar .mantine-Group-root {
+    flex-wrap: wrap !important;
+    max-width: 100%;
+  }
+
+  .digest-report-title-input {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 100%;
+    font-size: 16px;
+  }
+
+  .digest-report-toolbar .mantine-TextInput-root {
+    width: 100% !important;
+    flex: 1 1 160px;
+  }
+
+  .digest-refine-chip {
+    min-height: 30px;
+    height: auto;
+    padding: 4px 11px;
+  }
+
+  .digest-report-scroll {
+    padding: 16px 12px calc(32px + env(safe-area-inset-bottom, 0px));
+    overflow-y: visible;
+    overflow-x: hidden;
+  }
+
+  .digest-report-paper {
+    max-width: 100%;
+    padding: 0 0 24px;
+    overflow-wrap: anywhere;
+  }
+
+  .digest-report-paper table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .digest-empty-stage {
+    margin: 28px auto 0;
+    padding: 0 8px;
+  }
+
+  .digest-editor-textarea textarea {
+    min-height: 320px;
+  }
+}
+
+.mobile-workspace .m-office-page-scroll > .digest-page-shell {
+  margin: -12px;
+  width: calc(100% + 24px);
+  height: auto;
+  min-height: calc(100% + 24px);
+  overflow: visible !important;
+}
+
+.mobile-workspace .digest-page-header {
+  height: auto;
+  min-height: 46px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobile-workspace .digest-header-left {
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.mobile-workspace .digest-header-sub {
+  margin-left: 0;
+  flex-basis: 100%;
+  font-size: 11.5px;
+}
+
+.mobile-workspace .digest-header-right {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mobile-workspace .digest-model-trigger {
+  max-width: 100%;
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 34px;
+  height: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--dg-border);
+  background: var(--dg-rail);
+  color: var(--dg-body);
+}
+
+.mobile-workspace .digest-workspace-grid {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  overflow: visible;
+}
+
+.mobile-workspace .digest-left-pane {
+  height: auto;
+  overflow-y: visible;
+  border-right: none;
+  border-bottom: 1px solid var(--dg-hairline);
+  padding: 12px 12px 18px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mobile-workspace .digest-kpi-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-workspace .digest-obsidian-btn {
+  min-height: 40px;
+  background: var(--dg-obsidian);
+  color: var(--dg-obsidian-text);
+}
+
+.mobile-workspace .digest-secondary-btn {
+  min-height: 36px;
+  height: auto;
+  padding: 6px 10px;
+  border: 1px solid var(--dg-border);
+  background: var(--dg-paper);
+  color: var(--dg-body);
+  white-space: normal;
+  text-align: center;
+}
+
+.mobile-workspace .digest-refine-chip {
+  min-height: 30px;
+  height: auto;
+  padding: 4px 11px;
+  border: 1px solid var(--dg-border);
+  background: var(--dg-rail);
+  color: var(--dg-body);
+}
+
+.mobile-workspace .digest-right-pane {
+  height: auto;
+  min-height: 360px;
+  overflow: visible;
+}
+
+.mobile-workspace .digest-report-toolbar {
+  padding: 12px;
+  gap: 8px;
+}
+
+.mobile-workspace .digest-report-toolbar .mantine-Group-root {
+  flex-wrap: wrap !important;
+  max-width: 100%;
+}
+
+.mobile-workspace .digest-report-title-input {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 100%;
+  font-size: 16px;
+}
+
+.mobile-workspace .digest-report-scroll {
+  padding: 16px 12px calc(32px + env(safe-area-inset-bottom, 0px));
+  overflow-y: visible;
+}
+
+.mobile-workspace .digest-report-paper {
+  max-width: 100%;
+  padding: 0 0 24px;
+  overflow-wrap: anywhere;
+}
+
+.mobile-workspace .digest-report-paper table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .digest-empty-stage {
+  margin: 28px auto 0;
+  padding: 0 8px;
+}
+
+@media (max-width: 359px) {
+  .digest-sub-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

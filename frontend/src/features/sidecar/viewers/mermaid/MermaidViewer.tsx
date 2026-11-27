@@ -1,31 +1,37 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionIcon, Button, Group, LoadingOverlay, Paper, Text, Tooltip } from '@mantine/core'
-import { IconDeviceFloppy, IconDownload, IconRefresh } from '@tabler/icons-react'
+import { IconDeviceFloppy, IconDownload, IconMaximize, IconRefresh } from '@tabler/icons-react'
 import { downloadFile } from '../../fileTransfer'
 import type { ViewerContext } from '../../types'
 import { renderMermaid } from '../../../../components/renderMermaid'
 import { authenticatedApiFetch } from '../../../../api/client'
+import { extractSvgIntrinsicSize, PanZoomCanvas, type PanZoomCanvasHandle } from '../../../../components/PanZoomCanvas'
+import { DiagramLightboxModal } from '../../../../components/DiagramLightboxModal'
 
 export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, isActive = true }: ViewerContext) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<PanZoomCanvasHandle>(null)
   const onDirtyChangeRef = useRef(onDirtyChange)
   onDirtyChangeRef.current = onDirtyChange
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState('')
+  const [renderedSvg, setRenderedSvg] = useState('')
+  const [fitVersion, setFitVersion] = useState(0)
   const [isEditing, setIsEditing] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
   const initialCodeRef = useRef('')
+  const intrinsicSize = useMemo(() => extractSvgIntrinsicSize(renderedSvg), [renderedSvg])
 
-  const renderChart = useCallback(async (chartCode: string) => {
-    if (!containerRef.current) return
+  const renderChart = useCallback(async (chartCode: string, autoFit = false) => {
     setError(null)
     try {
       const { svg } = await renderMermaid(chartCode)
-      if (containerRef.current) {
-        containerRef.current.innerHTML = svg
+      setRenderedSvg(svg)
+      if (autoFit) {
+        setFitVersion((v) => v + 1)
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Mermaid 图表语法解析错误'
@@ -51,7 +57,7 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
       initialCodeRef.current = text
       setDirty(false)
       onDirtyChangeRef.current?.(false)
-      await renderChart(text)
+      await renderChart(text, true)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '文件读取失败'
       setError(msg)
@@ -69,8 +75,8 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
     const isNowDirty = newVal !== initialCodeRef.current
     setDirty(isNowDirty)
     onDirtyChangeRef.current?.(isNowDirty)
-    void renderChart(newVal)
-  };
+    void renderChart(newVal, false)
+  }
 
   const handleSave = useCallback(async () => {
     if (!onSave || !artifact.writable) return
@@ -86,6 +92,21 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
       setSaving(false)
     }
   }, [artifact.writable, code, onSave])
+
+  const handleDownloadSource = () => {
+    if (artifact.readUrl) {
+      const sep = artifact.readUrl.includes('?') ? '&' : '?'
+      void downloadFile(`${artifact.readUrl}${sep}download=1`, artifact.name)
+      return
+    }
+    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = artifact.name || 'diagram.mmd'
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 
   // 监听 Ctrl+S 快捷键保存
   useEffect(() => {
@@ -106,8 +127,8 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
   }, [dirty, saving, handleSave, isActive])
 
   return (
-    <div className="mermaid-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0 }}>
+    <div className="mermaid-viewer-pane" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <Paper p="xs" withBorder style={{ borderBottom: '1px solid var(--astr-border)', borderRadius: 0, flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <Text size="xs" fw={600} truncate title={artifact.name}>
@@ -143,28 +164,43 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
                 </Button>
               </Tooltip>
             )}
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              title="重新加载"
-              onClick={() => void fetchContent()}
-            >
-              <IconRefresh size={14} />
-            </ActionIcon>
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              title="下载源文件"
-              onClick={() => void downloadFile(`${artifact.readUrl}&download=1`, artifact.name)}
-            >
-              <IconDownload size={14} />
-            </ActionIcon>
+            <Tooltip label="弹窗放大查看">
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                aria-label="弹窗放大查看图表"
+                disabled={!renderedSvg}
+                onClick={() => setLightboxOpen(true)}
+              >
+                <IconMaximize size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="重新加载">
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                aria-label="重新加载"
+                onClick={() => void fetchContent()}
+              >
+                <IconRefresh size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="下载源文件">
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                aria-label="下载源文件"
+                onClick={handleDownloadSource}
+              >
+                <IconDownload size={14} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         </Group>
       </Paper>
 
       {isEditing && (
-        <div style={{ borderBottom: '1px solid var(--astr-border)', padding: 8, background: 'var(--astr-surface-muted)' }}>
+        <div style={{ borderBottom: '1px solid var(--astr-border)', padding: 8, background: 'var(--astr-surface-muted)', flex: 'none' }}>
           <textarea
             value={code}
             onChange={(e) => handleCodeChange(e.target.value)}
@@ -184,23 +220,34 @@ export function MermaidViewer({ artifact, onSave, onDirtyChange, toolbarAction, 
         </div>
       )}
 
-      <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'auto', padding: 16 }}>
+      <div style={{ flex: 1, position: 'relative', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <LoadingOverlay visible={loading} />
         {error && (
-          <Paper p="sm" withBorder mb="md" style={{ background: '#fff0f0', borderColor: '#ffc0c0', color: '#c00' }}>
+          <Paper p="sm" withBorder m="sm" style={{ background: '#fff0f0', borderColor: '#ffc0c0', color: '#c00', flex: 'none' }}>
             <Text size="xs" fw={500}>{error}</Text>
           </Paper>
         )}
-        <div
-          ref={containerRef}
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            minHeight: '100%',
-          }}
-        />
+        <PanZoomCanvas
+          ref={canvasRef}
+          dotGrid
+          contentSize={intrinsicSize}
+          fitKey={fitVersion}
+          ariaLabel="Mermaid 缩放画布"
+        >
+          <div
+            className="astr-diagram-svg-host"
+            dangerouslySetInnerHTML={{ __html: renderedSvg }}
+          />
+        </PanZoomCanvas>
       </div>
+
+      <DiagramLightboxModal
+        opened={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        title={artifact.name || 'Mermaid 架构图'}
+        svg={renderedSvg}
+        downloadFilename={artifact.name.replace(/\.mmd$/i, '') + '.svg'}
+      />
     </div>
   )
 }

@@ -211,7 +211,7 @@ export function filterAgentMentions(
       })
     : nonBotItems
   const allItems = options?.officeMode
-    ? [...botItems, browserItem, ...sortedItems]
+    ? [browserItem, ...sortedItems]
     : [
         ...botItems,
         swarmItem,

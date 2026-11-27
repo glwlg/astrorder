@@ -15,12 +15,13 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, ApiError } from "../api/client";
+import { IconCheck, IconPlus, IconRobot, IconTrash } from "@tabler/icons-react";
+import { api, ApiError, type BotSummary } from "../api/client";
 import { scopeKey } from "../domain/semantics";
 import type { Agent, BotGroup, BotGroupMember, Session } from "../domain/types";
 import { useAstrorderStore } from "../state/store";
 import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
+import { createMemberSeedFromBot } from "../features/bots/botGroupBridge";
 import { AgentBrandIcon } from "./AgentBrandIcon";
 import { displaySessionTitle } from "./sessionRailModel";
 import { REASONING_EFFORTS } from "../features/chat/composerMedia";
@@ -41,6 +42,7 @@ type MemberDraft = {
   forkSessionId: string;
   locked: boolean;
   forkUncertain: boolean;
+  sourceBotId?: string;
 };
 
 type AgentOptions = {
@@ -108,6 +110,8 @@ export function CreateBotGroupDialog({
   const [maxHops, setMaxHops] = useState<number>(10);
   const [members, setMembers] = useState<MemberDraft[]>([]);
   const [agentOptions, setAgentOptions] = useState<Record<string, AgentOptions>>({});
+  const [studioBots, setStudioBots] = useState<BotSummary[]>([]);
+  const [botsLoading, setBotsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
   const forked = useRef<Record<string, string>>({});
@@ -133,6 +137,25 @@ export function CreateBotGroupDialog({
     for (const agentId of new Set(group?.members.map((member) => member.agent_id) || [])) {
       void loadAgentOptions(agentId);
     }
+    let cancelled = false;
+    if (typeof api.listBots === "function") {
+      setBotsLoading(true);
+      void api.listBots()
+        .then((res) => {
+          if (!cancelled) setStudioBots(Array.isArray(res?.items) ? res.items : []);
+        })
+        .catch(() => {
+          if (!cancelled) setStudioBots([]);
+        })
+        .finally(() => {
+          if (!cancelled) setBotsLoading(false);
+        });
+    } else {
+      setStudioBots([]);
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [opened, group]);
 
   const loadAgentOptions = async (agentId: string, newMemberKey?: string) => {
@@ -178,8 +201,11 @@ export function CreateBotGroupDialog({
     }
   };
 
+  const nextMemberId = () =>
+    `member-${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+
   const addMember = (agent: Agent) => {
-    const id = `member-${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    const id = nextMemberId();
     const known = agentOptions[agent.id];
     const connection = agent.connection_id || "local";
     setMembers((prev) => [...prev, {
@@ -190,6 +216,72 @@ export function CreateBotGroupDialog({
       locked: false, forkUncertain: false,
     }]);
     if (!known) void loadAgentOptions(agent.id, id);
+  };
+
+  const toggleStudioBot = (bot: BotSummary) => {
+    const existing = members.find((member) => member.sourceBotId === bot.id);
+    if (existing) {
+      if (existing.locked) return;
+      setMembers((prev) => prev.filter((member) => member.sourceBotId !== bot.id));
+      setFormError("");
+      return;
+    }
+    if (members.length >= 16) return;
+    const id = nextMemberId();
+    const seed = createMemberSeedFromBot(
+      bot,
+      agents,
+      members.map((member) => member.alias),
+      id,
+    );
+    setMembers((prev) => {
+      if (prev.length >= 16) return prev;
+      const freshSeed = createMemberSeedFromBot(
+        bot,
+        agents,
+        prev.map((member) => member.alias),
+        id,
+      );
+      return [...prev, freshSeed];
+    });
+    setFormError("");
+    if (agents[seed.agentId] && !agentOptions[seed.agentId]) {
+      void loadAgentOptions(seed.agentId, id);
+    }
+  };
+
+  const importAllStudioBots = () => {
+    const importedIds = new Set(members.map((member) => member.sourceBotId).filter(Boolean));
+    const remainingSlots = Math.max(0, 16 - members.length);
+    if (remainingSlots === 0) return;
+    const pendingBots = studioBots.filter((bot) => !importedIds.has(bot.id)).slice(0, remainingSlots);
+    if (pendingBots.length === 0) return;
+
+    const existingAliases = members.map((member) => member.alias);
+    const newSeeds: MemberDraft[] = [];
+    const agentsToLoad = new Set<string>();
+    const loadTargets: Array<{ agentId: string; key: string }> = [];
+
+    for (const bot of pendingBots) {
+      const id = nextMemberId();
+      const seed = createMemberSeedFromBot(bot, agents, existingAliases, id);
+      existingAliases.push(seed.alias);
+      newSeeds.push(seed);
+      if (agents[seed.agentId] && !agentOptions[seed.agentId] && !agentsToLoad.has(seed.agentId)) {
+        agentsToLoad.add(seed.agentId);
+        loadTargets.push({ agentId: seed.agentId, key: id });
+      }
+    }
+
+    setMembers((prev) => {
+      const prevImported = new Set(prev.map((member) => member.sourceBotId).filter(Boolean));
+      const toAppend = newSeeds.filter((seed) => !seed.sourceBotId || !prevImported.has(seed.sourceBotId));
+      return [...prev, ...toAppend].slice(0, 16);
+    });
+    setFormError("");
+    for (const target of loadTargets) {
+      void loadAgentOptions(target.agentId, target.key);
+    }
   };
 
   const updateMember = (key: string, patch: Partial<MemberDraft>) => {
@@ -286,8 +378,76 @@ export function CreateBotGroupDialog({
           onChange={(event) => setDescription(event.currentTarget.value)} disabled={busy} />
         <NumberInput label="单次提问最大接力轮数" description="默认 10 次，可设置 1～20 次；暂停后提高上限，再点「重新判断」继续。"
           min={1} max={20} allowDecimal={false} value={maxHops} onChange={(value) => setMaxHops(typeof value === "number" ? value : 10)} disabled={busy} />
+        {(botsLoading || studioBots.length > 0) && (
+          <div>
+            <Group justify="space-between" align="center" mb={6}>
+              <Group gap={6}>
+                <IconRobot size={15} />
+                <Text size="sm" fw={600}>从 Bot 工作室导入</Text>
+                {studioBots.length > 0 && (
+                  <Badge size="xs" variant="light" color="violet">{studioBots.length}</Badge>
+                )}
+              </Group>
+              {studioBots.length > 1 && studioBots.some((bot) => !members.some((m) => m.sourceBotId === bot.id)) && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="violet"
+                  disabled={busy || members.length >= 16}
+                  onClick={importAllStudioBots}
+                >
+                  全部导入
+                </Button>
+              )}
+            </Group>
+            <Stack gap={6} style={{ maxHeight: 180, overflowY: "auto" }}>
+              {botsLoading && studioBots.length === 0 && (
+                <Text size="xs" c="dimmed">正在加载 Bot 工作室成员…</Text>
+              )}
+              {studioBots.map((bot) => {
+                const imported = members.some((member) => member.sourceBotId === bot.id);
+                const botAgent = agents[bot.default_agent_id];
+                return (
+                  <Paper key={bot.id} withBorder p="xs" radius="md">
+                    <Group className="bot-group-agent-row" justify="space-between" wrap="nowrap" gap="xs">
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <Group gap={6} wrap="nowrap">
+                          {botAgent ? <AgentBrandIcon kind={botAgent.kind} size={16} /> : <IconRobot size={16} />}
+                          <Text size="sm" fw={600} truncate="end">{bot.name}</Text>
+                          <Badge size="xs" variant="light" color="gray" style={{ flexShrink: 0 }}>@{bot.slug}</Badge>
+                          <Badge size="xs" variant="outline" color="gray" style={{ flexShrink: 0, maxWidth: 112 }}>
+                            {machineLabel(bot.connection_id || botAgent?.connection_id || "local")}
+                          </Badge>
+                        </Group>
+                        {(bot.description || bot.workspace) && (
+                          <Text size="xs" c="dimmed" truncate="end" mt={2}>
+                            {[bot.description, bot.workspace].filter(Boolean).join(" · ")}
+                          </Text>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        size="compact-xs"
+                        variant={imported ? "filled" : "light"}
+                        color={imported ? "teal" : "violet"}
+                        leftSection={imported ? <IconCheck size={13} /> : <IconPlus size={13} />}
+                        aria-pressed={imported}
+                        aria-label={imported ? `取消导入 Bot ${bot.name}` : `导入 Bot ${bot.name}`}
+                        disabled={busy || (!imported && members.length >= 16)}
+                        onClick={() => toggleStudioBot(bot)}
+                        style={{ flexShrink: 0 }}
+                      >
+                        {imported ? "已导入" : "导入"}
+                      </Button>
+                    </Group>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          </div>
+        )}
         <div>
-          <Text size="sm" fw={600} mb={6}>添加 Agent</Text>
+          <Text size="sm" fw={600} mb={6}>{studioBots.length > 0 ? "手动添加 Agent" : "添加 Agent"}</Text>
           <Stack gap={6} style={{ maxHeight: 180, overflowY: "auto" }}>
             {activeAgents.length === 0 && <Text size="sm" c="dimmed">没有可用的 Agent</Text>}
             {activeAgents.map((agent) => (

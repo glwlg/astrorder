@@ -9,7 +9,7 @@ export function readProjectOrder(): string[] {
 
 // Incoming keys are alphabetic only for first placement. Missing sources keep their slots.
 export function reconcileProjectOrder(saved: string[], incoming: string[]): string[] {
-  return [...new Set([...saved, ...incoming])]
+  return [...new Set([...(Array.isArray(saved) ? saved : []), ...(Array.isArray(incoming) ? incoming : [])])]
 }
 
 export function moveProject(order: string[], source: string, target: string): string[] {

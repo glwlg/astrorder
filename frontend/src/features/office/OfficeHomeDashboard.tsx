@@ -1,5 +1,5 @@
 import { useCallback, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { ActionIcon, Badge, Group, Menu, Modal, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -7,6 +7,9 @@ import {
   IconCheck,
   IconChevronDown,
   IconClock,
+  IconCopy,
+  IconEdit,
+  IconEye,
   IconFileSpreadsheet,
   IconFileText,
   IconFileTypeDocx,
@@ -28,6 +31,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { api, type RecentOfficeDoc } from '../../api/client'
+import { MarkdownContent } from '../../components/MarkdownContent'
 import { displaySessionTitle, formatRelativeTime } from '../../components/sessionRailModel'
 import { newCommandId, scopeKey } from '../../domain/semantics'
 import type { Agent, Project, Session } from '../../domain/types'
@@ -37,8 +41,10 @@ import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
+import { ExportMenu } from './export/ExportMenu'
 import { OfficePersonaCard } from './OfficePersonaCard'
 import { OfficeTemplateModal } from './OfficeTemplateModal'
+import { openOnboardingWizard } from './OnboardingWizard'
 import { buildPersonaPromptBlock, hasConfiguredOfficePersona, useOfficePersona, writingStyleLabel } from './officePersona'
 import { OFFICE_DRAFT_TEMPLATES } from './officeTemplates'
 import './officeStudio.css'
@@ -79,13 +85,45 @@ export interface OfficeHomeDashboardProps {
   sessions: Session[]
   agents: Record<string, Agent>
   onNewSession?: () => void
+  mobile?: boolean
+  onOpenSession?: (session: Session) => void
+  onNavigatePath?: (path: string) => void
 }
 
-export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHomeDashboardProps) {
+export function OfficeHomeDashboard({
+  sessions,
+  agents,
+  onNewSession,
+  mobile = false,
+  onOpenSession,
+  onNavigatePath,
+}: OfficeHomeDashboardProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const inputId = useId()
   const formRef = useRef<HTMLFormElement>(null)
+
+  const openTargetSession = useCallback(
+    (session: Session) => {
+      if (onOpenSession) {
+        onOpenSession(session)
+        return
+      }
+      navigate(`/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`)
+    },
+    [navigate, onOpenSession],
+  )
+
+  const navigateToPath = useCallback(
+    (path: string) => {
+      if (onNavigatePath) {
+        onNavigatePath(path)
+        return
+      }
+      navigate(path)
+    },
+    [navigate, onNavigatePath],
+  )
 
   const projects = useAstrorderStore(useShallow(selectProjects))
   const isAgentEnabled = usePluginSettingsStore((s) => s.isAgentEnabled)
@@ -156,6 +194,13 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
   const [personaModalOpen, setPersonaModalOpen] = useState(false)
   const [templateModalId, setTemplateModalId] = useState<string | null>(null)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
+  const [generatedPreviewDoc, setGeneratedPreviewDoc] = useState<{
+    title: string
+    markdown: string
+    savedPath?: string
+  } | null>(null)
+  const [previewEditing, setPreviewEditing] = useState(false)
+  const [copiedGenerated, setCopiedGenerated] = useState(false)
 
   const activeWorkspace = useMemo(
     () => workspaceChoices.find((w) => w.key === selectedWorkspaceKey) || workspaceChoices[0] || null,
@@ -170,7 +215,15 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
   const startConversationWithPrompt = useCallback(
     async (rawText: string, explicitTitle?: string) => {
       const trimmed = rawText.trim()
-      if (!trimmed || !effectiveAgent || submitting) return
+      if (!trimmed || submitting) return
+      if (!effectiveAgent) {
+        notifications.show({
+          color: 'yellow',
+          message: '尚未接入可用 AI 助手引擎，请先完成初始化向导配置后再发起对话',
+        })
+        openOnboardingWizard()
+        return
+      }
       setSubmitting(true)
       try {
         const personaPrefix = buildPersonaPromptBlock(profile)
@@ -197,7 +250,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         })
         useAstrorderStore.getState().mergeCommands([sent])
         setPrompt('')
-        navigate(`/chat/${encodeURIComponent(created.id)}?agent_id=${encodeURIComponent(created.agent_id)}`)
+        openTargetSession(created)
       } catch (cause) {
         notifications.show({
           color: 'red',
@@ -207,7 +260,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         setSubmitting(false)
       }
     },
-    [activeWorkspace, effectiveAgent, navigate, profile, submitting],
+    [activeWorkspace, effectiveAgent, openTargetSession, profile, submitting],
   )
 
   const handleOmniSubmit = (e?: FormEvent) => {
@@ -280,8 +333,15 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         return
       }
     }
-    if (!targetSession) return
-    navigate(`/chat/${encodeURIComponent(targetSession.id)}?agent_id=${encodeURIComponent(targetSession.agent_id)}`)
+    if (!targetSession) {
+      notifications.show({
+        color: 'yellow',
+        message: '尚未接入可用 AI 助手引擎，请先点击「一键配置 AI 助手」完成初始化',
+      })
+      openOnboardingWizard()
+      return
+    }
+    openTargetSession(targetSession)
     window.setTimeout(() => {
       const artifact = resolveArtifactFromPath(doc.path, targetSession!, { name: doc.name })
       const viewer = artifactViewerRegistry.findViewer(artifact)
@@ -292,10 +352,15 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
     }, 160)
   }
 
-  const handleGeneratedDocument = async (doc: { title: string; markdown: string; savedPath?: string }) => {
+  const handleGeneratedDocument = async (doc: {
+    title: string
+    markdown: string
+    savedPath?: string
+  }): Promise<boolean> => {
     let targetSession = sessions
       .filter((s) => !activeWorkspace || (s.workspace || '').toLowerCase() === activeWorkspace.workspace.toLowerCase())
       .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))[0]
+    let createFailed = false
     if (!targetSession && effectiveAgent) {
       try {
         targetSession = await api.createSession({
@@ -308,11 +373,26 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
           sessions: { ...state.sessions, [scopeKey(targetSession!.agent_id, targetSession!.id)]: targetSession! },
         }))
       } catch {
-        return
+        createFailed = true
       }
     }
-    if (!targetSession) return
-    navigate(`/chat/${encodeURIComponent(targetSession.id)}?agent_id=${encodeURIComponent(targetSession.agent_id)}`)
+    if (!targetSession) {
+      // Never swallow generated output when there is no active session or ready Agent:
+      // open an inline writing/preview workbench modal so the user can immediately view, edit, copy, and export.
+      setGeneratedPreviewDoc(doc)
+      setPreviewEditing(false)
+      setCopiedGenerated(false)
+      notifications.show({
+        color: createFailed ? 'yellow' : 'teal',
+        message: createFailed
+          ? '新建对话失败，已在当前页写作预览台为您打开生成结果'
+          : doc.savedPath
+            ? '已生成成品文档并保存至工作区，已在当前页写作预览台打开'
+            : '已生成成品文档，已在当前页写作预览台打开',
+      })
+      return false
+    }
+    openTargetSession(targetSession)
     window.setTimeout(() => {
       if (doc.savedPath) {
         const artifact = resolveArtifactFromPath(doc.savedPath, targetSession!, { name: `${doc.title}.md` })
@@ -337,6 +417,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         )
       }
     }, 160)
+    return true
   }
 
   const topTasks = useMemo(() => {
@@ -387,11 +468,15 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
   const personaConfigured = hasConfiguredOfficePersona(profile)
 
   return (
-    <div className="office-home-stage" aria-label="今日办公工作台">
+    <div
+      className={`office-home-stage${mobile ? ' is-mobile' : ''}`}
+      data-mobile={mobile ? 'true' : undefined}
+      aria-label="今日办公工作台"
+    >
       <div className="office-home-inner">
         {/* 1. Morning Briefing Greeting + Persona Pill */}
         <header className="office-home-header">
-          <div>
+          <div className="office-home-header-copy">
             <h1 className="office-home-greeting">
               {greetingByHour()}{profile.display_name ? `，${profile.display_name}` : ''}
             </h1>
@@ -404,7 +489,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
             </div>
           </div>
 
-          <Group gap="xs">
+          <Group gap="xs" className="office-home-header-actions">
             <button
               type="button"
               className="office-home-persona-pill"
@@ -420,7 +505,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
             <button
               type="button"
               className="office-home-persona-pill"
-              onClick={() => navigate('/meetings')}
+              onClick={() => navigateToPath('/meetings')}
             >
               <IconMicrophone size={14} />
               <span>开始会议录音</span>
@@ -428,7 +513,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
             <button
               type="button"
               className="office-home-persona-pill"
-              onClick={() => navigate('/digest')}
+              onClick={() => navigateToPath('/digest')}
             >
               <IconNotebook size={14} />
               <span>工作周报</span>
@@ -437,6 +522,26 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         </header>
 
         {/* 2. Conversation-First Office Omni-Composer */}
+        {!effectiveAgent && (
+          <div className="office-home-agent-banner">
+            <div className="office-home-agent-banner-copy">
+              <div className="office-home-agent-banner-title">
+                还没有接入可用的 AI 助手引擎
+              </div>
+              <div className="office-home-agent-banner-desc">
+                通过初始化向导选择本机已安装的引擎或一键安装 OpenAI Codex，完成后即可立即对话。
+              </div>
+            </div>
+            <button
+              type="button"
+              className="office-home-submit"
+              onClick={() => openOnboardingWizard()}
+            >
+              <IconSparkles size={13} />
+              <span>一键配置 AI 助手</span>
+            </button>
+          </div>
+        )}
         <form ref={formRef} className="office-home-composer" onSubmit={handleOmniSubmit} aria-label="新建办公对话">
           <textarea
             id={inputId}
@@ -444,7 +549,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
             placeholder={
               effectiveAgent
                 ? '告诉我你想起草的方案、要分析的报表、或需要协助推进的工作，按 Enter 直接开始…'
-                : '当前暂无就绪 AI 助手，请前往左下角「设置 → 高级配置 → 连接管理」检查工作环境…'
+                : '请先点击上方「一键配置 AI 助手」完成引擎接入，即可立即开始对话…'
             }
             value={prompt}
             onChange={(e) => setPrompt(e.currentTarget.value)}
@@ -452,7 +557,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
             disabled={submitting || !effectiveAgent}
           />
           <div className="office-home-composer-bar">
-            <Group gap={6}>
+            <Group gap={6} className="office-home-composer-tools">
               <Menu withinPortal position="bottom-start" width={240}>
                 <Menu.Target>
                   <button type="button" className="office-tool-chip" aria-label="选择目标工作空间">
@@ -560,7 +665,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
                   </Badge>
                 )}
               </Group>
-              <button type="button" className="office-home-link" onClick={() => navigate('/inbox')}>
+              <button type="button" className="office-home-link" onClick={() => navigateToPath('/inbox')}>
                 <span>全部</span>
                 <IconArrowRight size={12} />
               </button>
@@ -606,8 +711,8 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
                       style={{ cursor: 'pointer' }}
                       onClick={() =>
                         task.kind === 'meeting' && task.meetingId
-                          ? navigate(`/meetings?id=${encodeURIComponent(task.meetingId)}`)
-                          : navigate('/inbox')
+                          ? navigateToPath(`/meetings?id=${encodeURIComponent(task.meetingId)}`)
+                          : navigateToPath('/inbox')
                       }
                     >
                       <span className="office-bento-row-title">{task.text}</span>
@@ -669,7 +774,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
                 <IconClock size={14} />
                 <span className="office-home-section-title">近期会议与对话</span>
               </Group>
-              <button type="button" className="office-home-link" onClick={() => navigate('/meetings')}>
+              <button type="button" className="office-home-link" onClick={() => navigateToPath('/meetings')}>
                 <span>会议室</span>
                 <IconArrowRight size={12} />
               </button>
@@ -683,7 +788,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
                     key={`m-${m.id}`}
                     type="button"
                     className="office-bento-row"
-                    onClick={() => navigate(`/meetings?id=${encodeURIComponent(m.id)}`)}
+                    onClick={() => navigateToPath(`/meetings?id=${encodeURIComponent(m.id)}`)}
                   >
                     <IconMicrophone size={14} color="var(--oh-muted)" />
                     <div className="office-bento-row-main">
@@ -702,9 +807,7 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
                   key={`s-${scopeKey(s.agent_id, s.id)}`}
                   type="button"
                   className="office-bento-row"
-                  onClick={() =>
-                    navigate(`/chat/${encodeURIComponent(s.id)}?agent_id=${encodeURIComponent(s.agent_id)}`)
-                  }
+                  onClick={() => openTargetSession(s)}
                 >
                   <IconFolder size={14} color="var(--oh-muted)" />
                   <div className="office-bento-row-main">
@@ -745,8 +848,113 @@ export function OfficeHomeDashboard({ sessions, agents, onNewSession }: OfficeHo
         workspace={activeWorkspace?.workspace || null}
         onClose={() => setTemplateModalOpen(false)}
         onSendToChat={(assembledPrompt, title) => startConversationWithPrompt(assembledPrompt, title)}
-        onGeneratedDocument={(doc) => void handleGeneratedDocument(doc)}
+        onGeneratedDocument={(doc) => handleGeneratedDocument(doc)}
       />
+
+      {/* Inline Writing / Preview Workbench Modal when no chat session exists */}
+      <Modal
+        opened={generatedPreviewDoc !== null}
+        onClose={() => setGeneratedPreviewDoc(null)}
+        title={
+          <Group gap={8}>
+            <IconFileText size={18} />
+            <Text fw={650} size="sm">
+              {generatedPreviewDoc?.title || '成品文档预览'}
+            </Text>
+            <Badge size="xs" variant="light" color="teal">
+              写作预览台
+            </Badge>
+          </Group>
+        }
+        size="xl"
+        radius="md"
+        withinPortal
+      >
+        {generatedPreviewDoc && (
+          <Stack gap="sm">
+            {!effectiveAgent && (
+              <Alert color="indigo" variant="light" radius="md">
+                <Group justify="space-between" align="center" gap="sm" wrap="wrap">
+                  <Text size="xs">
+                    当前尚未接入可用 AI 助手引擎，文档已直接为您保留在写作预览台；配置助手后可开启连续对话润色。
+                  </Text>
+                  <Button
+                    size="compact-xs"
+                    color="dark"
+                    leftSection={<IconSparkles size={12} />}
+                    onClick={() => openOnboardingWizard()}
+                  >
+                    前往初始化向导
+                  </Button>
+                </Group>
+              </Alert>
+            )}
+
+            <Group justify="space-between" align="center" gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Button
+                  size="compact-xs"
+                  variant={previewEditing ? 'filled' : 'default'}
+                  color="dark"
+                  leftSection={previewEditing ? <IconEye size={13} /> : <IconEdit size={13} />}
+                  onClick={() => setPreviewEditing((v) => !v)}
+                >
+                  {previewEditing ? '预览排版' : '编辑正文'}
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  leftSection={copiedGenerated ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(generatedPreviewDoc.markdown).then(() => {
+                      setCopiedGenerated(true)
+                      notifications.show({ color: 'teal', message: '已复制文稿内容' })
+                      window.setTimeout(() => setCopiedGenerated(false), 1600)
+                    })
+                  }}
+                >
+                  {copiedGenerated ? '已复制' : '复制全文'}
+                </Button>
+              </Group>
+              <ExportMenu
+                markdown={generatedPreviewDoc.markdown}
+                title={generatedPreviewDoc.title}
+                fileName={generatedPreviewDoc.title}
+                workspace={activeWorkspace?.workspace || undefined}
+                variant="button"
+                buttonLabel="导出文档"
+              />
+            </Group>
+
+            {previewEditing ? (
+              <Textarea
+                aria-label="编辑生成的文稿正文"
+                autosize
+                minRows={12}
+                maxRows={22}
+                value={generatedPreviewDoc.markdown}
+                onChange={(e) => {
+                  const nextMarkdown = e.currentTarget.value
+                  setGeneratedPreviewDoc((prev) => (prev ? { ...prev, markdown: nextMarkdown } : prev))
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  maxHeight: '58vh',
+                  overflowY: 'auto',
+                  padding: '14px 16px',
+                  borderRadius: 10,
+                  border: '1px solid var(--astr-border, #e5e7eb)',
+                  background: 'var(--astr-surface, #ffffff)',
+                }}
+              >
+                <MarkdownContent value={generatedPreviewDoc.markdown} />
+              </div>
+            )}
+          </Stack>
+        )}
+      </Modal>
     </div>
   )
 }

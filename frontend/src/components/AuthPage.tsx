@@ -8,7 +8,7 @@ import { QrCodeLogin } from '../features/auth/QrCodeLogin'
 function errorDetail(error: unknown): string {
   if (error instanceof ApiError) return error.detail
   if (error instanceof Error) return error.message
-  return '服务暂时不可用，请检查 Astrorder 后端是否已启动。'
+  return '服务暂时不可用，请确认星序服务已正常启动。'
 }
 
 export function AuthPage({
@@ -55,9 +55,9 @@ export function AuthPage({
             </div>
           </Group>
           <div>
-            <Title order={2} size="h3">登录本地工作台</Title>
+            <Title order={2} size="h3">登录星序工作台</Title>
             <Text c="dimmed" mt={6} size="sm">
-              会话凭证只提交到当前 Astrorder 服务端，不会写入 URL 或浏览器存储。
+              登录凭证仅用于连接当前设备上的星序服务，保障你的本地数据安全。
             </Text>
           </div>
 
@@ -70,7 +70,7 @@ export function AuthPage({
             }}
             data={[
               { label: '扫码登录', value: 'qr' },
-              { label: '访问令牌', value: 'token' },
+              { label: '口令登录', value: 'token' },
             ]}
           />
 
@@ -86,25 +86,25 @@ export function AuthPage({
             <form onSubmit={submit}>
               <Stack gap="md">
                 <PasswordInput
-                  label="访问令牌"
-                  description="由本地服务配置提供"
-                  placeholder="输入令牌"
+                  label="登录口令"
+                  description="可在本机星序桌面端或启动提示中查看"
+                  placeholder="请输入登录口令"
                   value={token}
                   onChange={(event) => setToken(event.currentTarget.value)}
                   leftSection={<IconKey size={17} />}
                   autoComplete="off"
-                  aria-label="访问令牌"
+                  aria-label="登录口令"
                   required
                 />
                 <Button type="submit" loading={submitting} disabled={!token.trim()} leftSection={<IconRefresh size={17} />}>
-                  建立会话
+                  立即登录
                 </Button>
               </Stack>
             </form>
           )}
 
           <Text size="xs" c="dimmed">
-            未连接或未配置认证时，星序不会展示模拟 Agent、会话或消息。
+            如需使用手机或平板访问，可点击上方「扫码登录」快速授权连接。
           </Text>
         </Stack>
       </Paper>

@@ -267,6 +267,13 @@
     flex-shrink: 0;
   }
 
+  @media (max-width: 400px) {
+    .m-header-actions button {
+      width: 36px;
+      min-width: 36px;
+    }
+  }
+
   .m-inbox-trigger {
     position: relative;
   }

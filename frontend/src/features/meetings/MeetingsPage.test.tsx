@@ -266,8 +266,9 @@ describe('MeetingsPage v2 real-time studio, persistent capsule & ActionInbox loo
 
     expect(screen.getByRole('button', { name: '开始实时录制' })).toBeTruthy()
     await waitFor(() => {
-      expect(screen.getByText('R2T2 已就绪')).toBeTruthy()
+      expect(screen.getByText('本地语音转写已就绪')).toBeTruthy()
     })
+    expect(screen.queryByText(/R2T2/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '配置会议总结模型' }))
     fireEvent.click(screen.getByRole('tab', { name: '指定模型' }))
@@ -399,8 +400,9 @@ describe('MeetingsPage v2 real-time studio, persistent capsule & ActionInbox loo
     )
 
     await waitFor(() => {
-      expect(screen.getByText('R2T2 已就绪')).toBeTruthy()
+      expect(screen.getByText('本地语音转写已就绪')).toBeTruthy()
     })
+    expect(screen.queryByText(/R2T2/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '开始实时录制' }))
     await waitFor(() => {
@@ -526,8 +528,9 @@ describe('MeetingsPage v2 real-time studio, persistent capsule & ActionInbox loo
     )
 
     await waitFor(() => {
-      expect(screen.getByText('R2T2 已就绪')).toBeTruthy()
+      expect(screen.getByText('本地语音转写已就绪')).toBeTruthy()
     })
+    expect(screen.queryByText(/R2T2/)).toBeNull()
 
     // Start recording on /meetings
     fireEvent.click(screen.getByRole('button', { name: '开始实时录制' }))
@@ -632,8 +635,9 @@ describe('MeetingsPage v2 real-time studio, persistent capsule & ActionInbox loo
     )
 
     await waitFor(() => {
-      expect(screen.getByText('R2T2 已就绪')).toBeTruthy()
+      expect(screen.getByText('本地语音转写已就绪')).toBeTruthy()
     })
+    expect(screen.queryByText(/R2T2/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '开始实时录制' }))
     await waitFor(() => {

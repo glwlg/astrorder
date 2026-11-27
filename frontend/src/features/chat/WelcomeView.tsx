@@ -36,6 +36,7 @@ import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useShortcutStore } from '../shortcuts/shortcuts'
 import { useIsOfficeProfile } from '../office/appProfile'
 import { OfficeHomeDashboard } from '../office/OfficeHomeDashboard'
+import { openOnboardingWizard } from '../office/OnboardingWizard'
 import './welcomeDeck.css'
 
 const OFFICE_STARTER_PROMPTS = [
@@ -221,7 +222,7 @@ function DeveloperWelcomeView({ sessions, agents, onNewSession }: WelcomeViewPro
   const todaySummary = useMemo(() => {
     const data = todayUsage.data
     if (!data) return null
-    if (data.range === 'today') {
+    if (data.range === 'today' && data.summary) {
       return {
         requests: Number(data.summary.requests || 0),
         totalTokens: Number(data.summary.totalTokens || 0),
@@ -229,7 +230,7 @@ function DeveloperWelcomeView({ sessions, agents, onNewSession }: WelcomeViewPro
     }
     const now = new Date()
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const day = data.days.find((row) => row.date === today)
+    const day = Array.isArray(data.days) ? data.days.find((row) => row.date === today) : undefined
     return day ? { requests: Number(day.requests || 0), totalTokens: Number(day.totalTokens || 0) } : null
   }, [todayUsage.data])
 
@@ -405,13 +406,32 @@ function DeveloperWelcomeView({ sessions, agents, onNewSession }: WelcomeViewPro
                   ? isOfficeProfile
                     ? '告诉我你要起草的文档、整理的资料或待办事项，按 Enter 直接开始（Shift+Enter 换行）…'
                     : '描述你要推进的任务，Enter 直接委派星辰启动会话（Shift+Enter 换行）…'
-                  : '当前暂无就绪助手，请先在左下角「设置 → 高级配置 → 连接管理」检查工作环境…'
+                  : '当前尚未接入就绪的 AI 助手，点击下方「一键配置 AI 助手」即可完成安装与接入…'
               }
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleTextareaKeyDown}
               disabled={submitting || readyAgents.length === 0}
             />
+            {readyAgents.length === 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  padding: '8px 14px',
+                  borderTop: '1px solid var(--astr-border, #e5e7eb)',
+                }}
+              >
+                <Text size="xs" c="dimmed">
+                  检测到暂未连接可用 Agent，可一键选用本机已安装引擎或安装 OpenAI Codex
+                </Text>
+                <Button size="compact-xs" color="dark" onClick={() => openOnboardingWizard()}>
+                  一键配置 AI 助手
+                </Button>
+              </div>
+            )}
             <div className="welcome-omni-footer">
               <div className="welcome-omni-selectors">
                 <Menu withinPortal hideDetached={false} position="bottom-start" offset={6} radius="md" shadow="lg" width={268}>

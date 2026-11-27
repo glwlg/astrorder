@@ -379,8 +379,15 @@ describe('SessionRail local handoff', () => {
 	   const row = view.container.querySelector('.session-row-wrapper')!
 	   fireEvent.click(row.querySelector('button[aria-label="更多操作"]')!)
 	   fireEvent.click(await screen.findByRole('menuitem', { name: '转交' }))
-	   const options = within(screen.getByLabelText('目标 Agent')).getAllByRole('option')
-	   expect(options.map(option => (option as HTMLOptionElement).value)).toEqual(['', 'remote-codex'])
+	   expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
+	   fireEvent.click(screen.getByLabelText('目标 Agent'))
+	   const dropdown = await waitFor(() => {
+	     const el = document.querySelector('.astr-branded-select-dropdown') as HTMLElement | null
+	     if (!el) throw new Error('dropdown not open')
+	     return el
+	   })
+	   const options = within(dropdown).getAllByRole('menuitem')
+	   expect(options.map(option => option.textContent?.trim())).toEqual(['Codex · 本机 Codex · ssh-wsl'])
 	   view.unmount()
 	 })
 
@@ -410,11 +417,12 @@ describe('SessionRail local handoff', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: '转交' }))
 
     expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('目标 Agent'), { target: { value: 'codex' } })
     await waitFor(() => expect(models).toHaveBeenCalledWith('codex-existing', 'codex'))
-    await screen.findByRole('option', { name: 'GPT-6' })
-    fireEvent.change(screen.getByLabelText('模型'), { target: { value: JSON.stringify(['openai', 'gpt-6']) } })
-    fireEvent.change(screen.getByLabelText('思考程度'), { target: { value: 'high' } })
+    await waitFor(() => expect(screen.getByLabelText('模型')).not.toBeDisabled())
+    fireEvent.click(screen.getByLabelText('模型'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /GPT-6/ }))
+    fireEvent.click(screen.getByLabelText('思考程度'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '高' }))
     fireEvent.click(screen.getByRole('button', { name: '转交' }))
 
     await waitFor(() => expect(handoff).toHaveBeenCalledWith('local-1', 'local', 'codex', expect.any(String), {
@@ -485,8 +493,9 @@ describe('SessionRail local handoff', () => {
     expect(await screen.findByRole('dialog', { name: '转交会话' })).toBeInTheDocument()
     await waitFor(() => expect(models).toHaveBeenCalledWith('__probe__', 'remote-agy'))
     expect(screen.queryByLabelText('思考程度')).not.toBeInTheDocument()
-    await screen.findByRole('option', { name: 'Gemini 4 Carbon (Medium)' })
-    fireEvent.change(screen.getByLabelText('模型'), { target: { value: JSON.stringify(['antigravity', 'gemini-4-carbon-medium']) } })
+    await waitFor(() => expect(screen.getByLabelText('模型')).not.toBeDisabled())
+    fireEvent.click(screen.getByLabelText('模型'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Gemini 4 Carbon \(Medium\)/ }))
     fireEvent.click(screen.getByRole('button', { name: '转交' }))
 
     await waitFor(() => expect(handoff).toHaveBeenCalledWith('codex-1', 'remote-codex', 'remote-agy', expect.any(String), {

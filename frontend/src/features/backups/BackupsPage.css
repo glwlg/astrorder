@@ -180,3 +180,161 @@
     min-height: 280px;
   }
 }
+
+/* ============================================================================
+   Mobile & Narrow Viewport Refinement (375px–430px / .mobile-workspace)
+   ============================================================================ */
+@media (max-width: 767px) {
+  .backups-page {
+    padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+    gap: 12px;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .backups-header {
+    gap: 10px;
+  }
+
+  .backups-header > .mantine-Group-root {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .backups-header .mantine-Button-root {
+    min-height: 36px;
+  }
+
+  .backups-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    overflow: visible;
+  }
+
+  .backups-pane {
+    min-width: 0;
+    min-height: auto;
+    overflow: visible;
+    border-radius: 12px;
+  }
+
+  .backups-pane-header {
+    padding: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .backups-pane-header > .mantine-Group-root {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .backups-pane-scroll {
+    padding: 10px;
+    overflow-y: visible;
+  }
+
+  .backup-job-card,
+  .backup-version-card {
+    padding: 11px 12px;
+    min-width: 0;
+  }
+
+  .backup-job-card .mantine-Group-root,
+  .backup-version-card .mantine-Group-root {
+    flex-wrap: wrap;
+  }
+
+  .backup-job-card .mantine-ActionIcon-root,
+  .backup-version-card .mantine-ActionIcon-root {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .backup-detail-meta {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .backup-note-box {
+    flex-wrap: wrap;
+  }
+}
+
+.mobile-workspace .backups-page {
+  height: 100%;
+  padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+  gap: 12px;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .m-office-page-scroll > .backups-page {
+  margin: -12px;
+  width: calc(100% + 24px);
+  height: auto;
+  min-height: calc(100% + 24px);
+  overflow: visible !important;
+}
+
+.mobile-workspace .backups-header {
+  gap: 10px;
+}
+
+.mobile-workspace .backups-header > .mantine-Group-root {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.mobile-workspace .backups-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  overflow: visible;
+}
+
+.mobile-workspace .backups-pane {
+  min-width: 0;
+  min-height: auto;
+  overflow: visible;
+  border-radius: 12px;
+}
+
+.mobile-workspace .backups-pane-header {
+  padding: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobile-workspace .backups-pane-header > .mantine-Group-root {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.mobile-workspace .backups-pane-scroll {
+  padding: 10px;
+  overflow-y: visible;
+}
+
+.mobile-workspace .backup-job-card,
+.mobile-workspace .backup-version-card {
+  padding: 11px 12px;
+  min-width: 0;
+}
+
+.mobile-workspace .backup-job-card .mantine-Group-root,
+.mobile-workspace .backup-version-card .mantine-Group-root {
+  flex-wrap: wrap;
+}
+
+.mobile-workspace .backup-detail-meta {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.mobile-workspace .backup-note-box {
+  flex-wrap: wrap;
+}

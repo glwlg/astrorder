@@ -1,7 +1,7 @@
 import { MantineProvider } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../../api/client'
@@ -12,6 +12,13 @@ import { mobileOutboxStorage, directOutboxStorage } from './mobileOutboxStorage'
 import { scopeKey } from '../../domain/semantics'
 import { draftStorage, draftShelfStorage } from '../chat/draftStorage'
 import * as localVoiceStream from '../chat/localVoiceStream'
+import { clearStoredAppProfileForTest, getAppProfile, setAppProfile } from '../office/appProfile'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { useIntegrationsStore } from '../integrations/integrationStore'
+import { extensionRegistry } from '../extensions/extensionRegistry'
+import { useExtensionStore } from '../extensions/extensionStore'
+import type { ExtensionPageComponentProps } from '../extensions/types'
+import { databaseToolRegistry } from '../sidecar/databaseTool'
 
 vi.mock('./serverOutbox', async importOriginal => {
   const actual = await importOriginal<typeof import('./serverOutbox')>()
@@ -1120,6 +1127,571 @@ describe('independent mobile composer', () => {
       expect(document.documentElement.style.colorScheme).toBe('light')
     } finally {
       lightMeta.remove()
+    }
+  })
+
+  it('strictly obeys global office mode on mobile: hides dev controls/tok-s/worktree and exposes office core entries', async () => {
+    const agySession = {
+      ...session,
+      id: 'office-chat-1',
+      agent_id: 'agy-1',
+      title: '季度汇报准备',
+      workspace: '/workspace/office-notes',
+    }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'agy-1', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }],
+      sessions: [agySession],
+    })
+    useAstrorderStore.getState().mergeMessages('agy-1', 'office-chat-1', [{
+      id: 'm-wt',
+      agent_id: 'agy-1',
+      session_id: 'office-chat-1',
+      role: 'assistant',
+      kind: 'message',
+      text: '已创建工作树 /workspace/office-notes/.worktrees/feat-1',
+      attachments: [],
+      created_at: session.updated_at,
+      command_id: null,
+      tool: null,
+    }])
+    useAstrorderStore.getState().mergeTasks([{
+      id: 'office-bg-task',
+      agent_id: 'agy-1',
+      session_id: 'office-chat-1',
+      kind: 'todo',
+      title: '后台研发任务横幅',
+      status: 'running',
+      progress: null,
+      command: null,
+      logs: [],
+      target_id: 't1',
+      created_at: session.updated_at,
+      updated_at: session.updated_at,
+    }])
+    vi.spyOn(api, 'getSessionUsage').mockResolvedValue({
+      ok: true,
+      session_id: agySession.id,
+      model: 'bound-model',
+      context_window: 200000,
+      last_input_tokens: 12000,
+      context_available: true,
+      source: 'native_last_request',
+      used_percentage: 6,
+      total_tokens: 15000,
+      input_tokens: 12000,
+      output_tokens: 3000,
+      cached_tokens: 0,
+      reasoning_tokens: 0,
+      cache_hit_rate: 0,
+      speed: 52.3,
+    })
+
+    setAppProfile('office', { syncPluginStore: false })
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile/chat/office-chat-1?agent_id=agy-1']}>
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      expect(await screen.findByRole('heading', { level: 1, name: '季度汇报准备' })).toBeInTheDocument()
+
+      // Office core navigation exposes 对话 / 待办 / 会议 / 复盘
+      const officeNav = screen.getByRole('navigation', { name: '办公导航' })
+      expect(within(officeNav).getByRole('button', { name: '对话' })).toBeInTheDocument()
+      expect(within(officeNav).getByRole('button', { name: /待办/ })).toBeInTheDocument()
+      expect(within(officeNav).getByRole('button', { name: '会议' })).toBeInTheDocument()
+      expect(within(officeNav).getByRole('button', { name: '复盘' })).toBeInTheDocument()
+
+      // Header hides 成长雷达 & 群聊; card hides tok/s usage chip, task notices & Worktree banner
+      expect(screen.queryByRole('button', { name: '成长雷达知识流' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '群聊' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '上下文用量' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '后台研发任务横幅' })).not.toBeInTheDocument()
+      expect(screen.queryByText(/tok\/s/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Worktree/i)).not.toBeInTheDocument()
+
+      // App settings menu hides 内核管理 and 模型网关
+      fireEvent.click(screen.getByRole('button', { name: '应用设置' }))
+      expect(await screen.findByRole('menuitem', { name: '刷新' })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: '内核管理' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: '模型网关' })).not.toBeInTheDocument()
+      fireEvent.keyDown(document, { key: 'Escape' })
+
+      // Session actions menu hides Swarm 团队, 代码检查点, 黑板
+      fireEvent.click(screen.getByRole('button', { name: '会话操作' }))
+      expect(await screen.findByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Swarm 团队' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: /代码检查点/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: '黑板' })).not.toBeInTheDocument()
+      fireEvent.keyDown(document, { key: 'Escape' })
+
+      // Left drawer hides 群聊 tab and hides 复制 ID in session menu in global office mode
+      fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+      const drawer = await screen.findByRole('dialog', { name: '会话列表' })
+      expect(within(drawer).queryByRole('tab', { name: /群聊/ })).not.toBeInTheDocument()
+      fireEvent.click(within(drawer).getByRole('button', { name: '会话操作 季度汇报准备' }))
+      const drawerMenu = await screen.findByRole('menu', { name: '会话操作' })
+      expect(within(drawerMenu).queryByRole('menuitem', { name: '复制 ID' })).not.toBeInTheDocument()
+      expect(within(drawerMenu).queryByRole('menuitem', { name: '在新工作树中创建分支' })).not.toBeInTheDocument()
+      fireEvent.click(within(drawer).getByRole('button', { name: '关闭面板' }))
+
+      // Navigating via office nav to 待办 opens ActionInboxView on mobile
+      fireEvent.click(within(officeNav).getByRole('button', { name: /待办/ }))
+      expect(await screen.findByRole('heading', { level: 1, name: '待办中心' })).toBeInTheDocument()
+    } finally {
+      clearStoredAppProfileForTest()
+      usePluginSettingsStore.setState({ pluginConfigs: {} })
+    }
+  })
+
+  it('renders OfficeHomeDashboard in office mode when there are 0 sessions instead of an empty dead-end', async () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'agy-1', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null }],
+      sessions: [],
+    })
+    vi.spyOn(api, 'listRecentOfficeDocs').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'listMeetings').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'listTodos').mockResolvedValue({ items: [], open_count: 0 })
+    vi.spyOn(api, 'listMeetingActionItems').mockResolvedValue({ items: [], open_count: 0 })
+
+    setAppProfile('office', { syncPluginStore: false })
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile']}>
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      expect(await screen.findByLabelText('今日办公工作台')).toBeInTheDocument()
+      expect(screen.queryByText('从左上角选择会话，或新建会话')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '办公首页，打开会话列表' })).toHaveTextContent('办公首页')
+      expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'home')
+      const officeNav = screen.getByRole('navigation', { name: '办公导航' })
+      expect(within(officeNav).getByRole('button', { name: '首页' })).toHaveAttribute('aria-current', 'page')
+    } finally {
+      clearStoredAppProfileForTest()
+      usePluginSettingsStore.setState({ pluginConfigs: {} })
+    }
+  })
+
+  it('switches between developer and office modes from the app menu and launches the onboarding wizard', async () => {
+    vi.spyOn(api, 'updatePluginSettings').mockResolvedValue({ enabled: {}, configs: {} })
+    vi.spyOn(api, 'getToolchainStatus').mockResolvedValue({
+      items: [],
+      platform: 'linux',
+      arch: 'x64',
+    } as unknown as Awaited<ReturnType<typeof api.getToolchainStatus>>)
+
+    clearStoredAppProfileForTest()
+    usePluginSettingsStore.setState({ pluginConfigs: {}, enabledPlugins: {} })
+    try {
+      mount()
+      const header = document.querySelector('.m-header') as HTMLElement
+
+      // Switch developer -> office
+      fireEvent.click(within(header).getByRole('button', { name: '应用设置' }))
+      const toOffice = await screen.findByRole('menuitem', { name: '切换至办公模式' })
+      expect(screen.getByRole('menuitem', { name: '应用设置' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: '功能与插件' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: 'AI 快速配置向导' })).toBeInTheDocument()
+      fireEvent.click(toOffice)
+
+      await waitFor(() => expect(getAppProfile()).toBe('office'))
+      expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-office-mode', 'true')
+      expect(screen.getByRole('navigation', { name: '办公导航' })).toBeInTheDocument()
+
+      // Switch office -> developer
+      fireEvent.click(within(header).getByRole('button', { name: '应用设置' }))
+      expect(screen.queryByRole('menuitem', { name: '内核管理' })).not.toBeInTheDocument()
+      const toDev = await screen.findByRole('menuitem', { name: '切换至研发模式' })
+      fireEvent.click(toDev)
+
+      await waitFor(() => expect(getAppProfile()).toBe('developer'))
+      expect(screen.queryByRole('navigation', { name: '办公导航' })).not.toBeInTheDocument()
+
+      // Open onboarding wizard from menu
+      fireEvent.click(within(header).getByRole('button', { name: '应用设置' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'AI 快速配置向导' }))
+      expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    } finally {
+      clearStoredAppProfileForTest()
+      usePluginSettingsStore.setState({ pluginConfigs: {}, enabledPlugins: {} })
+    }
+  })
+
+  it('navigates all desktop modules and custom integrations from the developer apps sheet while preserving ?view=mobile', async () => {
+    function LocationProbe() {
+      const loc = useLocation()
+      return <output data-testid="loc">{`${loc.pathname}${loc.search}`}</output>
+    }
+
+    vi.spyOn(api, 'listBots').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'getAnalyticsUsage').mockResolvedValue({
+      range: '7d',
+      surface: 'all',
+      totals: { input_tokens: 0, output_tokens: 0, cached_tokens: 0, reasoning_tokens: 0, total_tokens: 0, requests: 0, sessions: 0 },
+      daily: [],
+      by_model: [],
+      by_agent: [],
+    } as unknown as Awaited<ReturnType<typeof api.getAnalyticsUsage>>)
+    vi.spyOn(api, 'listBackupTargets').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.listBackupTargets>>)
+    vi.spyOn(api, 'listBackupJobs').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.listBackupJobs>>)
+    vi.spyOn(api, 'listMeetings').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'listDigestHistory').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.listDigestHistory>>)
+    vi.spyOn(api, 'listDigestTemplates').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.listDigestTemplates>>)
+    vi.spyOn(api, 'listIntegrations').mockResolvedValue({
+      items: [{
+        id: 'ops-console',
+        name: '运维控制台',
+        url: 'https://ops.example.com',
+        open_mode: 'embed',
+        icon_type: 'builtin',
+        icon_value: 'dashboard',
+        visible: true,
+        order: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      }],
+    })
+
+    useIntegrationsStore.setState({
+      items: [{
+        id: 'ops-console',
+        name: '运维控制台',
+        url: 'https://ops.example.com',
+        open_mode: 'embed',
+        icon_type: 'builtin',
+        icon_value: 'dashboard',
+        visible: true,
+        order: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      }],
+      hydrated: true,
+      loading: false,
+    })
+
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile/chat/native-test?agent_id=inert&view=mobile']}>
+              <LocationProbe />
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      const openApps = async () => {
+        fireEvent.click(screen.getByRole('button', { name: '工作台导航' }))
+        return screen.findByRole('dialog', { name: '工作台导航' })
+      }
+
+      // Verify full developer module grid + custom integration
+      const appsDialog = await openApps()
+      for (const name of ['对话', '待办', '会议', '复盘', '群聊', 'Bot 工作室', '成长雷达', '用量统计', '备份同步', '功能与插件', '设置']) {
+        expect(within(appsDialog).getByRole('button', { name: new RegExp(`^${name}`) })).toBeInTheDocument()
+      }
+      expect(within(appsDialog).getByRole('button', { name: '运维控制台' })).toBeInTheDocument()
+
+      // Navigate to Bot 工作室
+      fireEvent.click(within(appsDialog).getByRole('button', { name: 'Bot 工作室' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/bots?view=mobile'))
+      expect(screen.getByRole('button', { name: 'Bot 工作室，打开会话列表' })).toHaveTextContent('Bot 工作室')
+      expect(screen.getByRole('button', { name: '返回对话' })).toBeInTheDocument()
+      expect(await screen.findByLabelText('Bot 目录')).toBeInTheDocument()
+
+      // Navigate to 用量统计
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '用量统计' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/analytics?view=mobile'))
+      expect(screen.getByRole('button', { name: '用量统计，打开会话列表' })).toHaveTextContent('用量统计')
+      expect(await screen.findByRole('tab', { name: '会话 Token' })).toBeInTheDocument()
+
+      // Navigate to 备份同步
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '备份同步' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/backups?view=mobile'))
+      expect(screen.getByRole('button', { name: '备份同步，打开会话列表' })).toHaveTextContent('备份同步')
+      expect(await screen.findByLabelText('备份任务列表')).toBeInTheDocument()
+
+      // Navigate to 功能与插件
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '功能与插件' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/plugins?view=mobile'))
+      expect(screen.getByRole('button', { name: '功能与插件，打开会话列表' })).toHaveTextContent('功能与插件')
+      await waitFor(() => expect(document.querySelector('.plugins-page')).toBeInTheDocument())
+
+      // Navigate to 设置 and verify tab switching preserves ?view=mobile
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '设置' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/settings?view=mobile'))
+      expect(screen.getByRole('button', { name: '设置，打开会话列表' })).toHaveTextContent('设置')
+      expect(await screen.findByRole('heading', { name: '常规与外观' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: 'AI 供应商' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/settings?tab=models&view=mobile'))
+      expect(await screen.findByRole('heading', { name: 'AI 供应商' })).toBeInTheDocument()
+
+      // Navigate to 会议 / 复盘 / 待办 in developer mode
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '会议' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/meetings?view=mobile'))
+      expect(screen.getByRole('button', { name: '会议记录，打开会话列表' })).toHaveTextContent('会议')
+      expect(await screen.findByLabelText('实时会议工作台')).toBeInTheDocument()
+
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '复盘' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/digest?view=mobile'))
+      expect(screen.getByRole('button', { name: '工作复盘，打开会话列表' })).toHaveTextContent('复盘')
+      await waitFor(() => expect(document.querySelector('.digest-page-shell')).toBeInTheDocument())
+
+      fireEvent.click(within(await openApps()).getByRole('button', { name: /^待办/ }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/inbox?view=mobile'))
+      expect(screen.getByRole('button', { name: '待办中心，打开会话列表' })).toHaveTextContent('待办')
+
+      // Navigate to custom integration and verify IntegrationPage resolves :integrationId
+      fireEvent.click(within(await openApps()).getByRole('button', { name: '运维控制台' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/integrations/ops-console?view=mobile'))
+      expect(screen.getByRole('button', { name: '运维控制台，打开会话列表' })).toHaveTextContent('运维控制台')
+      await waitFor(() => {
+        const frame = document.querySelector('iframe[title="运维控制台"]')
+        expect(frame).toHaveAttribute('src', 'https://ops.example.com')
+      })
+
+      // One-tap return to chat preserves ?view=mobile
+      fireEvent.click(screen.getByRole('button', { name: '返回对话' }))
+      await waitFor(() => expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/chat/native-test?agent_id=inert&view=mobile'))
+    } finally {
+      useIntegrationsStore.getState().reset()
+    }
+  })
+
+  it('matches unprefixed desktop module paths (/settings?view=mobile) on mobile', async () => {
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/settings?tab=models&view=mobile']}>
+            <MobileWorkspace />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: '设置，打开会话列表' })).toHaveTextContent('设置')
+    expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'settings')
+    expect(await screen.findByRole('heading', { name: 'AI 供应商' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'AI 供应商' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it.each(['/mobile/bots', '/bots', '/mobile/analytics', '/mobile/backups', '/mobile/groups', '/mobile/learning'])(
+    'strictly guards developer-only route %s in office mode and redirects to office home',
+    async (blockedPath) => {
+      useAstrorderStore.getState().hydrateBootstrap({
+        protocol_version: 1,
+        cursor: 1,
+        agents: [{ id: 'agy-1', kind: 'antigravity', name: 'Antigravity', status: 'ready', capabilities: ['chat'], limitation: null }],
+        sessions: [],
+      })
+      vi.spyOn(api, 'listRecentOfficeDocs').mockResolvedValue({ items: [] })
+      vi.spyOn(api, 'listMeetings').mockResolvedValue({ items: [] })
+      vi.spyOn(api, 'listTodos').mockResolvedValue({ items: [], open_count: 0 })
+      vi.spyOn(api, 'listMeetingActionItems').mockResolvedValue({ items: [], open_count: 0 })
+
+      setAppProfile('office', { syncPluginStore: false })
+      try {
+        render(
+          <MantineProvider>
+            <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+              <MemoryRouter initialEntries={[blockedPath]}>
+                <MobileWorkspace />
+              </MemoryRouter>
+            </QueryClientProvider>
+          </MantineProvider>,
+        )
+
+        expect(await screen.findByLabelText('今日办公工作台')).toBeInTheDocument()
+        expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'home')
+
+        // Apps sheet in office mode excludes developer-only modules
+        fireEvent.click(screen.getByRole('button', { name: '工作台导航' }))
+        const appsDialog = await screen.findByRole('dialog', { name: '工作台导航' })
+        for (const forbidden of ['Bot 工作室', '用量统计', '备份同步', '群聊', '成长雷达']) {
+          expect(within(appsDialog).queryByRole('button', { name: forbidden })).not.toBeInTheDocument()
+        }
+        expect(within(appsDialog).getByRole('button', { name: '功能与插件' })).toBeInTheDocument()
+        expect(within(appsDialog).getByRole('button', { name: '设置' })).toBeInTheDocument()
+      } finally {
+        clearStoredAppProfileForTest()
+        usePluginSettingsStore.setState({ pluginConfigs: {} })
+      }
+    },
+  )
+
+  it('opens ProjectDatabaseModal from MobileSessionDrawer project menu in developer mode when database tool is active', async () => {
+    const projectSession = { ...session, workspace: '/workspace/mobile', source_id: 'source-mobile', project_id: 'project-mobile', project_name: '移动项目' }
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{ id: 'inert', kind: 'hermes', name: '协议测试', status: 'ready', capabilities: ['chat', 'stop', 'attachments'], limitation: null, source_id: 'source-mobile' }],
+      projects: [{ id: 'project-row', source_id: 'source-mobile', agent_id: 'inert', project_id: 'project-mobile', project_name: '移动项目', workspace: '/workspace/mobile', session_count: 1, updated_at: session.updated_at }],
+      sessions: [projectSession],
+    })
+    databaseToolRegistry.register({
+      id: 'dbx-test-provider',
+      implementationName: 'DBX',
+      mediaType: 'application/x-astrorder-dbx',
+      openWorkbench: vi.fn(),
+      openSqlFile: vi.fn().mockResolvedValue(undefined),
+      openSqlSnippet: vi.fn(),
+    })
+    vi.spyOn(api, 'getProjectDatabaseBindings').mockResolvedValue({ bindings: [] })
+    vi.spyOn(api, 'listDbxConnections').mockResolvedValue({ connections: [] })
+
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }))
+    fireEvent.click(await screen.findByRole('button', { name: '项目操作 移动项目' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '关联数据库' }))
+
+    expect(await screen.findByText('关联数据库 · 移动项目')).toBeInTheDocument()
+  })
+
+  it('surfaces dynamically registered ESM pages in the mobile apps drawer and routes to /mobile/ext-page/:pluginId/:pageId', async () => {
+    function LocationProbe() {
+      const loc = useLocation()
+      return <output data-testid="loc">{`${loc.pathname}${loc.search}`}</output>
+    }
+
+    const extPage = extensionRegistry.registerPage({
+      pluginId: 'mobile-esm',
+      id: 'radar',
+      title: '移动扩展面板',
+      mobileLabel: '扩展雷达',
+      hideInOfficeMode: true,
+      component: ({ pluginId, pageId, surface }: ExtensionPageComponentProps) => (
+        <div data-testid="mobile-ext-page-body">{`${pluginId}:${pageId}:${surface}`}</div>
+      ),
+      source: 'esm',
+    })
+
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile/chat/native-test?agent_id=inert&view=mobile']}>
+              <LocationProbe />
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: '工作台导航' }))
+      const appsDialog = await screen.findByRole('dialog', { name: '工作台导航' })
+      fireEvent.click(within(appsDialog).getByRole('button', { name: '扩展雷达' }))
+
+      await waitFor(() =>
+        expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/ext-page/mobile-esm/radar?view=mobile'),
+      )
+      expect(await screen.findByTestId('mobile-ext-page-body')).toHaveTextContent('mobile-esm:radar:mobile')
+      expect(screen.getByRole('button', { name: '扩展雷达，打开会话列表' })).toHaveTextContent('扩展雷达')
+      expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'ext-page')
+    } finally {
+      extPage.dispose()
+    }
+  })
+
+  it('keeps deep-linked /mobile/ext-page/:pluginId/:pageId pending during hydration/ESM activation and falls back only after settling', async () => {
+    function LocationProbe() {
+      const loc = useLocation()
+      return <output data-testid="loc">{`${loc.pathname}${loc.search}`}</output>
+    }
+
+    useExtensionStore.getState().reset()
+    const disposables: Array<{ dispose(): void }> = []
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile/ext-page/async-mobile-esm/board?view=mobile']}>
+              <LocationProbe />
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      // 1. Before extensionStore hydrates: stays on deep link and shows loading placeholder
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/ext-page/async-mobile-esm/board?view=mobile')
+      expect(screen.getByRole('status', { name: '正在加载扩展页面' })).toBeInTheDocument()
+      expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'ext-page')
+
+      // 2. Hydrated with enabled ESM plugin currently loading: still stays pending (no redirect!)
+      act(() => {
+        useExtensionStore.setState({
+          hydrated: true,
+          items: [
+            {
+              id: 'async-mobile-esm',
+              name: '异步移动扩展',
+              version: '1.0.0',
+              category: 'workspace',
+              source: 'official',
+              enabled: true,
+              permissions_granted: true,
+              runtime_state: 'ready',
+              backend_type: 'none',
+              frontend: { mode: 'esm', entry: 'ui/entry.js' },
+            },
+          ],
+          esmStates: {
+            'async-mobile-esm': { status: 'loading', updatedAt: Date.now() },
+          },
+        })
+      })
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/ext-page/async-mobile-esm/board?view=mobile')
+      expect(screen.getByRole('status', { name: '正在加载扩展页面' })).toBeInTheDocument()
+
+      // 3. ESM plugin finishes activate() and registers page: renders immediately on the deep-linked route
+      act(() => {
+        disposables.push(
+          extensionRegistry.registerPage({
+            pluginId: 'async-mobile-esm',
+            id: 'board',
+            title: '异步移动看板',
+            component: ({ surface }: ExtensionPageComponentProps) => (
+              <div data-testid="async-mobile-page">{`loaded:${surface}`}</div>
+            ),
+            source: 'esm',
+          }),
+        )
+        useExtensionStore.getState().setEsmRuntimeState('async-mobile-esm', { status: 'loaded', updatedAt: Date.now() })
+      })
+      expect(await screen.findByTestId('async-mobile-page')).toHaveTextContent('loaded:mobile')
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/ext-page/async-mobile-esm/board?view=mobile')
+
+      // 4. Once plugin is disabled/unregistered and settled, route safely redirects back to chat
+      act(() => {
+        while (disposables.length) disposables.pop()?.dispose()
+        useExtensionStore.setState((state) => ({
+          items: state.items.map((item) =>
+            item.id === 'async-mobile-esm' ? { ...item, enabled: false } : item,
+          ),
+        }))
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/chat/native-test?agent_id=inert&view=mobile'),
+      )
+    } finally {
+      while (disposables.length) disposables.pop()?.dispose()
+      useExtensionStore.getState().reset()
     }
   })
 })

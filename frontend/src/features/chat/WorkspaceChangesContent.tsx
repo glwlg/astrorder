@@ -67,26 +67,27 @@ export function WorkspaceChangesContent({
 }) {
   const isOfficeMode = useIsOfficeExperience(session)
   const showSwarm = !isOfficeMode && isAntigravityAgent(agent)
+  const showSchedules = !isOfficeMode
   const [userPickedSection, setUserPickedSection] = useState(false)
   const [section, setSection] = useState<PanelSection>(() => {
     if (showSwarm && swarm?.available) return 'swarm'
-    if (schedules.length > 0) return 'schedules'
+    if (showSchedules && schedules.length > 0) return 'schedules'
     return 'outputs'
   })
 
   useEffect(() => {
-    if (!showSwarm && section === 'swarm') {
-      setSection(schedules.length > 0 ? 'schedules' : 'outputs')
+    if ((!showSwarm && section === 'swarm') || (!showSchedules && section === 'schedules')) {
+      setSection(showSchedules && schedules.length > 0 ? 'schedules' : 'outputs')
       return
     }
     if (!userPickedSection) {
       if (showSwarm && swarm?.available) {
         setSection('swarm')
-      } else if (schedules.length > 0) {
+      } else if (showSchedules && schedules.length > 0) {
         setSection('schedules')
       }
     }
-  }, [showSwarm, swarm?.available, schedules.length, userPickedSection, section])
+  }, [showSwarm, showSchedules, swarm?.available, schedules.length, userPickedSection, section])
 
   // Only explicit Agent outputs are artifacts. Paths mentioned in prose,
   // uploaded user references and opened editors are not produced artifacts.
@@ -122,7 +123,10 @@ export function WorkspaceChangesContent({
 
   const swarmCount = swarm?.available ? swarm.members.length : 0
   const scheduleCount = schedules.length
-  const effectiveSection: PanelSection = !showSwarm && section === 'swarm' ? 'outputs' : section
+  const effectiveSection: PanelSection =
+    (!showSwarm && section === 'swarm') || (!showSchedules && section === 'schedules')
+      ? 'outputs'
+      : section
   const headingTitle =
     effectiveSection === 'swarm'
       ? 'Swarm 团队'
@@ -136,16 +140,18 @@ export function WorkspaceChangesContent({
         ? scheduleCount
         : outputs.length
 
-  const tabOptions = showSwarm
-    ? [
-        { value: 'swarm', label: `Swarm ${swarmCount}` },
-        { value: 'schedules', label: `定时 ${scheduleCount}` },
-        { value: 'outputs', label: `产物 ${outputs.length}` },
-      ]
-    : [
-        { value: 'schedules', label: `定时 ${scheduleCount}` },
-        { value: 'outputs', label: `产物 ${outputs.length}` },
-      ]
+  const tabOptions = isOfficeMode
+    ? [{ value: 'outputs', label: `产物 ${outputs.length}` }]
+    : showSwarm
+      ? [
+          { value: 'swarm', label: `Swarm ${swarmCount}` },
+          { value: 'schedules', label: `定时 ${scheduleCount}` },
+          { value: 'outputs', label: `产物 ${outputs.length}` },
+        ]
+      : [
+          { value: 'schedules', label: `定时 ${scheduleCount}` },
+          { value: 'outputs', label: `产物 ${outputs.length}` },
+        ]
 
   return (
     <section className="workbench-overview">
@@ -175,17 +181,19 @@ export function WorkspaceChangesContent({
           </ActionIcon>
         </Tooltip>
       </header>
-      <SegmentedControl
-        className="workbench-sections"
-        fullWidth
-        size="xs"
-        value={effectiveSection}
-        onChange={(val) => {
-          setUserPickedSection(true)
-          setSection(val as PanelSection)
-        }}
-        data={tabOptions}
-      />
+      {tabOptions.length > 1 && (
+        <SegmentedControl
+          className="workbench-sections"
+          fullWidth
+          size="xs"
+          value={effectiveSection}
+          onChange={(val) => {
+            setUserPickedSection(true)
+            setSection(val as PanelSection)
+          }}
+          data={tabOptions}
+        />
+      )}
       {effectiveSection === 'swarm' ? (
         <SessionSwarmView
           session={session}

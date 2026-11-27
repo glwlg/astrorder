@@ -20,8 +20,8 @@ export interface OfficeTemplateModalProps {
   onClose: () => void
   /** Send assembled drafting prompt into current/new chat conversation */
   onSendToChat: (prompt: string, title: string) => void | Promise<void>
-  /** Open generated Markdown directly inside Rich Document Studio */
-  onGeneratedDocument?: (doc: { title: string; markdown: string; savedPath?: string }) => void
+  /** Open generated Markdown directly inside Rich Document Studio. Return false to suppress the default toast. */
+  onGeneratedDocument?: (doc: { title: string; markdown: string; savedPath?: string }) => boolean | void | Promise<boolean | void>
 }
 
 export function OfficeTemplateModal({
@@ -131,15 +131,17 @@ export function OfficeTemplateModal({
         }
       }
       onClose()
-      onGeneratedDocument?.({
+      const handled = await onGeneratedDocument?.({
         title: resp.title || title,
         markdown: resp.markdown,
         savedPath,
       })
-      notifications.show({
-        color: 'teal',
-        message: savedPath ? '已生成成品文档并保存至工作区，正在写作台打开' : '已生成成品文档，正在写作台打开',
-      })
+      if (handled !== false) {
+        notifications.show({
+          color: 'teal',
+          message: savedPath ? '已生成成品文档并保存至工作区，正在写作台打开' : '已生成成品文档，正在写作台打开',
+        })
+      }
     } catch (cause) {
       notifications.show({
         color: 'red',

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { Session } from '../../domain/types'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 
@@ -54,10 +55,18 @@ function writeStoredOfficeModeRegistry(reg: OfficeModeRegistry) {
   } catch {}
 }
 
-function resolveActiveRegistry(configured: unknown): OfficeModeRegistry {
-  const fromPlugin = normalizeRegistry(configured)
-  if (fromPlugin.keys.length > 0 || fromPlugin.workspaces.length > 0) {
-    return fromPlugin
+function hasExplicitConfiguredRegistry(configured: unknown): configured is Record<string, unknown> {
+  return Boolean(configured && typeof configured === 'object')
+}
+
+export function resolveActiveRegistry(configured: unknown, hydrated = false): OfficeModeRegistry {
+  // When server/plugin config has an explicit registry object (including empty `{ keys: [], workspaces: [] }`),
+  // treat it as authoritative so turning off the last office workspace cannot be resurrected by stale localStorage.
+  if (hasExplicitConfiguredRegistry(configured)) {
+    return normalizeRegistry(configured)
+  }
+  if (hydrated) {
+    return { keys: [], workspaces: [] }
   }
   return readStoredOfficeModeRegistry()
 }
@@ -100,7 +109,10 @@ export function setProjectOfficeMode(
   enabled: boolean,
 ): OfficeModeRegistry {
   const store = usePluginSettingsStore.getState()
-  const current = resolveActiveRegistry(store.pluginConfigs[OFFICE_WORKSPACE_MODE_CONFIG_KEY]?.projects)
+  const current = resolveActiveRegistry(
+    store?.pluginConfigs?.[OFFICE_WORKSPACE_MODE_CONFIG_KEY]?.projects,
+    Boolean(store?.hydrated),
+  )
   const keys = new Set(current.keys)
   const workspaces = new Set(current.workspaces)
   const normWs = normalizeWorkspacePath(params.workspace)
@@ -123,8 +135,9 @@ export function setProjectOfficeMode(
 }
 
 export function useOfficeModeRegistry(): OfficeModeRegistry {
-  const configured = usePluginSettingsStore((s) => s.pluginConfigs[OFFICE_WORKSPACE_MODE_CONFIG_KEY]?.projects)
-  return resolveActiveRegistry(configured)
+  const configured = usePluginSettingsStore((s) => s?.pluginConfigs?.[OFFICE_WORKSPACE_MODE_CONFIG_KEY]?.projects)
+  const hydrated = usePluginSettingsStore((s) => Boolean(s?.hydrated))
+  return useMemo(() => resolveActiveRegistry(configured, hydrated), [configured, hydrated])
 }
 
 export function useIsSessionOfficeMode(session?: Session | null): boolean {

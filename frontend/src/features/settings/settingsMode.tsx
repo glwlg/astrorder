@@ -29,6 +29,8 @@ export function writeStoredSettingsMode(mode: SettingsMode) {
 export interface SettingsModeContextValue {
   mode: SettingsMode
   setMode: (next: SettingsMode) => void
+  /** True when the global app profile is 'office', locking settings into simplified office mode. */
+  officeLocked?: boolean
   /** False when a settings sub-page is rendered standalone outside SettingsWorkbench (e.g. unit tests). */
   managedByWorkbench: boolean
 }
@@ -37,6 +39,7 @@ export interface SettingsModeContextValue {
 export const SettingsModeContext = createContext<SettingsModeContextValue>({
   mode: 'advanced',
   setMode: () => {},
+  officeLocked: false,
   managedByWorkbench: false,
 })
 

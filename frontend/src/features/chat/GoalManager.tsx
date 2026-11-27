@@ -6,9 +6,11 @@ import { api } from '../../api/client'
 import { ConfirmPopover } from '../../components/ConfirmPopover'
 import type { Agent, Session, Task } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
+import { useIsOfficeExperience } from '../office/appProfile'
 import { selectSessionGoal } from './goalStatus'
 
 export function GoalManager({ session, agent, tasks, disabled = false }: { session: Session; agent?: Agent; tasks: Task[]; disabled?: boolean }) {
+  const isOfficeMode = useIsOfficeExperience(session)
   const goal = selectSessionGoal(tasks)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -66,7 +68,7 @@ export function GoalManager({ session, agent, tasks, disabled = false }: { sessi
     }
   }
 
-  if (!goal) return null
+  if (isOfficeMode || !goal) return null
 
   return <>
     <div className={`composer-goal-pill is-${goal.tone}`}>

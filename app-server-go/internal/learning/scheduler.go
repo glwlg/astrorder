@@ -4,9 +4,31 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"astrorder.dev/app-server/internal/store"
 )
 
-const defaultSchedulerTick = 30 * time.Second
+const (
+	// PluginID is the built-in workspace plugin toggle key controlling Learning Radar.
+	PluginID             = "workspace-learning-radar"
+	defaultSchedulerTick = 30 * time.Second
+)
+
+func (s *Service) isPluginEnabled(ctx context.Context) bool {
+	if s == nil || s.options.Store == nil {
+		return true
+	}
+	pref, err := s.options.Store.GetPreference(ctx, store.PrefPluginsEnabled)
+	if err != nil || !pref.Exists {
+		return true
+	}
+	if saved, ok := pref.Value.(map[string]any); ok {
+		if flag, ok := saved[PluginID].(bool); ok {
+			return flag
+		}
+	}
+	return true
+}
 
 // WakeScheduler nudges the background loop to re-evaluate weekly due scans immediately.
 func (s *Service) WakeScheduler() {
@@ -39,6 +61,9 @@ func (s *Service) RunScheduler(ctx context.Context) {
 
 func (s *Service) tick(ctx context.Context) {
 	if ctx.Err() != nil {
+		return
+	}
+	if !s.isPluginEnabled(ctx) {
 		return
 	}
 	if changed, err := s.repo.RefreshDueReviews(ctx); err == nil && changed > 0 {

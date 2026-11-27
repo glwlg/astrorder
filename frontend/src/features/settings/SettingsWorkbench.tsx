@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Center, Group, Loader, Paper, SegmentedControl, Stack, Tabs, Text } from '@mantine/core'
 import {
   IconAdjustmentsHorizontal,
@@ -18,6 +18,8 @@ import {
 } from '../../components/workbenchIcons'
 import { SettingsDrawerScope } from '../../components/SettingsDrawer'
 import '../../components/settings.css'
+import { OnboardingWizard } from '../office/OnboardingWizard'
+import { useIsOfficeProfile } from '../office/appProfile'
 import {
   COMMAND_COMPRESSION_PLUGIN_ID,
   SIDEBAR_INTEGRATIONS_PLUGIN_ID,
@@ -91,44 +93,70 @@ export function SettingsWorkbench({
   pluginId,
   onTabChange,
   onBackToMain,
+  mobile = false,
 }: {
   tab: string
   pluginId?: string
   onTabChange: (tab: string) => void
   onBackToMain?: () => void
+  mobile?: boolean
 }) {
   const normalizedTab = normalizeSettingsTab(tab)
+  const navListRef = useRef<HTMLDivElement>(null)
+  const isOfficeProfile = useIsOfficeProfile()
   const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
   const commandCompressionEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(COMMAND_COMPRESSION_PLUGIN_ID))
 
   const [mode, setModeState] = useState<SettingsMode>(() =>
-    isAdvancedSettingsTab(normalizedTab) ? 'advanced' : readStoredSettingsMode(),
+    !isOfficeProfile && isAdvancedSettingsTab(normalizedTab) ? 'advanced' : readStoredSettingsMode(),
   )
+
+  const effectiveMode: SettingsMode = isOfficeProfile ? 'basic' : mode
+  const effectiveTab = isOfficeProfile && isAdvancedSettingsTab(normalizedTab) ? 'general' : normalizedTab
 
   const setMode = useCallback(
     (next: SettingsMode) => {
+      if (isOfficeProfile) {
+        setModeState('basic')
+        writeStoredSettingsMode('basic')
+        if (isAdvancedSettingsTab(normalizedTab)) {
+          onTabChange('general')
+        }
+        return
+      }
       setModeState(next)
       writeStoredSettingsMode(next)
       if (next === 'basic' && isAdvancedSettingsTab(normalizedTab)) {
         onTabChange('general')
       }
     },
-    [normalizedTab, onTabChange],
+    [isOfficeProfile, normalizedTab, onTabChange],
   )
 
-  // Deep-linking to any advanced tab automatically opens Advanced mode so the user never lands on a hidden panel.
+  // Converge settings mode & active tab when global Office Profile is active.
   useEffect(() => {
+    if (isOfficeProfile) {
+      if (mode !== 'basic') {
+        setModeState('basic')
+        writeStoredSettingsMode('basic')
+      }
+      if (isAdvancedSettingsTab(normalizedTab)) {
+        onTabChange('general')
+      }
+      return
+    }
+    // Deep-linking to any advanced tab in developer profile automatically opens Advanced mode.
     if (isAdvancedSettingsTab(normalizedTab) && mode !== 'advanced') {
       setModeState('advanced')
       writeStoredSettingsMode('advanced')
     }
-  }, [normalizedTab, mode])
+  }, [isOfficeProfile, normalizedTab, mode, onTabChange])
 
   useEffect(() => {
-    if (pluginId && normalizedTab === 'plugins') {
+    if (pluginId && effectiveTab === 'plugins') {
       forwardPluginConfigOpen(pluginId)
     }
-  }, [pluginId, normalizedTab])
+  }, [pluginId, effectiveTab])
 
   useEffect(() => {
     const onOpenSettings = (event: Event) => {
@@ -147,28 +175,34 @@ export function SettingsWorkbench({
   }, [onTabChange])
 
   useEffect(() => {
-    if (!integrationsPluginEnabled && normalizedTab === 'integrations') {
+    if (!integrationsPluginEnabled && effectiveTab === 'integrations') {
       onTabChange('plugins')
     }
-    if (!commandCompressionEnabled && normalizedTab === 'rtk') {
+    if (!commandCompressionEnabled && effectiveTab === 'rtk') {
       onTabChange('plugins')
     }
-  }, [commandCompressionEnabled, integrationsPluginEnabled, onTabChange, normalizedTab])
+  }, [commandCompressionEnabled, integrationsPluginEnabled, onTabChange, effectiveTab])
 
-  const showAdvanced = mode === 'advanced'
+  useEffect(() => {
+    const activeEl = navListRef.current?.querySelector<HTMLElement>('[data-active="true"]')
+    activeEl?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [effectiveTab])
+
+  const showAdvanced = !isOfficeProfile && effectiveMode === 'advanced'
   const advancedTabCount = commandCompressionEnabled ? 4 : 3
 
   return (
-    <SettingsModeContext.Provider value={{ mode, setMode, managedByWorkbench: true }}>
+    <SettingsModeContext.Provider value={{ mode: effectiveMode, setMode, officeLocked: isOfficeProfile, managedByWorkbench: true }}>
       <Suspense fallback={<Center style={{ flex: 1 }}><Loader size="sm" color="dark" /></Center>}>
         <Tabs
-          value={normalizedTab}
+          value={effectiveTab}
           onChange={(value) => value && onTabChange(value)}
-          orientation="vertical"
+          orientation={mobile ? 'horizontal' : 'vertical'}
           keepMounted={true}
-          className="settings-tabs"
+          className={`settings-tabs settings-workbench${mobile ? ' is-mobile' : ''}`}
+          data-mobile={mobile ? 'true' : undefined}
         >
-          <Tabs.List className="settings-nav-list">
+          <Tabs.List ref={navListRef} className="settings-nav-list">
             {onBackToMain && (
               <button type="button" className="settings-back-btn" onClick={onBackToMain}>
                 <IconArrowLeft size={14} aria-hidden="true" />
@@ -176,19 +210,21 @@ export function SettingsWorkbench({
               </button>
             )}
 
-            <div className="settings-mode-switcher">
-              <SegmentedControl
-                fullWidth
-                size="xs"
-                aria-label="设置模式"
-                value={mode}
-                onChange={(val) => setMode(val === 'advanced' ? 'advanced' : 'basic')}
-                data={[
-                  { value: 'basic', label: '一般配置' },
-                  { value: 'advanced', label: '高级配置' },
-                ]}
-              />
-            </div>
+            {!isOfficeProfile && (
+              <div className="settings-mode-switcher">
+                <SegmentedControl
+                  fullWidth
+                  size="xs"
+                  aria-label="设置模式"
+                  value={effectiveMode}
+                  onChange={(val) => setMode(val === 'advanced' ? 'advanced' : 'basic')}
+                  data={[
+                    { value: 'basic', label: '一般配置' },
+                    { value: 'advanced', label: '高级配置' },
+                  ]}
+                />
+              </div>
+            )}
 
             <Tabs.Tab value="general" leftSection={<IconAdjustmentsHorizontal size={16} stroke={1.7} />}>
               常规与外观
@@ -198,17 +234,17 @@ export function SettingsWorkbench({
             </Tabs.Tab>
             {integrationsPluginEnabled && (
               <Tabs.Tab value="integrations" leftSection={<IconPlugConnected size={16} stroke={1.7} />}>
-                常用集成
+                {isOfficeProfile ? '常用网站' : '常用集成'}
               </Tabs.Tab>
             )}
             <Tabs.Tab value="shortcuts" leftSection={<KeyboardIcon size={16} />}>
               快捷键
             </Tabs.Tab>
             <Tabs.Tab value="plugins" leftSection={<PuzzlePieceIcon size={16} />}>
-              功能与插件
+              {isOfficeProfile ? '功能开关' : '功能与插件'}
             </Tabs.Tab>
 
-            {showAdvanced ? (
+            {!isOfficeProfile && (showAdvanced ? (
               <>
                 <div className="settings-nav-group-divider" aria-hidden="true" />
                 <div className="settings-nav-group-label">高级与开发配置</div>
@@ -236,7 +272,7 @@ export function SettingsWorkbench({
                 <span>展开高级与开发配置 ({advancedTabCount})</span>
                 <IconChevronRight size={14} aria-hidden="true" />
               </button>
-            )}
+            ))}
           </Tabs.List>
 
           <Tabs.Panel value="general" className="settings-tab-panel" keepMounted={false}>
@@ -256,20 +292,24 @@ export function SettingsWorkbench({
           <Tabs.Panel value="plugins" className="settings-tab-panel">
             <PluginsPage />
           </Tabs.Panel>
-          <Tabs.Panel value="connections" className="settings-tab-panel">
-            <AgentsPage />
-          </Tabs.Panel>
-          <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
-            <CapabilitiesSettingsCard />
-          </Tabs.Panel>
-          {commandCompressionEnabled && (
-            <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}>
-              <RtkSettingsPage />
-            </Tabs.Panel>
+          {!isOfficeProfile && (
+            <>
+              <Tabs.Panel value="connections" className="settings-tab-panel">
+                <AgentsPage />
+              </Tabs.Panel>
+              <Tabs.Panel value="skills" className="settings-tab-panel" data-tab-panel-skills="true" style={{ overflow: 'hidden' }}>
+                <CapabilitiesSettingsCard />
+              </Tabs.Panel>
+              {commandCompressionEnabled && (
+                <Tabs.Panel value="rtk" className="settings-tab-panel" keepMounted={false}>
+                  <RtkSettingsPage />
+                </Tabs.Panel>
+              )}
+              <Tabs.Panel value="network" className="settings-tab-panel">
+                <NetworkSettingsPage />
+              </Tabs.Panel>
+            </>
           )}
-          <Tabs.Panel value="network" className="settings-tab-panel">
-            <NetworkSettingsPage />
-          </Tabs.Panel>
         </Tabs>
       </Suspense>
     </SettingsModeContext.Provider>
@@ -399,6 +439,7 @@ export function StandaloneSettingsPage() {
               <SettingsWorkbench tab={tab} pluginId={targetPluginId} onTabChange={setTab} onBackToMain={handleReturnToChat} />
             </SettingsErrorBoundary>
           </div>
+          <OnboardingWizard ready hasExistingData />
         </div>
       )}
     </SettingsDrawerScope>

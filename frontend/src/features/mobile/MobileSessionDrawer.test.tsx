@@ -211,4 +211,27 @@ describe('MobileSessionDrawer', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '复制 ID' }))
     expect(onCopySessionId).toHaveBeenCalledWith(groups[0].sessions[0])
   })
+
+  it('offers project database association in project menu when enabled and hides it for unmarked groups', () => {
+    const onManageProjectDatabase = vi.fn()
+    mount({ onManageProjectDatabase })
+
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 移动项目A' }))
+    const dbItem = screen.getByRole('menuitem', { name: '关联数据库' })
+    expect(dbItem).toBeInTheDocument()
+    fireEvent.click(dbItem)
+    expect(onManageProjectDatabase).toHaveBeenCalledWith(groups[0])
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    // Unmarked project group does not expose 关联数据库
+    fireEvent.click(screen.getByRole('button', { name: '未标记项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 未标记项目' }))
+    expect(screen.queryByRole('menuitem', { name: '关联数据库' })).not.toBeInTheDocument()
+  })
+
+  it('omits project database association when callback is not provided (e.g. office mode)', () => {
+    mount({ onManageProjectDatabase: undefined })
+    fireEvent.click(screen.getByRole('button', { name: '项目操作 移动项目A' }))
+    expect(screen.queryByRole('menuitem', { name: '关联数据库' })).not.toBeInTheDocument()
+  })
 })

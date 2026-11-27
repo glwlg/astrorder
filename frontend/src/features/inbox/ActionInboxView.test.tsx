@@ -178,4 +178,101 @@ describe('ActionInboxView', () => {
     await waitFor(() => expect(screen.queryByText('监控Agent')).not.toBeInTheDocument())
     expect(screen.getByText('全部处理完毕')).toBeInTheDocument()
   })
+
+  it('creates a friendly scheduled reminder from the 定时提醒 tab and refreshes the list immediately', async () => {
+    const schedules: Array<import('../../domain/types').SessionSchedule> = []
+    vi.spyOn(api, 'listTodos').mockResolvedValue({ items: [], open_count: 0 })
+    vi.spyOn(api, 'listMeetingActionItems').mockResolvedValue({ items: [], open_count: 0 })
+    vi.spyOn(api, 'listAllSchedules').mockImplementation(async () => ({ items: [...schedules] }))
+    const createSchedule = vi.spyOn(api, 'createSessionSchedule').mockImplementation(async (sessionId, payload) => {
+      const created: import('../../domain/types').SessionSchedule = {
+        id: 'sched-new-1',
+        agent_id: payload.agent_id,
+        session_id: sessionId,
+        name: payload.name || '工作日早会提醒',
+        prompt: payload.prompt,
+        enabled: true,
+        schedule_kind: payload.schedule_kind,
+        cron_expr: payload.cron_expr || '',
+        interval_minutes: payload.interval_minutes || 0,
+        daily_time: payload.daily_time || '',
+        weekday_mask: payload.weekday_mask || 0,
+        run_at: payload.run_at,
+        timezone: payload.timezone || 'Asia/Shanghai',
+        when_busy: payload.when_busy || 'skip',
+        misfire_policy: 'grace_once',
+        misfire_grace_sec: 300,
+        last_status: '',
+        last_error: '',
+        last_command_id: '',
+        consecutive_failures: 0,
+        pause_reason: '',
+        created_at: '2026-11-27T09:00:00Z',
+        updated_at: '2026-11-27T09:00:00Z',
+      }
+      schedules.push(created)
+      return created
+    })
+
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 1,
+      agents: [{
+        id: 'agent-1',
+        kind: 'codex',
+        name: 'Codex',
+        status: 'ready',
+        capabilities: ['chat'],
+        limitation: null,
+      }],
+      sessions: [
+        { id: 's-daily', agent_id: 'agent-1', title: '日常办公助手', workspace: '/docs', project_name: '办公空间', status: 'idle', updated_at: '2026-11-27T09:00:00Z' },
+      ],
+    })
+
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <ActionInboxView onOpenSession={vi.fn()} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: /定时提醒/ }))
+    expect(await screen.findByRole('button', { name: '新建提醒' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建第一条提醒' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '新建提醒' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建定时提醒' })
+
+    fireEvent.change(dialog.querySelector('input[placeholder*="每日晨报"]')!, {
+      target: { value: '工作日晨会提醒' },
+    })
+    fireEvent.change(dialog.querySelector('textarea')!, {
+      target: { value: '提醒我汇总今日待办和会议议程' },
+    })
+    fireEvent.click(screen.getByRole('radio', { name: '每工作日' }))
+    fireEvent.change(screen.getByLabelText('提醒时间'), { target: { value: '08:30' } })
+    expect(screen.getByLabelText('关联目标对话')).toHaveValue('agent-1::s-daily')
+
+    fireEvent.click(screen.getByRole('button', { name: '创建提醒' }))
+
+    await waitFor(() => {
+      expect(createSchedule).toHaveBeenCalledWith(
+        's-daily',
+        expect.objectContaining({
+          agent_id: 'agent-1',
+          name: '工作日晨会提醒',
+          prompt: '提醒我汇总今日待办和会议议程',
+          enabled: true,
+          schedule_kind: 'weekly',
+          daily_time: '08:30',
+          weekday_mask: 62,
+        }),
+      )
+    })
+
+    expect(await screen.findByText('工作日晨会提醒')).toBeInTheDocument()
+    expect(screen.getByText('工作日 08:30')).toBeInTheDocument()
+  })
 })

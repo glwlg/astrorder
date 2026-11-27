@@ -529,12 +529,16 @@ it('shows native goals from any agent through progress.type, including Hermes tu
   client.clear()
 })
 
-it('interprets quota exceeded errors with recommended model', () => {
+it('interprets quota exceeded errors with natural guidance and no hardcoded model', () => {
   const parsed = interpretGatewayError('openai.APIConnectionError: 429: quota_exceeded')
   expect(parsed).not.toBeNull()
   expect(parsed?.type).toBe('quota')
-  expect(parsed?.title).toBe('网关模型配额已耗尽')
-  expect(parsed?.recommendedModel?.model).toBe('gemini-3.8-flash')
+  expect(parsed?.title).toBe('当前模型额度已用完或请求受限')
+  expect(parsed?.description).toContain('切换其他可用模型')
+  expect(parsed?.suggestions?.length).toBeGreaterThan(0)
+  expect(parsed?.recommendedModel).toBeUndefined()
+  expect(JSON.stringify(parsed)).not.toContain('gemini-3.8-flash')
+  expect(JSON.stringify(parsed)).not.toContain('google-antigravity')
 })
 
 it('interprets server disconnection gracefully', () => {

@@ -3,7 +3,7 @@
 .sidebar-integrations-divider {
   width: 28px;
   height: 1px;
-  margin: 0 auto 4px;
+  margin: 4px auto 4px;
   background: color-mix(in oklab, var(--astr-border) 85%, transparent);
   flex: none;
 }
@@ -14,15 +14,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 7px 10px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-
-.sidebar-integrations-nav::-webkit-scrollbar {
-  display: none;
+  padding: 6px 7px 14px;
+  flex: none;
+  overflow: visible;
 }
 
 .sidebar-integrations-nav .sidebar-nav-link {

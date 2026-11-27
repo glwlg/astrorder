@@ -188,21 +188,21 @@ export function MeetingModelConfigPopover({
 
   const r2t2Label =
     r2t2Status?.state === 'running'
-      ? `Confucius4-R2T2 · ${r2t2Status.device || '本地 GPU'}`
+      ? `本地语音转写引擎 · ${r2t2Status.device || '本地加速'}`
       : r2t2Status?.state === 'starting'
-        ? 'R2T2 正在加载模型…'
+        ? '本地语音转写引擎正在加载模型…'
         : r2t2Status?.state === 'installing'
-          ? `R2T2 正在下载 (${Math.round((r2t2Status.progress || 0) * 100)}%)`
+          ? `离线语音识别模型正在下载 (${Math.round((r2t2Status.progress || 0) * 100)}%)`
           : r2t2Status?.state === 'error'
-            ? r2t2Status.error || 'R2T2 异常'
-            : 'Confucius4-R2T2 · 未启用'
+            ? r2t2Status.error || '本地语音转写引擎异常'
+            : '离线语音识别 · 未启用'
 
   return (
     <div className="mtg-popover-backdrop" onClick={onClose}>
       <div
         className="mtg-config-popover"
         role="dialog"
-        aria-label="会议总结模型与 R2T2 配置"
+        aria-label="会议总结模型与语音转写配置"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mtg-cfg-section">
@@ -429,7 +429,7 @@ export function MeetingModelConfigPopover({
                   r2t2Running ? 'is-green' : r2t2Status?.state === 'error' ? 'is-red' : 'is-muted'
                 }`}
               />
-              <span>R2T2 实时转写</span>
+              <span>本地语音转写引擎</span>
             </span>
             {r2t2Running && (
               <button
@@ -449,7 +449,7 @@ export function MeetingModelConfigPopover({
               type="button"
               role="switch"
               aria-checked={Boolean(r2t2Status?.enabled)}
-              aria-label="启用 R2T2 实时转写"
+              aria-label="启用本地语音转写引擎"
               disabled={r2t2Busy}
               className={`mtg-toggle${r2t2Status?.enabled ? ' is-on' : ''}`}
               onClick={() => void onToggleR2t2(!r2t2Status?.enabled)}

@@ -209,7 +209,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                     },
                   },
                 }}
-                title="点击切换或创建分支"
+                title={isLinkedWorktree && session.workspace ? `Worktree: ${session.workspace} — 点击切换或创建分支` : '点击切换或创建分支'}
                 aria-label="切换或创建 Git 分支"
                 disabled={statusUnavailable || !branch || switching}
               >
@@ -294,7 +294,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
         </div>
 
         {/* 右侧：代码变更数统计（点击在侧边栏展开 git diff 文件浏览器） */}
-        <Tooltip label="点击在侧边栏查看所有修改的文件列表与 Diff">
+        <Tooltip label={isLinkedWorktree && session.workspace ? `点击在侧边栏查看 Worktree (${session.workspace}) 的修改文件与 Diff` : '点击在侧边栏查看所有修改的文件列表与 Diff'}>
           <UnstyledButton
             onClick={handleOpenDiffTree}
             aria-label="查看工作区 Git Diff"

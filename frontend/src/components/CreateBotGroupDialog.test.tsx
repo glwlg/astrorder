@@ -156,4 +156,135 @@ describe('CreateBotGroupDialog', () => {
     })
     expect(create.mock.calls[0][0].members[0].thinking_effort).toBeUndefined()
   })
+
+  it('imports existing Bot Studio bots with name, persona, agent, workspace, and model while preserving manual agent entry', async () => {
+    vi.spyOn(api, 'listBots').mockResolvedValue({
+      items: [
+        {
+          id: 'bot-director',
+          slug: 'video-director',
+          name: '视频导演',
+          description: '负责脚本文案与分镜审校',
+          workspace: '/workspace/studio-video',
+          connection_id: 'ssh-debian',
+          default_agent_id: 'hermes',
+          default_provider: 'openai',
+          default_model: 'gpt-5',
+          default_effort: 'high',
+          default_approval_mode: 'auto',
+          created_at: '2026-11-26T00:00:00Z',
+          updated_at: '2026-11-26T00:00:00Z',
+          has_agents_md: true,
+          agents_md_excerpt: '按 2K 成片标准输出验收清单',
+          skills: [],
+          session_count: 1,
+          running_count: 0,
+        },
+        {
+          id: 'bot-reviewer',
+          slug: 'qa-reviewer',
+          name: '质量把关员',
+          description: '核查事实与数据口径',
+          workspace: '/workspace/qa',
+          default_agent_id: 'codex',
+          created_at: '2026-11-26T00:00:00Z',
+          updated_at: '2026-11-26T00:00:00Z',
+          has_agents_md: false,
+          skills: [],
+          session_count: 0,
+          running_count: 0,
+        },
+      ],
+    })
+    const create = vi.spyOn(api, 'createBotGroup').mockResolvedValue({ ok: true, group: saved })
+
+    openDialog()
+    fireEvent.change(screen.getByLabelText(/群聊名称/), { target: { value: 'Bot 协作群' } })
+
+    const importBtn = await screen.findByRole('button', { name: '导入 Bot 视频导演' })
+    fireEvent.click(importBtn)
+    expect(screen.getByRole('button', { name: '取消导入 Bot 视频导演' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Manual agent addition remains available alongside Bot Studio imports
+    await addCodex()
+
+    fireEvent.click(screen.getByRole('button', { name: '创建群聊' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+
+    const payloadMembers = create.mock.calls[0][0].members
+    expect(payloadMembers).toHaveLength(2)
+    expect(payloadMembers[0]).toMatchObject({
+      agent_id: 'hermes',
+      machine_id: 'ssh-debian',
+      name: '视频导演',
+      alias: '视频导演',
+      system_role_prompt: '负责脚本文案与分镜审校；按 2K 成片标准输出验收清单',
+      workspace: '/workspace/studio-video',
+      model_provider: 'openai',
+      model_name: 'gpt-5',
+      thinking_effort: 'high',
+      approval_policy: 'auto',
+    })
+    expect(payloadMembers[1]).toMatchObject({
+      agent_id: 'codex',
+      alias: 'Codex-1',
+    })
+  })
+
+  it('batch-imports all Bot Studio bots via 全部导入, loads agent options for each agent, and submits cleanly', async () => {
+    vi.spyOn(api, 'listBots').mockResolvedValue({
+      items: [
+        {
+          id: 'bot-a',
+          slug: 'alpha',
+          name: '策划师',
+          description: '负责方案策划',
+          workspace: '/workspace/plan',
+          connection_id: 'ssh-debian',
+          default_agent_id: 'hermes',
+          created_at: '2026-11-26T00:00:00Z',
+          updated_at: '2026-11-26T00:00:00Z',
+          has_agents_md: true,
+          skills: [],
+          session_count: 0,
+          running_count: 0,
+        },
+        {
+          id: 'bot-b',
+          slug: 'beta',
+          name: '审校员',
+          description: '负责成稿审校',
+          workspace: '/workspace/review',
+          default_agent_id: 'codex',
+          created_at: '2026-11-26T00:00:00Z',
+          updated_at: '2026-11-26T00:00:00Z',
+          has_agents_md: false,
+          skills: [],
+          session_count: 0,
+          running_count: 0,
+        },
+      ],
+    })
+    const create = vi.spyOn(api, 'createBotGroup').mockResolvedValue({ ok: true, group: saved })
+
+    openDialog()
+    fireEvent.change(screen.getByLabelText(/群聊名称/), { target: { value: '全员协作群' } })
+
+    const importAllBtn = await screen.findByRole('button', { name: '全部导入' })
+    fireEvent.click(importAllBtn)
+
+    await waitFor(() => {
+      expect(api.getSessions).toHaveBeenCalledWith('hermes')
+      expect(api.getSessions).toHaveBeenCalledWith('codex')
+    })
+
+    expect(screen.getByRole('button', { name: '取消导入 Bot 策划师' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '取消导入 Bot 审校员' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: '创建群聊' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create.mock.calls[0][0].members).toHaveLength(2)
+    expect(create.mock.calls[0][0].members[0]).toMatchObject({ agent_id: 'hermes', name: '策划师', alias: '策划师', workspace: '/workspace/plan' })
+    expect(create.mock.calls[0][0].members[1]).toMatchObject({ agent_id: 'codex', name: '审校员', alias: '审校员', workspace: '/workspace/review' })
+  })
 })

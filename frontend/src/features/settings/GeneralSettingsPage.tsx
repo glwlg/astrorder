@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { SegmentedControl, Switch, Text, Title } from '@mantine/core'
+import { Button, Group, SegmentedControl, Switch, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { useNotificationPermissionControl } from '../../components/NotificationPermissionControl'
 import { AppearanceSettingsPage } from '../appearance/AppearanceSettingsPage'
 import { setAppProfile, useAppProfile, type AppProfile } from '../office/appProfile'
 import { OfficePersonaCard } from '../office/OfficePersonaCard'
+import { openOnboardingWizard } from '../office/OnboardingWizard'
 
 type StartupSettings = { available: boolean; enabled: boolean }
 type DesktopBridge = {
@@ -18,6 +20,14 @@ function getDesktopBridge(): DesktopBridge | undefined {
 
 export function GeneralSettingsPage() {
   const appProfile = useAppProfile()
+  const {
+    permission: notifyPermission,
+    busy: notifyBusy,
+    enable: enableNotifications,
+    disable: disableNotifications,
+    sendTest: sendTestNotification,
+    showDeniedHelp,
+  } = useNotificationPermissionControl()
   const [startup, setStartup] = useState<StartupSettings>({ available: false, enabled: false })
   const [loadingStartup, setLoadingStartup] = useState(() => Boolean(getDesktopBridge()?.getStartupSettings))
 
@@ -91,6 +101,67 @@ export function GeneralSettingsPage() {
             { value: 'developer', label: '研发模式' },
           ]}
         />
+      </div>
+
+      <div className="st-setting-row">
+        <div className="st-setting-row-copy">
+          <div className="st-setting-row-title">初始化配置向导</div>
+          <div className="st-setting-row-desc">
+            重新选择或安装本机 AI 助手引擎、配置模型、注入星序 CLI 与官方技能，并启动配置助手对话
+          </div>
+        </div>
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => openOnboardingWizard()}
+        >
+          重新运行向导
+        </Button>
+      </div>
+
+      <div className="st-setting-row">
+        <div className="st-setting-row-copy">
+          <div className="st-setting-row-title">桌面与后台通知</div>
+          <div className="st-setting-row-desc">
+            {notifyPermission === 'granted'
+              ? '已开启：任务完成、待回答问题与审批请求将发送系统通知'
+              : notifyPermission === 'denied'
+                ? '通知权限已被拒绝，请在系统或浏览器设置中允许星序通知后重试'
+                : notifyPermission === 'unsupported'
+                  ? '当前浏览器环境不支持后台推送通知'
+                  : '开启后，AI 助手完成长任务或等待确认时将通过系统通知栏提醒你'}
+          </div>
+        </div>
+        <Group gap="xs" wrap="nowrap">
+          {notifyPermission === 'granted' && (
+            <Button
+              size="xs"
+              variant="default"
+              loading={notifyBusy}
+              onClick={() => void sendTestNotification()}
+            >
+              测试通知
+            </Button>
+          )}
+          {notifyPermission === 'denied' ? (
+            <Button size="xs" variant="default" onClick={showDeniedHelp}>
+              查看说明
+            </Button>
+          ) : (
+            <Switch
+              aria-label="桌面与后台通知"
+              checked={notifyPermission === 'granted'}
+              disabled={notifyBusy || notifyPermission === 'unsupported'}
+              onChange={(event) => {
+                if (event.currentTarget.checked) {
+                  void enableNotifications()
+                } else {
+                  void disableNotifications()
+                }
+              }}
+            />
+          )}
+        </Group>
       </div>
 
       <div className="st-setting-row">

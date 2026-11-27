@@ -574,7 +574,7 @@ export function CapabilitiesSettingsCard() {
     setMarketFormAgent(selectedAgent !== 'all' ? selectedAgent : 'codex')
     setMarketFormName('')
     setMarketFormType('git')
-    setMarketFormSource('https://github.com/DietrichGebert/ponytail.git')
+    setMarketFormSource('')
     setMarketModalOpen(true)
   }
 
@@ -2290,14 +2290,14 @@ export function CapabilitiesSettingsCard() {
           />
           <TextInput
             label="市场标识名称"
-            placeholder="例如: ponytail, xai-official, custom-market"
+            placeholder="例如: team-skills, official-registry, custom-market"
             value={marketFormName}
             onChange={(e) => setMarketFormName(e.target.value)}
             required
           />
           <TextInput
             label="Git 仓库地址 / Registry URL"
-            placeholder="https://github.com/.../marketplace.git"
+            placeholder="https://github.com/your-org/your-skills-repo.git"
             value={marketFormSource}
             onChange={(e) => setMarketFormSource(e.target.value)}
             required

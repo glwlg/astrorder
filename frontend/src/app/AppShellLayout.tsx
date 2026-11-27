@@ -26,6 +26,7 @@ import {
   useMeetingSessionStore,
 } from '../features/meetings/meetingSessionStore'
 import { FirstLaunchProfileModal } from '../features/office/FirstLaunchProfileModal'
+import { NotificationOptInPrompt } from '../components/NotificationOptInPrompt'
 import { APP_PROFILE_SYNC_KEY } from '../features/office/appProfile'
 import { PerfProfiler } from '../perf/clientPerf'
 
@@ -452,6 +453,9 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
       <FirstLaunchProfileModal
         ready={connection === 'connected' || Object.keys(agents).length > 0}
         hasExistingData={projects.length > 0 || sessions.length > 0}
+      />
+      <NotificationOptInPrompt
+        ready={connection === 'connected' || Object.keys(agents).length > 0}
       />
     </AppShell>
   )

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Badge, Button, Group, Modal, Stack, Switch, Text, TextInput } from '@mantine/core'
+import { Badge, Button, Group, Modal, Stack, Switch, Text, TextInput, Textarea } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -41,7 +41,17 @@ import type { Command, SessionSchedule } from '../../domain/types'
 import { selectSessions, useAstrorderStore } from '../../state/store'
 import { useShallow } from 'zustand/react/shallow'
 import { useIsOfficeProfile } from '../office/appProfile'
+import { formatWeekdayMask } from '../../hooks/useSessionSchedules'
 import { isDueTodayOrOverdue, isOverdue, useActionInbox } from './useActionInbox'
+import {
+  buildReminderSchedulePayload,
+  createEmptyReminderDraft,
+  formatReminderHumanSummary,
+  REMINDER_WEEKDAY_ITEMS,
+  validateReminderDraft,
+  type ReminderDraft,
+  type ReminderTriggerMode,
+} from './scheduleReminderHelper'
 import './actionInbox.css'
 
 type InboxFilter = 'all' | 'today' | 'todo' | 'meeting' | 'schedule' | 'agent' | 'done'
@@ -68,7 +78,9 @@ function priorityLabel(p?: string): string {
 function formatScheduleCadence(s: SessionSchedule): string {
   if (s.schedule_kind === 'interval' && s.interval_minutes) return `每 ${s.interval_minutes} 分钟`
   if (s.schedule_kind === 'daily' && s.daily_time) return `每天 ${s.daily_time}`
-  if (s.schedule_kind === 'weekly' && s.daily_time) return `每周 ${s.daily_time}`
+  if (s.schedule_kind === 'weekly' && s.daily_time) {
+    return `${formatWeekdayMask(s.weekday_mask)} ${s.daily_time}`
+  }
   if (s.schedule_kind === 'once' && s.run_at) return `单次 ${s.run_at.slice(0, 16).replace('T', ' ')}`
   if (s.cron_expr) return s.cron_expr
   return '定时任务'
@@ -123,6 +135,12 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
   // Dispatch-to-AI-chat session picker modal
   const [dispatchTask, setDispatchTask] = useState<{ title: string; prompt: string } | null>(null)
   const [dispatchSearch, setDispatchSearch] = useState('')
+
+  // Create scheduled reminder modal
+  const [reminderModalOpen, setReminderModalOpen] = useState(false)
+  const [reminderDraft, setReminderDraft] = useState<ReminderDraft>(() => createEmptyReminderDraft())
+  const [reminderSaving, setReminderSaving] = useState(false)
+  const [reminderError, setReminderError] = useState<string | null>(null)
 
   const runningCount = useMemo(
     () => sessions.filter((s) => sessionActivityStatus(s) === 'running').length,
@@ -246,11 +264,15 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
     return list
   }, [projects])
 
+  const reminderSessionOptions = useMemo(
+    () => [...sessions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '')),
+    [sessions],
+  )
+
   const recentSessions = useMemo(() => {
-    const sorted = [...sessions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
     const q = dispatchSearch.trim().toLowerCase()
-    if (!q) return sorted.slice(0, 20)
-    return sorted
+    if (!q) return reminderSessionOptions.slice(0, 20)
+    return reminderSessionOptions
       .filter(
         (s) =>
           (s.title || '').toLowerCase().includes(q) ||
@@ -258,7 +280,7 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
           (s.workspace || '').toLowerCase().includes(q),
       )
       .slice(0, 20)
-  }, [dispatchSearch, sessions])
+  }, [dispatchSearch, reminderSessionOptions])
 
   const handleAddTodo = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -404,10 +426,78 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
   const handleToggleSchedule = async (sched: SessionSchedule, enabled: boolean) => {
     try {
       await api.updateSessionSchedule(sched.id, { enabled })
-      await queryClient.invalidateQueries({ queryKey: ['astrorder', 'schedules-all'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'schedules-all'] }),
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'session-schedules'] }),
+      ])
       notifications.show({ color: 'teal', message: enabled ? '已开启定时提醒' : '已暂停定时提醒' })
     } catch (cause) {
       notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '更新定时任务失败' })
+    }
+  }
+
+  const handleDeleteSchedule = async (sched: SessionSchedule) => {
+    const key = `sched-del:${sched.id}`
+    if (busyIds[key]) return
+    setBusyIds((prev) => ({ ...prev, [key]: true }))
+    try {
+      await api.deleteSessionSchedule(sched.id)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'schedules-all'] }),
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'session-schedules'] }),
+      ])
+      notifications.show({ color: 'teal', message: '已删除定时提醒' })
+    } catch (cause) {
+      notifications.show({ color: 'red', message: cause instanceof Error ? cause.message : '删除定时提醒失败' })
+    } finally {
+      setBusyIds((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }
+  }
+
+  const openReminderModal = () => {
+    const defaultSession = reminderSessionOptions[0]
+    const defaultKey = defaultSession ? scopeKey(defaultSession.agent_id, defaultSession.id) : ''
+    setReminderDraft(createEmptyReminderDraft(defaultKey))
+    setReminderError(null)
+    setReminderModalOpen(true)
+  }
+
+  const handleCreateReminder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (reminderSaving) return
+    const validationError = validateReminderDraft(reminderDraft)
+    if (validationError) {
+      setReminderError(validationError)
+      return
+    }
+    const target = reminderSessionOptions.find(
+      (s) => scopeKey(s.agent_id, s.id) === reminderDraft.sessionKey,
+    )
+    if (!target) {
+      setReminderError('所选目标对话不存在，请重新选择')
+      return
+    }
+    setReminderError(null)
+    setReminderSaving(true)
+    try {
+      const payload = buildReminderSchedulePayload(reminderDraft, target.agent_id)
+      await api.createSessionSchedule(target.id, payload)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'schedules-all'] }),
+        queryClient.invalidateQueries({ queryKey: ['astrorder', 'session-schedules'] }),
+      ])
+      setReminderModalOpen(false)
+      notifications.show({ color: 'teal', message: '已创建定时提醒' })
+    } catch (cause) {
+      const msg = cause instanceof Error ? cause.message : '创建定时提醒失败'
+      setReminderError(msg)
+      notifications.show({ color: 'red', message: msg })
+    } finally {
+      setReminderSaving(false)
     }
   }
 
@@ -689,6 +779,23 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
         </div>
       </div>
 
+      {filter === 'schedule' && (
+        <div className="action-inbox-schedule-bar">
+          <div className="action-inbox-schedule-bar-copy">
+            <strong>定时提醒</strong>
+            <span>选择时间与重复方式，到点自动在关联对话中提醒你，无需手写 Cron。</span>
+          </div>
+          <Button
+            size="xs"
+            color="dark"
+            leftSection={<IconPlus size={14} />}
+            onClick={openReminderModal}
+          >
+            新建提醒
+          </Button>
+        </div>
+      )}
+
       {isEmptyView ? (
         <div className="action-inbox-empty">
           <div className="action-inbox-empty-icon" aria-hidden="true">
@@ -699,11 +806,22 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
             {filter === 'done'
               ? '还没有已完成的待办记录。'
               : filter === 'schedule'
-                ? '暂无定时提醒任务，可在对话中创建定时提醒。'
+                ? '暂无定时提醒，点击下方按钮即可快速创建。'
                 : runningCount > 0
                   ? `目前没有待你处理的事项，另有 ${runningCount} 个任务正在后台执行。`
                   : '没有待办事项、未完成会议行动项或待确认请求。'}
           </p>
+          {filter === 'schedule' && (
+            <Button
+              size="xs"
+              color="dark"
+              mt="xs"
+              leftSection={<IconPlus size={14} />}
+              onClick={openReminderModal}
+            >
+              新建第一条提醒
+            </Button>
+          )}
         </div>
       ) : (
         <div className="action-inbox-list">
@@ -1000,6 +1118,16 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
                     <span>进入对话</span>
                     <IconArrowRight size={13} aria-hidden="true" />
                   </button>
+                  <button
+                    type="button"
+                    className="action-inbox-icon-ghost is-danger"
+                    title="删除定时提醒"
+                    aria-label={`删除定时提醒 ${sched.name || '定时提醒'}`}
+                    disabled={Boolean(busyIds[`sched-del:${sched.id}`])}
+                    onClick={() => void handleDeleteSchedule(sched)}
+                  >
+                    <IconTrash size={14} />
+                  </button>
                 </div>
               </div>
               {sched.prompt && <p className="action-inbox-summary">{sched.prompt}</p>}
@@ -1284,6 +1412,207 @@ export function ActionInboxView({ compact = false, onOpenSession }: ActionInboxV
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      {/* Friendly Create Scheduled Reminder Modal */}
+      <Modal
+        opened={reminderModalOpen}
+        onClose={() => {
+          if (!reminderSaving) setReminderModalOpen(false)
+        }}
+        title="新建定时提醒"
+        size="md"
+        withinPortal
+      >
+        <form onSubmit={(e) => void handleCreateReminder(e)}>
+          <Stack gap="sm">
+            <TextInput
+              size="xs"
+              label="提醒名称（可选）"
+              placeholder="例如：每日晨报提醒（留空自动取提醒内容首行）"
+              value={reminderDraft.name}
+              onChange={(e) => {
+                const value = e.currentTarget.value
+                setReminderDraft((prev) => ({ ...prev, name: value }))
+              }}
+              disabled={reminderSaving}
+            />
+
+            <Textarea
+              size="xs"
+              label="提醒内容"
+              placeholder="例如：提醒我整理今日待办清单并同步项目进度"
+              minRows={3}
+              required
+              value={reminderDraft.prompt}
+              onChange={(e) => {
+                const value = e.currentTarget.value
+                setReminderDraft((prev) => ({ ...prev, prompt: value }))
+                setReminderError(null)
+              }}
+              disabled={reminderSaving}
+            />
+
+            <div className="action-inbox-reminder-field">
+              <span className="action-inbox-reminder-label">触发方式</span>
+              <div className="action-inbox-reminder-pills" role="radiogroup" aria-label="触发方式">
+                {(
+                  [
+                    ['once', '一次性'],
+                    ['daily', '每天'],
+                    ['weekdays', '每工作日'],
+                    ['weekly', '每周几'],
+                  ] as const satisfies ReadonlyArray<readonly [ReminderTriggerMode, string]>
+                ).map(([modeValue, label]) => (
+                  <button
+                    key={modeValue}
+                    type="button"
+                    role="radio"
+                    aria-checked={reminderDraft.mode === modeValue}
+                    className={`action-inbox-reminder-pill${reminderDraft.mode === modeValue ? ' is-active' : ''}`}
+                    disabled={reminderSaving}
+                    onClick={() => {
+                      setReminderDraft((prev) => ({ ...prev, mode: modeValue }))
+                      setReminderError(null)
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {reminderDraft.mode === 'once' ? (
+              <label className="action-inbox-reminder-field">
+                <span className="action-inbox-reminder-label">提醒日期与时间</span>
+                <input
+                  type="datetime-local"
+                  aria-label="提醒日期与时间"
+                  className="action-inbox-reminder-native-input"
+                  value={reminderDraft.onceLocal}
+                  disabled={reminderSaving}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value
+                    setReminderDraft((prev) => ({ ...prev, onceLocal: value }))
+                    setReminderError(null)
+                  }}
+                />
+              </label>
+            ) : (
+              <>
+                {reminderDraft.mode === 'weekly' && (
+                  <div className="action-inbox-reminder-field">
+                    <span className="action-inbox-reminder-label">重复星期</span>
+                    <div className="action-inbox-weekday-row" role="group" aria-label="选择星期">
+                      {REMINDER_WEEKDAY_ITEMS.map((day) => {
+                        const active = Boolean(reminderDraft.weekdayMask & day.bit)
+                        return (
+                          <button
+                            key={day.bit}
+                            type="button"
+                            aria-pressed={active}
+                            aria-label={`周${day.label}`}
+                            className={`action-inbox-weekday-btn${active ? ' is-active' : ''}`}
+                            disabled={reminderSaving}
+                            onClick={() => {
+                              setReminderDraft((prev) => {
+                                const nextMask = active
+                                  ? prev.weekdayMask & ~day.bit
+                                  : prev.weekdayMask | day.bit
+                                return { ...prev, weekdayMask: nextMask || day.bit }
+                              })
+                              setReminderError(null)
+                            }}
+                          >
+                            {day.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <label className="action-inbox-reminder-field">
+                  <span className="action-inbox-reminder-label">提醒时间</span>
+                  <input
+                    type="time"
+                    aria-label="提醒时间"
+                    className="action-inbox-reminder-native-input"
+                    value={reminderDraft.time}
+                    disabled={reminderSaving}
+                    onChange={(e) => {
+                      const value = e.currentTarget.value
+                      setReminderDraft((prev) => ({ ...prev, time: value }))
+                      setReminderError(null)
+                    }}
+                  />
+                </label>
+              </>
+            )}
+
+            <label className="action-inbox-reminder-field">
+              <span className="action-inbox-reminder-label">关联目标对话</span>
+              {reminderSessionOptions.length === 0 ? (
+                <Text size="xs" c="dimmed">
+                  当前暂无可用对话，请先创建一个对话后再设置定时提醒。
+                </Text>
+              ) : (
+                <select
+                  aria-label="关联目标对话"
+                  className="action-inbox-reminder-native-input"
+                  value={reminderDraft.sessionKey}
+                  disabled={reminderSaving}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value
+                    setReminderDraft((prev) => ({ ...prev, sessionKey: value }))
+                    setReminderError(null)
+                  }}
+                >
+                  {reminderSessionOptions.map((s) => {
+                    const sKey = scopeKey(s.agent_id, s.id)
+                    return (
+                      <option key={sKey} value={sKey}>
+                        {s.title || '未命名对话'}
+                        {s.project_name ? ` · ${s.project_name}` : ''}
+                      </option>
+                    )
+                  })}
+                </select>
+              )}
+            </label>
+
+            <div className="action-inbox-reminder-summary" role="status">
+              {formatReminderHumanSummary(reminderDraft)}
+            </div>
+
+            {reminderError && (
+              <div className="action-inbox-reminder-error" role="alert">
+                {reminderError}
+              </div>
+            )}
+
+            <Group justify="flex-end" gap="xs" mt="xs">
+              <Button
+                size="xs"
+                variant="subtle"
+                color="gray"
+                disabled={reminderSaving}
+                onClick={() => setReminderModalOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="submit"
+                size="xs"
+                color="dark"
+                loading={reminderSaving}
+                disabled={reminderSessionOptions.length === 0}
+              >
+                创建提醒
+              </Button>
+            </Group>
+          </Stack>
+        </form>
       </Modal>
     </div>
   )

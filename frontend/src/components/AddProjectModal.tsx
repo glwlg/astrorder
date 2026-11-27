@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
+  Alert,
   Badge,
   Button,
   Group,
@@ -24,6 +25,7 @@ import {
   IconPlus,
   IconRefresh,
   IconServer,
+  IconSparkles,
   IconX,
 } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
@@ -33,6 +35,7 @@ import type { Agent, SshConnection } from '../domain/types'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { BrandedSelect } from './BrandedSelect'
 import { useAppProfile } from '../features/office/appProfile'
+import { openOnboardingWizard } from '../features/office/OnboardingWizard'
 import { setProjectOfficeMode } from '../features/office/officeWorkspaceMode'
 const emptyAgents: Record<string, Agent> = {}
 
@@ -170,10 +173,22 @@ export function AddProjectModal({
   }, [agents, connectionId])
 
   useEffect(() => {
-    if (agentOptions.length > 0 && (!selectedAgentId || !agentOptions.some((opt) => opt.value === selectedAgentId))) {
+    if (agentOptions.length === 0) {
+      if (selectedAgentId) setSelectedAgentId('')
+      return
+    }
+    if (!selectedAgentId || !agentOptions.some((opt) => opt.value === selectedAgentId)) {
       setSelectedAgentId(agentOptions[0].value)
     }
   }, [agentOptions, selectedAgentId])
+
+  const effectiveAgentId = useMemo(() => {
+    if (selectedAgentId && agentOptions.some((opt) => opt.value === selectedAgentId)) {
+      return selectedAgentId
+    }
+    return agentOptions[0]?.value || ''
+  }, [agentOptions, selectedAgentId])
+  const hasReadyAgent = Boolean(effectiveAgentId)
 
   // 2. 加载选定服务器下的目录树
   const fetchDirectory = useCallback(async (pathQuery: string) => {
@@ -293,7 +308,7 @@ export function AddProjectModal({
 
   // 3. 提交新建项目
   const handleSubmit = async () => {
-    if (!selectedPath.trim() || submitting) return
+    if (!selectedPath.trim() || !effectiveAgentId || submitting) return
     setSubmitting(true)
     try {
       const finalName = projectName.trim() || selectedPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || (isOfficeSpace ? '未命名空间' : '未命名项目')
@@ -302,7 +317,7 @@ export function AddProjectModal({
         workspace: selectedPath.trim(),
         name: finalName,
         connection_id: effectiveConn,
-        agent_id: selectedAgentId || 'codex',
+        agent_id: effectiveAgentId,
       })
 
       if (isOfficeSpace) {
@@ -314,7 +329,7 @@ export function AddProjectModal({
 
       // 同时自动为该新项目创建一个会话，以便用户直接进入对话
       const sessionRes = await api.createSession({
-        agent_id: selectedAgentId || 'codex',
+        agent_id: effectiveAgentId,
         workspace: selectedPath.trim(),
         title: isOfficeSpace ? '新对话' : '新会话',
         project_id: res.project.project_id,
@@ -637,8 +652,36 @@ export function AddProjectModal({
           disabled={submitting}
         />
 
-        {/* Step 4: 默认 Agent（办公空间单助手自动选用，避免技术干扰） */}
-        {agentOptions.length > (isOfficeSpace ? 1 : 0) && (
+        {/* Step 4: 默认 Agent（无就绪 Agent 时显示友好引导，绝不硬编码回退 codex） */}
+        {!hasReadyAgent ? (
+          <Alert color="indigo" variant="light" radius="md">
+            <Group justify="space-between" align="center" gap="sm" wrap="wrap">
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <Text size="xs" fw={600}>
+                  {connectionId === 'local'
+                    ? '当前尚未检测到可用的 AI 助手引擎'
+                    : '该远端服务器暂无就绪的 AI 助手'}
+                </Text>
+                <Text size="xs" c="dimmed" mt={2}>
+                  {connectionId === 'local'
+                    ? '请先通过初始化向导完成引擎安装或登录配置，随后即可创建并开始对话。'
+                    : '请先确认远端连接状态，或切换回本机并通过初始化向导配置 AI 助手。'}
+                </Text>
+              </div>
+              <Button
+                size="compact-xs"
+                color="dark"
+                leftSection={<IconSparkles size={13} />}
+                onClick={() => {
+                  onClose()
+                  openOnboardingWizard()
+                }}
+              >
+                打开初始化向导
+              </Button>
+            </Group>
+          </Alert>
+        ) : agentOptions.length > (isOfficeSpace ? 1 : 0) ? (
           <BrandedSelect
             label={isOfficeSpace ? '3. 默认 AI 助手' : '4. 初始智能体'}
             options={agentOptions.map((opt) => ({
@@ -646,11 +689,11 @@ export function AddProjectModal({
               label: opt.label,
               icon: <AgentBrandIcon kind={agents[opt.value]?.kind} size={15} />,
             }))}
-            value={selectedAgentId}
+            value={effectiveAgentId}
             onChange={setSelectedAgentId}
             disabled={submitting}
           />
-        )}
+        ) : null}
 
         <Group justify="flex-end" gap="sm" mt="md">
           <Button variant="subtle" color="gray" onClick={onClose} disabled={submitting}>
@@ -660,7 +703,7 @@ export function AddProjectModal({
             color="indigo"
             onClick={() => void handleSubmit()}
             loading={submitting}
-            disabled={!selectedPath.trim() || !projectName.trim()}
+            disabled={!selectedPath.trim() || !projectName.trim() || !hasReadyAgent}
           >
             {isOfficeSpace ? '创建办公空间' : '确定创建项目'}
           </Button>

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { Session } from '../../domain/types'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { writeStoredSettingsMode } from '../settings/settingsMode'
 import {
   isProjectInOfficeMode,
   isSessionInOfficeMode,
@@ -37,7 +38,7 @@ export function readStoredAppProfile(): AppProfile | null {
 
 export function hasExplicitAppProfile(): boolean {
   const fromPlugin = normalizeProfile(
-    usePluginSettingsStore.getState().pluginConfigs[APP_PROFILE_PLUGIN_KEY]?.mode,
+    usePluginSettingsStore.getState()?.pluginConfigs?.[APP_PROFILE_PLUGIN_KEY]?.mode,
   )
   if (fromPlugin) return true
   return readStoredAppProfile() !== null
@@ -45,7 +46,7 @@ export function hasExplicitAppProfile(): boolean {
 
 export function getAppProfile(): AppProfile {
   const fromPlugin = normalizeProfile(
-    usePluginSettingsStore.getState().pluginConfigs[APP_PROFILE_PLUGIN_KEY]?.mode,
+    usePluginSettingsStore.getState()?.pluginConfigs?.[APP_PROFILE_PLUGIN_KEY]?.mode,
   )
   if (fromPlugin) return fromPlugin
   return readStoredAppProfile() ?? 'developer'
@@ -57,6 +58,10 @@ export function setAppProfile(next: AppProfile, options?: { syncPluginStore?: bo
       localStorage.setItem(APP_PROFILE_STORAGE_KEY, next)
       localStorage.setItem(APP_PROFILE_SYNC_KEY, String(Date.now()))
     } catch {}
+  }
+  if (next === 'office') {
+    // Keep Settings mode converged with global Office Profile so mode switches never conflict.
+    writeStoredSettingsMode('basic')
   }
   if (options?.syncPluginStore !== false) {
     usePluginSettingsStore.getState().setPluginConfig(APP_PROFILE_PLUGIN_KEY, 'mode', next)
@@ -76,7 +81,10 @@ export function clearStoredAppProfileForTest() {
 
 function subscribe(callback: () => void): () => void {
   listeners.add(callback)
-  const unsubStore = usePluginSettingsStore.subscribe(callback)
+  const unsubStore =
+    typeof usePluginSettingsStore.subscribe === 'function'
+      ? usePluginSettingsStore.subscribe(callback)
+      : () => {}
   const onStorage = (event: StorageEvent) => {
     if (event.key === APP_PROFILE_STORAGE_KEY || event.key === APP_PROFILE_SYNC_KEY) {
       callback()
@@ -130,9 +138,11 @@ export function useIsProjectOfficeExperience(
  * 对话、待办、会议、复盘 + 常用网站 + 设置.
  */
 export const DEV_ONLY_PRIMARY_NAV_IDS = new Set<string>([
+  'bots',
   'monitor',
   'groups',
   'analytics',
   'backups',
   'agentAccounts',
+  'learning',
 ])

@@ -402,12 +402,12 @@ export function MeetingsPage() {
   const r2t2Starting = r2t2Status?.state === 'starting' || r2t2Status?.state === 'installing'
   const r2t2StatusText =
     recordState === 'recording'
-      ? 'R2T2 实时转写中'
+      ? '离线语音识别中'
       : r2t2Running
-        ? 'R2T2 已就绪'
+        ? '本地语音转写已就绪'
         : r2t2Starting
-          ? 'R2T2 加载中…'
-          : 'R2T2 未启用'
+          ? '本地语音引擎加载中…'
+          : '本地语音转写未启用'
 
   const effectiveModelLabel = settings.effective_model || settings.model || 'deepseek-chat'
   const cadenceLabel = settings.auto_summarize ? `每 ${settings.auto_summarize_interval_sec || 30} 秒` : '手动总结'
@@ -444,7 +444,7 @@ export function MeetingsPage() {
             type="button"
             className="mtg-engine-trigger"
             onClick={() => setConfigOpen(true)}
-            title="点击查看或切换 R2T2 本地实时转写引擎"
+            title="点击查看或切换本地语音转写引擎"
           >
             <span
               className={`mtg-dot ${
@@ -693,7 +693,7 @@ export function MeetingsPage() {
                 </button>
                 <h2 className="mtg-launch-cta-title">开始实时录制</h2>
                 <p className="mtg-launch-cta-sub">
-                  R2T2 实时转写并自动定期存档，录音结束自动整理终稿纪要
+                  本地语音转写引擎实时识别并定期存档，录音结束自动整理终稿纪要
                 </p>
 
                 <div className="mtg-launch-tools">
@@ -726,7 +726,7 @@ export function MeetingsPage() {
                 {!r2t2Running && (
                   <div className="mtg-r2t2-callout">
                     <span className={`mtg-dot ${r2t2Starting ? 'is-amber' : 'is-muted'}`} />
-                    <span>{r2t2Starting ? '正在加载本地 R2T2 模型…' : '本地 R2T2 听写尚未启动'}</span>
+                    <span>{r2t2Starting ? '正在加载本地语音识别模型…' : '本地语音转写引擎尚未启动'}</span>
                     {!r2t2Starting && (
                       <button
                         type="button"
@@ -882,7 +882,7 @@ export function MeetingsPage() {
                       {recordState === 'recording' && (
                         <div className="mtg-live-caption">
                           <span className="mtg-dot is-green" />
-                          <span>R2T2 实时识别中…</span>
+                          <span>离线语音识别中…</span>
                         </div>
                       )}
                     </div>
@@ -1039,7 +1039,7 @@ export function MeetingsPage() {
                         {finalizingSummary
                           ? '录音已自动保存，正在基于完整录音原文进行全篇整体总结…'
                           : recordState === 'recording'
-                            ? `正在实时聆听并由 R2T2 转写，${settings.auto_summarize ? `每 ${settings.auto_summarize_interval_sec || 30} 秒自动提炼结构化纪要与行动项` : '录音结束将自动整体总结并保存'}。`
+                            ? `正在实时聆听并离线转写，${settings.auto_summarize ? `每 ${settings.auto_summarize_interval_sec || 30} 秒自动提炼结构化纪要与行动项` : '录音结束将自动整体总结并保存'}。`
                             : '点击上方「立即总结」即可按当前模型提炼核心摘要、议题脉络、决议与行动项。'}
                       </div>
                     ) : (

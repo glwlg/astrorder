@@ -184,9 +184,9 @@ it('replaces the transcript on in-app navigation, including the same native ID i
   expect(view.container.querySelector('.desktop-details')).toHaveStyle({ display: 'none' })
   fireEvent.click(screen.getByRole('button', { name: '打开会话详情' }))
   expect(await screen.findByRole('dialog', { name: '会话详情' })).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '固定详情侧栏' }))
+  fireEvent.click(screen.getByRole('button', { name: '固定侧栏' }))
   expect(view.container.querySelector('.desktop-details')).toHaveStyle({ display: 'block' })
-  fireEvent.click(screen.getByRole('button', { name: '收起详情侧栏' }))
+  fireEvent.click(screen.getByRole('button', { name: '取消固定' }))
   expect(view.container.querySelector('.desktop-details')).toHaveStyle({ display: 'none' })
   for (const target of ['codex/two', 'hermes/one', 'codex/one', 'codex/two', 'codex/one']) {
     fireEvent.click(screen.getByRole('button', { name: target }))
@@ -318,6 +318,94 @@ it('hides code review and code checkpoints buttons in top-right header when work
     expect(screen.getByRole('button', { name: '请求 Codex 审查' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '打开代码检查点' })).toBeInTheDocument()
   })
+
+  localStorage.clear()
+  usePluginSettingsStore.getState().reset()
+  client.clear()
+})
+
+it('hides GoalManager, SessionRuntimeBar, and SessionSchedulesView (Cron) in office mode', async () => {
+  localStorage.clear()
+  usePluginSettingsStore.getState().reset()
+  vi.spyOn(usePluginSettingsStore.getState(), 'setPluginConfig').mockImplementation((pluginId, key, value) => {
+    usePluginSettingsStore.setState((state) => ({
+      pluginConfigs: {
+        ...state.pluginConfigs,
+        [pluginId]: { ...(state.pluginConfigs[pluginId] || {}), [key]: value },
+      },
+    }))
+  })
+  setProjectOfficeMode({ projectKey: 'project:local\u0000office-seal', workspace: 'D:/Work/Seal' }, true)
+  useAstrorderStore.getState().resetRuntime()
+  const date = '2026-11-27T10:00:00Z'
+  useAstrorderStore.getState().hydrateBootstrap({
+    protocol_version: 1,
+    cursor: 0,
+    agents: [{ id: 'codex', name: 'Codex', kind: 'codex', status: 'ready', capabilities: ['chat'], limitation: null }],
+    sessions: [{ id: 'office-s2', agent_id: 'codex', title: '合同审阅', workspace: 'D:/Work/Seal', status: 'idle', updated_at: date }],
+  })
+  useAstrorderStore.getState().mergeTasks([
+    {
+      id: 'hermes:goal:current',
+      session_id: 'office-s2',
+      agent_id: 'codex',
+      kind: 'todo',
+      title: '目标: 自动化发布',
+      status: 'running',
+      progress: { type: 'goal', source: 'hermes', native_status: 'active', turns_used: 1, max_turns: 10 },
+      command: null,
+      logs: [],
+      target_id: null,
+      created_at: date,
+      updated_at: date,
+    },
+    {
+      id: 'sub-1',
+      session_id: 'office-s2',
+      agent_id: 'codex',
+      kind: 'subagent',
+      title: '子代理执行任务',
+      status: 'running',
+      progress: null,
+      command: null,
+      logs: [],
+      target_id: null,
+      created_at: date,
+      updated_at: date,
+    },
+  ])
+  vi.spyOn(api, 'getMessages').mockResolvedValue({ items: [], next_cursor: null })
+  vi.spyOn(api, 'getCommands').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] })
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ model: 'model', provider: 'provider' })
+  const listSchedulesSpy = vi.spyOn(api, 'listSessionSchedules').mockResolvedValue({ items: [] })
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/chat/office-s2?agent_id=codex']}>
+          <Routes>
+            <Route path="/chat/:sessionId" element={<ChatPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+
+  expect(await screen.findByRole('heading', { level: 2, name: '合同审阅' })).toBeInTheDocument()
+  // GoalManager & SessionRuntimeBar are completely hidden in office mode
+  expect(screen.queryByRole('region', { name: '运行摘要' })).toBeNull()
+  expect(screen.queryByLabelText('运行摘要')).toBeNull()
+  expect(screen.queryByText(/自动化发布/)).toBeNull()
+  expect(screen.queryByText('子代理')).toBeNull()
+  expect(listSchedulesSpy).not.toHaveBeenCalled()
+
+  // Floating outputs panel has NO 定时 (SessionSchedulesView / Cron) tab in office mode
+  fireEvent.click(screen.getByRole('button', { name: '打开产物悬浮面板' }))
+  expect(screen.getByRole('complementary', { name: '产物' })).toBeInTheDocument()
+  expect(screen.queryByRole('radio', { name: /定时/ })).toBeNull()
+  expect(screen.queryByText('新建定时')).toBeNull()
 
   localStorage.clear()
   usePluginSettingsStore.getState().reset()

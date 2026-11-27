@@ -904,8 +904,8 @@ export const useMeetingSessionStore = create<MeetingSessionState>((set, get) => 
       if (!status || status.state !== 'running') {
         throw new Error(
           status?.state === 'starting' || status?.state === 'installing'
-            ? 'R2T2 引擎正在加载中，请稍候几秒再试'
-            : 'R2T2 本地实时转写未启动，请先在右上角配置面板中启用 R2T2',
+            ? '本地语音转写引擎正在加载中，请稍候几秒再试'
+            : '本地语音转写引擎未启动，请先在右上角配置面板中启用本地语音转写',
         )
       }
 
@@ -999,15 +999,15 @@ export const useMeetingSessionStore = create<MeetingSessionState>((set, get) => 
       await new Promise<void>((resolve, reject) => {
         ws.onerror = () => {
           if (!ready) {
-            reject(new Error('无法连接 R2T2 实时流式听写服务'))
+            reject(new Error('无法连接本地语音转写服务'))
           } else if (get().recordState !== 'idle') {
             finalizeCompletedRecording(liveTextRuntime)
-            notifications.show({ color: 'red', message: 'R2T2 实时转写连接中断，已自动保存当前内容' })
+            notifications.show({ color: 'red', message: '本地语音转写连接中断，已自动保存当前内容' })
           }
         }
         ws.onclose = () => {
           if (!ready) {
-            reject(new Error('R2T2 实时转写连接已关闭'))
+            reject(new Error('本地语音转写连接已关闭'))
           } else {
             const st = get().recordState
             if (st === 'recording' || st === 'paused' || st === 'stopping') {
@@ -1086,7 +1086,7 @@ export const useMeetingSessionStore = create<MeetingSessionState>((set, get) => 
           } else if (msg.type === 'done') {
             finalizeCompletedRecording(msg.text || liveTextRuntime || '')
           } else if (msg.type === 'error') {
-            const errMsg = msg.message || 'R2T2 实时转写失败'
+            const errMsg = msg.message || '本地语音转写失败'
             if (!ready) {
               clearMediaRuntime()
               closeSocketRuntime()

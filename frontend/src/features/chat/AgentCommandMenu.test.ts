@@ -56,4 +56,17 @@ describe('agent composer menus', () => {
       expect(formatAgentMention(item)).toBe('@浏览器 ')
     }
   })
+
+  it('hides Bot:<slug> mentions in office mode while keeping them in developer mode', () => {
+    const items = [
+      { name: 'Bot:weekly-helper', description: '周报助手', kind: 'bot' as const, path: 'bot:weekly-helper', botSlug: 'weekly-helper' },
+      { name: 'Q4方案.docx', description: '/office/Q4方案.docx', kind: 'file' as const, path: '/office/Q4方案.docx' },
+    ]
+    const devRes = filterAgentMentions(items, '@', { officeMode: false })
+    expect(devRes.some((item) => item.name === 'Bot:weekly-helper')).toBe(true)
+
+    const officeRes = filterAgentMentions(items, '@', { officeMode: true })
+    expect(officeRes.some((item) => item.name.startsWith('Bot:'))).toBe(false)
+    expect(officeRes.some((item) => item.name === 'Q4方案.docx')).toBe(true)
+  })
 })

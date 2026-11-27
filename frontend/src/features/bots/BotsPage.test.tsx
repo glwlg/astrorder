@@ -184,6 +184,10 @@ describe('BotsPage', () => {
     expect(await screen.findByText(/把你的专属工作区打造成可随时调用的 Bot/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /直接新建 Bot/ }))
 
+    const workspaceInput = screen.getByLabelText(/专属工作区路径/) as HTMLInputElement
+    expect(workspaceInput.placeholder).not.toContain('/home/luwei')
+    expect(workspaceInput.placeholder).toContain('~/Documents/my-project')
+
     fireEvent.change(screen.getByLabelText('Bot 名称'), { target: { value: '视频制作师' } })
     fireEvent.change(screen.getByLabelText(/专属工作区路径/), { target: { value: '/home/luwei/workspace/video' } })
     fireEvent.change(screen.getByLabelText(/基础设定/), { target: { value: '专业宣传片制作' } })

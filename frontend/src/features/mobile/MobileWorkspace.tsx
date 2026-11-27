@@ -1,19 +1,22 @@
-import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TouchEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Button, Group, Menu, Modal, TextInput, useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock, IconInbox, IconHistory, IconCompass, IconGitBranch } from '@tabler/icons-react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock, IconInbox, IconHistory, IconCompass, IconGitBranch, IconNotebook, IconLayoutGrid, IconHome, IconRobot, IconChartBar, IconArchive, IconPuzzle, IconSettings, IconSparkles, IconBriefcase, IconCode } from '@tabler/icons-react'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api/client'
-import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool, openSqlSnippetInDatabaseTool } from '../sidecar/databaseTool'
+import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool, openSqlSnippetInDatabaseTool, useHasDatabaseTool } from '../sidecar/databaseTool'
+import { ProjectDatabaseModal } from '../dbxExec/ProjectDatabaseModal'
+import { buildWorkspaceScopeKey } from '../dbxExec/projectDbStore'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import type { Agent, AgentCommand, AgentMention, Approval, BotGroup, Command, Message, Session, Task } from '../../domain/types'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import { NotificationPermissionMenuItems } from '../../components/NotificationPermissionControl'
+import { NotificationOptInPrompt } from '../../components/NotificationOptInPrompt'
 import { useSessionUnread } from '../../hooks/useSessionUnread'
 import { isDisconnectedSessionRoute, LIVE_ACTIVITY_MS, selectApprovals, selectCommands, selectMessages, selectProjects, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
 import { useSessionResources } from '../../hooks/useAstrorderData'
@@ -61,7 +64,8 @@ import { MobileTranscript, type MessageActionAnchor } from './MobileTranscript'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import { useSidecarStore } from '../sidecar/sidecarStore'
-import { useIsSessionOfficeMode } from '../office/officeWorkspaceMode'
+import { setAppProfile, useIsOfficeExperience, useIsOfficeProfile } from '../office/appProfile'
+import { FirstLaunchProfileModal, openOnboardingWizard } from '../office/FirstLaunchProfileModal'
 import { MobileMessageMenu } from './MobileMessageMenu'
 
 import { EnvironmentConnections } from '../agents/EnvironmentConnections'
@@ -80,18 +84,23 @@ import { HandoffDialog } from '../../components/HandoffDialog'
 import { ForkWorktreeDialog } from '../../components/ForkWorktreeDialog'
 import { BackgroundTasks } from '../../components/BackgroundTasks'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
-import { BrowserMirrorPanel } from '../sidecar/viewers/browser/BrowserMirrorViewer'
 import {
   BLACKBOARD_VIEWER_PLUGIN_ID,
   BROWSER_VIEWER_PLUGIN_ID,
+  SIDEBAR_INTEGRATIONS_PLUGIN_ID,
   VOICE_INPUT_PLUGIN_ID,
   WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
-  WORKSPACE_GROUPS_PLUGIN_ID,
-  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
+import { registerBuiltinWorkspacePages } from '../extensions/builtinWorkspacePages'
+import { extensionRegistry, useExtensionRegistryVersion } from '../extensions/extensionRegistry'
+import { useExtensionStore } from '../extensions/extensionStore'
+import { PluginErrorBoundary } from '../extensions/PluginErrorBoundary'
+import { resolveExtensionPageMobilePath } from '../extensions/types'
+import { useIntegrationsStore } from '../integrations/integrationStore'
+import { IntegrationIcon } from '../integrations/integrationIcons'
 import { useAccentColor } from '../../themeAccent'
 import { AgentCommandMenu, AgentMentionMenu, filterAgentCommands, filterAgentMentions, formatAgentMention, useAgentCommands, useAgentMentions, useFileMentions } from '../chat/AgentCommandMenu'
 import { ClickSpark } from '../../components/animations/ClickSpark'
@@ -124,6 +133,35 @@ import './mobile.css'
 import './mobileParity.css'
 import './mobileConnections.css'
 import './mobileAccounts.css'
+
+registerBuiltinWorkspacePages()
+
+const LazyBrowserMirrorPanel = lazy(() =>
+  import('../sidecar/viewers/browser/BrowserMirrorViewer').then((mod) => ({ default: mod.BrowserMirrorPanel })),
+)
+const MobileOfficeHomeDashboard = lazy(() =>
+  import('../office/OfficeHomeDashboard').then((mod) => ({ default: mod.OfficeHomeDashboard })),
+)
+const MobileBotsPage = lazy(() =>
+  import('../bots/BotsPage').then((mod) => ({ default: mod.BotsPage })),
+)
+const MobilePluginsPage = lazy(() =>
+  import('../plugins/PluginsPage').then((mod) => ({ default: mod.PluginsPage })),
+)
+const MobileSettingsWorkbench = lazy(() =>
+  import('../settings/SettingsWorkbench').then((mod) => ({ default: mod.SettingsWorkbench })),
+)
+const MobileIntegrationPage = lazy(() =>
+  import('../integrations/IntegrationPage').then((mod) => ({ default: mod.IntegrationPage })),
+)
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
 
 const messageError = sendErrorMessage
 const queueLabels = { queued: '排队待发', submitting: '发送中', received: '等待原生确认', accepted: '已接受，等待本轮结束', running: '执行中', unknown: '结果未确认，未自动重发', failed: '未发送成功，内容已保留', cancelled: '已取消', completed: '已完成' }
@@ -226,27 +264,249 @@ export function MobileWorkspace() {
     })
   }, [sessions, openState.data])
   const route = new URLSearchParams(location.search)
-  const groupMatch = location.pathname.match(/^(?:\/mobile)?\/groups(?:\/([^/]+))?$/)
+  const preserveMobileView = route.get('view') === 'mobile'
+  const mobileUrl = useCallback((path: string) => {
+    const [rawPathname, rawQuery = ''] = path.split('?')
+    const targetPath = rawPathname.startsWith('/mobile') || rawPathname.startsWith('/auth')
+      ? rawPathname
+      : rawPathname === '/'
+        ? '/mobile'
+        : `/mobile${rawPathname.startsWith('/') ? rawPathname : `/${rawPathname}`}`
+    if (!preserveMobileView || rawPathname.startsWith('/auth')) {
+      return rawQuery ? `${targetPath}?${rawQuery}` : targetPath
+    }
+    const params = new URLSearchParams(rawQuery)
+    if (!params.has('view')) params.set('view', 'mobile')
+    const qs = params.toString()
+    return qs ? `${targetPath}?${qs}` : targetPath
+  }, [preserveMobileView])
+
+  const normalizedPath = location.pathname === '/mobile' || location.pathname === '/mobile/'
+    ? '/'
+    : location.pathname.startsWith('/mobile/')
+      ? location.pathname.slice('/mobile'.length)
+      : location.pathname
+
+  const groupMatch = normalizedPath.match(/^\/groups(?:\/([^/]+))?$/)
+  const integrationMatch = normalizedPath.match(/^\/integrations\/([^/]+)$/)
+  const extPageMatch = normalizedPath.match(/^\/ext-page\/([^/]+)\/([^/]+)$/)
   const isGroupRoute = Boolean(groupMatch)
-  const isLearningRoute = location.pathname === '/learning' || location.pathname.startsWith('/mobile/learning')
-  const routeGroupId = groupMatch?.[1] ? decodeURIComponent(groupMatch[1]) : ''
-  const routeId = !isGroupRoute && !isLearningRoute ? location.pathname.match(/\/chat\/([^/]+)$/)?.[1] : undefined
-  const sessionId = routeId ? decodeURIComponent(routeId) : ''
+  const isLearningRoute = normalizedPath === '/learning' || normalizedPath.startsWith('/learning/')
+  const isMeetingsRoute = normalizedPath === '/meetings' || normalizedPath.startsWith('/meetings/')
+  const isDigestRoute = normalizedPath === '/digest' || normalizedPath.startsWith('/digest/')
+  const isInboxRoute = normalizedPath === '/inbox' || normalizedPath.startsWith('/inbox/')
+  const isBotsRoute = normalizedPath === '/bots' || normalizedPath.startsWith('/bots/')
+  const isAnalyticsRoute = normalizedPath === '/analytics' || normalizedPath.startsWith('/analytics/')
+  const isBackupsRoute = normalizedPath === '/backups' || normalizedPath.startsWith('/backups/')
+  const isPluginsRoute = normalizedPath === '/plugins' || normalizedPath.startsWith('/plugins/')
+  const isSettingsRoute = normalizedPath === '/settings' || normalizedPath.startsWith('/settings/')
+  const isIntegrationRoute = Boolean(integrationMatch)
+  const isExtPageRoute = Boolean(extPageMatch)
+  const isHomeRoute = normalizedPath === '/home'
+  const isNonChatRoute =
+    isGroupRoute ||
+    isLearningRoute ||
+    isMeetingsRoute ||
+    isDigestRoute ||
+    isInboxRoute ||
+    isBotsRoute ||
+    isAnalyticsRoute ||
+    isBackupsRoute ||
+    isPluginsRoute ||
+    isSettingsRoute ||
+    isIntegrationRoute ||
+    isExtPageRoute ||
+    isHomeRoute
+  const routeGroupId = groupMatch?.[1] ? safeDecodeURIComponent(groupMatch[1]) : ''
+  const routeIntegrationId = integrationMatch?.[1] ? safeDecodeURIComponent(integrationMatch[1]) : ''
+  const routeExtPluginId = extPageMatch?.[1] ? safeDecodeURIComponent(extPageMatch[1]) : ''
+  const routeExtPageId = extPageMatch?.[2] ? safeDecodeURIComponent(extPageMatch[2]) : ''
+  const routeId = !isNonChatRoute ? normalizedPath.match(/^\/chat\/([^/]+)$/)?.[1] : undefined
+  const sessionId = routeId ? safeDecodeURIComponent(routeId) : ''
   const agentId = route.get('agent_id')
+  const settingsTab = route.get('tab') || 'general'
+  const settingsPluginId = (route.get('pluginId') || route.get('plugin') || '').trim() || undefined
   const disconnectedRoute = useAstrorderStore(state =>
-    !isGroupRoute && Boolean(sessionId) && isDisconnectedSessionRoute(state, sessionId, agentId),
+    !isNonChatRoute && Boolean(sessionId) && isDisconnectedSessionRoute(state, sessionId, agentId),
   )
   const rawSessionsMap = useAstrorderStore(state => state.sessions)
-  const selected = !isGroupRoute
+  const selected = !isNonChatRoute
     ? (navigableSessions.find(s => s.id === sessionId && s.agent_id === agentId)
       || (sessionId && agentId && !disconnectedRoute ? rawSessionsMap[scopeKey(agentId, sessionId)] || null : null))
     : null
+  const isOfficeProfile = useIsOfficeProfile()
+  const isOfficeMode = useIsOfficeExperience(selected)
+  useEffect(() => { void usePluginSettingsStore.getState().hydrate() }, [])
+  const extensionRegistryVersion = useExtensionRegistryVersion()
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
+  const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
+  const agentAccountsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
+  const analyticsGatewayPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
+  const integrationsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(SIDEBAR_INTEGRATIONS_PLUGIN_ID))
+  const blackboardPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
+  const browserPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BROWSER_VIEWER_PLUGIN_ID))
+  const hasDatabaseTool = useHasDatabaseTool()
+  const activeExtensionPages = useMemo(() => {
+    void extensionRegistryVersion
+    return extensionRegistry.getActivePages({
+      isOfficeMode,
+      enabledPlugins,
+    })
+  }, [enabledPlugins, extensionRegistryVersion, isOfficeMode])
+  const groupsPage = activeExtensionPages.find((page) => page.id === 'groups')
+  const learningPage = activeExtensionPages.find((page) => page.id === 'learning')
+  const analyticsPage = activeExtensionPages.find((page) => page.id === 'analytics')
+  const backupsPage = activeExtensionPages.find((page) => page.id === 'backups')
+  const meetingsPage = activeExtensionPages.find((page) => page.id === 'meetings')
+  const digestPage = activeExtensionPages.find((page) => page.id === 'digest')
+  const extensionsHydrated = useExtensionStore((s) => s.hydrated)
+  const extensionsError = useExtensionStore((s) => s.error)
+  const routeExtPluginItem = useExtensionStore((s) =>
+    routeExtPluginId ? s.items.find((item) => item.id === routeExtPluginId) : undefined,
+  )
+  const routeExtEsmState = useExtensionStore((s) =>
+    routeExtPluginId ? s.esmStates[routeExtPluginId] : undefined,
+  )
+  const matchedExtPage = useMemo(() => {
+    void extensionRegistryVersion
+    if (!isExtPageRoute || !routeExtPluginId || !routeExtPageId) return undefined
+    return extensionRegistry.getPageById(routeExtPluginId, routeExtPageId)
+  }, [extensionRegistryVersion, isExtPageRoute, routeExtPageId, routeExtPluginId])
+  const effectiveExtPage =
+    matchedExtPage &&
+    enabledPlugins[matchedExtPage.pluginId] !== false &&
+    !(isOfficeMode && matchedExtPage.hideInOfficeMode)
+      ? matchedExtPage
+      : undefined
+  const routeExtManifestPage = routeExtPluginItem?.contributes?.pages?.find(
+    (entry) => entry.id === routeExtPageId,
+  )
+  const routeExtBlockedByOfficeManifest =
+    isOfficeMode && Boolean(routeExtManifestPage?.hide_in_office_mode)
+  const isRouteExtEligibleEsm = Boolean(
+    routeExtPluginItem &&
+    routeExtPluginItem.frontend?.mode === 'esm' &&
+    routeExtPluginItem.enabled &&
+    routeExtPluginItem.permissions_granted !== false &&
+    !(routeExtPluginItem.pending_permissions && routeExtPluginItem.pending_permissions.length > 0) &&
+    enabledPlugins[routeExtPluginItem.id] !== false &&
+    !routeExtBlockedByOfficeManifest,
+  )
+  const isRouteExtSettled =
+    routeExtEsmState?.status === 'loaded' || routeExtEsmState?.status === 'error'
+  const isExtPagePending = Boolean(
+    isExtPageRoute &&
+    !matchedExtPage &&
+    ((!extensionsHydrated && !extensionsError) || (isRouteExtEligibleEsm && !isRouteExtSettled)),
+  )
+  const dynamicMobilePages = useMemo(
+    () =>
+      activeExtensionPages.filter(
+        (page) => page.source !== 'builtin' && page.showInMobileApps !== false,
+      ),
+    [activeExtensionPages],
+  )
+  const meetingsPluginEnabled = Boolean(meetingsPage)
+  const digestPluginEnabled = Boolean(digestPage)
+  const showLearningEntry = Boolean(learningPage)
+  const showGroupsEntry = Boolean(groupsPage)
+  const showBotsEntry = !isOfficeMode
+  const showAnalyticsEntry = Boolean(analyticsPage)
+  const showBackupsEntry = Boolean(backupsPage)
+  const showIntegrationsEntry = integrationsPluginEnabled
+  const effectiveGroupRoute = isGroupRoute && showGroupsEntry
+  const effectiveLearningRoute = isLearningRoute && showLearningEntry
+  const effectiveBotsRoute = isBotsRoute && showBotsEntry
+  const effectiveAnalyticsRoute = isAnalyticsRoute && showAnalyticsEntry
+  const effectiveBackupsRoute = isBackupsRoute && showBackupsEntry
+  const effectiveMeetingsRoute = isMeetingsRoute && meetingsPluginEnabled
+  const effectiveDigestRoute = isDigestRoute && digestPluginEnabled
+  const effectiveInboxRoute = isInboxRoute
+  const effectivePluginsRoute = isPluginsRoute
+  const effectiveSettingsRoute = isSettingsRoute
+  const effectiveIntegrationRoute = isIntegrationRoute && showIntegrationsEntry
+  const effectiveExtPageRoute = isExtPageRoute && Boolean(effectiveExtPage)
+  const effectiveHomeRoute = isHomeRoute && isOfficeMode
+  const isOfficeHomeView = isOfficeMode && (effectiveHomeRoute || (!isNonChatRoute && !selected))
+  const isModuleRoute =
+    effectiveInboxRoute ||
+    effectiveMeetingsRoute ||
+    effectiveDigestRoute ||
+    effectiveBotsRoute ||
+    effectiveAnalyticsRoute ||
+    effectiveBackupsRoute ||
+    effectivePluginsRoute ||
+    effectiveSettingsRoute ||
+    effectiveIntegrationRoute ||
+    effectiveExtPageRoute ||
+    isExtPagePending
+  const isBlockedRoute =
+    (isGroupRoute && !effectiveGroupRoute) ||
+    (isLearningRoute && !effectiveLearningRoute) ||
+    (isBotsRoute && !effectiveBotsRoute) ||
+    (isAnalyticsRoute && !effectiveAnalyticsRoute) ||
+    (isBackupsRoute && !effectiveBackupsRoute) ||
+    (isMeetingsRoute && !effectiveMeetingsRoute) ||
+    (isDigestRoute && !effectiveDigestRoute) ||
+    (isIntegrationRoute && !effectiveIntegrationRoute) ||
+    (isExtPageRoute && !effectiveExtPageRoute && !isExtPagePending) ||
+    (isHomeRoute && !effectiveHomeRoute)
+  const activeOfficePage: 'home' | 'chat' | 'inbox' | 'meetings' | 'digest' | null =
+    isOfficeHomeView
+      ? 'home'
+      : effectiveInboxRoute
+        ? 'inbox'
+        : effectiveMeetingsRoute
+          ? 'meetings'
+          : effectiveDigestRoute
+            ? 'digest'
+            : (!isNonChatRoute && selected)
+              ? 'chat'
+              : null
   const { isUnread, markRead } = useSessionUnread(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
   const { totalCount: inboxTotalCount, urgentCount: inboxUrgentCount } = useActionInbox(selected ? scopeKey(selected.agent_id, selected.id) : undefined)
-  const [sheet, setSheet] = useState<'sessions' | 'inbox' | 'checkpoints' | 'status' | 'goal' | 'tasks' | 'task' | 'swarm' | 'schedules' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
+  const [sheet, setSheet] = useState<'sessions' | 'apps' | 'inbox' | 'checkpoints' | 'status' | 'goal' | 'tasks' | 'task' | 'swarm' | 'schedules' | 'models' | 'connections' | 'accounts' | 'gateway' | 'blackboard' | 'browser' | 'kernels' | null>(() =>
     location.pathname.startsWith('/agent-accounts') || location.pathname.startsWith('/mobile/agent-accounts') ? 'accounts' : null,
   )
-  const [drawerTab, setDrawerTab] = useState<'sessions' | 'groups'>(() => (isGroupRoute ? 'groups' : 'sessions'))
+  const integrationItems = useIntegrationsStore((s) => s.items)
+  useEffect(() => {
+    if (showIntegrationsEntry && (effectiveIntegrationRoute || sheet === 'apps')) {
+      void useIntegrationsStore.getState().hydrate()
+    }
+  }, [effectiveIntegrationRoute, sheet, showIntegrationsEntry])
+  const activeIntegration = routeIntegrationId ? integrationItems.find((entry) => entry.id === routeIntegrationId) : undefined
+  const activeIntegrationTitle = useMemo(() => {
+    if (!activeIntegration) return '外链集成'
+    const clean = activeIntegration.name.trim()
+    if (clean) return clean
+    try {
+      return new URL(activeIntegration.url).hostname || activeIntegration.url
+    } catch {
+      return activeIntegration.url
+    }
+  }, [activeIntegration])
+  const [databaseTarget, setDatabaseTarget] = useState<ProjectGroup | null>(null)
+  const lastChatRef = useRef<{ agentId: string; sessionId: string } | null>(null)
+  useEffect(() => {
+    if (selected) {
+      lastChatRef.current = { agentId: selected.agent_id, sessionId: selected.id }
+    }
+  }, [selected])
+  useEffect(() => {
+    const onOpenSettings = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: string; pluginId?: string }>).detail
+      const params = new URLSearchParams()
+      if (detail?.tab) params.set('tab', detail.tab)
+      if (detail?.pluginId) params.set('pluginId', detail.pluginId)
+      const qs = params.toString()
+      setSheet(null)
+      navigate(mobileUrl(qs ? `/mobile/settings?${qs}` : '/mobile/settings'))
+    }
+    window.addEventListener('astrorder:open-settings', onOpenSettings)
+    return () => window.removeEventListener('astrorder:open-settings', onOpenSettings)
+  }, [mobileUrl, navigate])
+  const [drawerTab, setDrawerTab] = useState<'sessions' | 'groups'>(() => (effectiveGroupRoute ? 'groups' : 'sessions'))
   const [groupSearch, setGroupSearch] = useState('')
   const [createGroupOpened, setCreateGroupOpened] = useState(false)
   const storeGroups = useAstrorderStore(state => state.botGroups)
@@ -259,7 +519,7 @@ export function MobileWorkspace() {
         return { items: [] as BotGroup[], count: 0 }
       }
     },
-    enabled: isGroupRoute || sheet === 'sessions',
+    enabled: !isOfficeMode && (effectiveGroupRoute || (sheet === 'sessions' && showGroupsEntry)),
     staleTime: 10000,
     retry: false,
   })
@@ -282,21 +542,31 @@ export function MobileWorkspace() {
     })
   }, [queryClient])
   const openDrawer = useCallback((tab?: 'sessions' | 'groups') => {
-    const nextTab = tab ?? (isGroupRoute ? 'groups' : 'sessions')
+    const requestedTab = tab ?? (effectiveGroupRoute ? 'groups' : 'sessions')
+    const nextTab = showGroupsEntry ? requestedTab : 'sessions'
     setDrawerTab(nextTab)
     setSheet('sessions')
     if (nextTab === 'groups') void botGroupsQuery.refetch()
     else void openState.refetch()
-  }, [isGroupRoute, botGroupsQuery, openState])
+  }, [effectiveGroupRoute, showGroupsEntry, botGroupsQuery, openState])
   const selectGroup = (group: BotGroup) => {
-    navigate(`/mobile/groups/${encodeURIComponent(group.id)}`, { replace: true })
+    if (!showGroupsEntry) return
+    navigate(mobileUrl(`/mobile/groups/${encodeURIComponent(group.id)}`), { replace: true })
     setSheet(null)
   }
   useEffect(() => {
     if (sheet !== 'sessions') {
-      setDrawerTab(isGroupRoute ? 'groups' : 'sessions')
+      setDrawerTab(effectiveGroupRoute ? 'groups' : 'sessions')
     }
-  }, [isGroupRoute, sheet])
+  }, [effectiveGroupRoute, sheet])
+  useEffect(() => {
+    if (!isOfficeMode) return
+    if (drawerTab === 'groups') setDrawerTab('sessions')
+    setDatabaseTarget(null)
+    if (sheet && ['kernels', 'gateway', 'swarm', 'checkpoints', 'blackboard', 'goal', 'tasks', 'schedules', 'accounts', 'connections'].includes(sheet)) {
+      setSheet(null)
+    }
+  }, [isOfficeMode, drawerTab, sheet])
   const [workbenchMounted, setWorkbenchMounted] = useState(false)
   const [workbenchOpened, setWorkbenchOpened] = useState(false)
   const closeWorkbench = useCallback(() => setWorkbenchOpened(false), [])
@@ -316,26 +586,67 @@ export function MobileWorkspace() {
     const inferred: SessionCardCut = nextIndex >= 0 && currentIndex >= 0 && nextIndex < currentIndex ? 'previous-up' : 'next-down'
     setSessionDrag(null)
     setSessionTransition(transition || inferred)
-    navigate(`/mobile/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`, { replace: true })
+    navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(session.id)}?agent_id=${encodeURIComponent(session.agent_id)}`), { replace: true })
     setSheet(null)
   }
+  const openSessionById = (aid: string, sid: string) => {
+    const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
+      || sessions.find(s => s.agent_id === aid && s.id === sid)
+    if (target) {
+      select(target)
+    } else {
+      navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`), { replace: true })
+      setSheet(null)
+    }
+  }
+  const returnToChat = useCallback(() => {
+    setSheet(null)
+    const remembered = lastChatRef.current
+      ? sessions.find((s) => s.agent_id === lastChatRef.current?.agentId && s.id === lastChatRef.current?.sessionId)
+      : undefined
+    const next = remembered || sessions[0]
+    if (next) {
+      navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`), { replace: true })
+    } else if (isOfficeMode) {
+      navigate(mobileUrl('/mobile/home'), { replace: true })
+    } else {
+      navigate(mobileUrl('/mobile'), { replace: true })
+    }
+  }, [isOfficeMode, mobileUrl, navigate, sessions])
+  const openChatFromOfficeNav = () => {
+    setSheet(null)
+    if (!isNonChatRoute && selected) return
+    returnToChat()
+  }
   useEffect(() => {
-    if (isGroupRoute || isLearningRoute) return
+    if (isBlockedRoute) {
+      const next = sessions[0]
+      if (next) {
+        navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`), { replace: true })
+      } else {
+        navigate(mobileUrl(isOfficeMode ? '/mobile/home' : '/mobile'), { replace: true })
+      }
+      return
+    }
+    if (isNonChatRoute) return
     if (routeId && !disconnectedRoute) return
+    if (isOfficeMode) {
+      if (disconnectedRoute) navigate(mobileUrl('/mobile/home'), { replace: true })
+      return
+    }
     const next = sessions[0]
-    if (next) navigate(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`, { replace: true })
-    else if (disconnectedRoute) navigate('/mobile', { replace: true })
-  }, [isGroupRoute, isLearningRoute, routeId, disconnectedRoute, sessions, navigate])
+    if (next) navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`), { replace: true })
+    else if (disconnectedRoute) navigate(mobileUrl('/mobile'), { replace: true })
+  }, [isBlockedRoute, isOfficeMode, isNonChatRoute, routeId, disconnectedRoute, sessions, navigate, mobileUrl])
   const resources = useSessionResources(selected, true)
   const sessionModel = useSessionModel(selected)
   const userIdle = useUserIdle()
-  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected), retry: false, staleTime: 5000, refetchIntervalInBackground: false, refetchInterval: !userIdle && selected?.status === 'running' ? 3000 : false })
+  const sessionUsage = useQuery({ queryKey: ['astrorder', 'session_usage', selected?.id, selected?.agent_id], queryFn: () => api.getSessionUsage(selected!.id, selected!.agent_id), enabled: Boolean(selected) && !isOfficeMode, retry: false, staleTime: 5000, refetchIntervalInBackground: false, refetchInterval: !userIdle && selected?.status === 'running' ? 3000 : false })
   const readOnly = selected?.control_state === 'readonly' || sessionModel.data?.read_only === true
   const selectedAgent = selected ? agents[selected.agent_id] : undefined
   const isAntigravity = selectedAgent?.kind === 'antigravity' || selectedAgent?.kind === 'antigravity-ssh'
-  const sessionSwarm = useSessionSwarm(selected, selectedAgent, sheet === 'swarm')
-  const sessionSchedules = useSessionSchedules(selected)
-  const isOfficeMode = useIsSessionOfficeMode(selected)
+  const sessionSwarm = useSessionSwarm(selected, selectedAgent, !isOfficeMode && sheet === 'swarm')
+  const sessionSchedules = useSessionSchedules(isOfficeMode ? null : selected)
   const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace) && !isOfficeMode)
   const enabledSchedules = useMemo(
     () => (sessionSchedules.data || []).filter((item) => item.enabled),
@@ -355,7 +666,7 @@ export function MobileWorkspace() {
   const activeWorktreeState = useSessionActiveWorktree({
     session: selected,
     messages,
-    enabled: !isOfficeMode && !isGroupRoute && !isLearningRoute,
+    enabled: !isOfficeMode && !isNonChatRoute,
   })
   const viewSession = activeWorktreeState.effectiveSession ?? selected
   const tasks = useAstrorderStore(useShallow(state => selected ? selectTasks(state, selected.agent_id, selected.id) : []))
@@ -416,15 +727,6 @@ export function MobileWorkspace() {
   const { draft, setDraft } = usePersistentDraft(selected?.agent_id || '', selected?.id || '')
   const text = draft.text
   const activeAccent = useAccentColor()
-  useEffect(() => { void usePluginSettingsStore.getState().hydrate() }, [])
-  const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
-  const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
-  const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
-  const learningPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
-  const agentAccountsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
-  const analyticsGatewayPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
-  const blackboardPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
-  const browserPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BROWSER_VIEWER_PLUGIN_ID))
   const voice = useVoiceInput(key, (transcript, event) => {
     if (event.kind === 'final' && event.submit) {
       void send(transcript)
@@ -494,7 +796,7 @@ export function MobileWorkspace() {
       transcript.style.removeProperty('padding-bottom')
       transcript.style.removeProperty('scroll-padding-bottom')
     }
-  }, [key, isGroupRoute])
+  }, [key, isNonChatRoute, isOfficeHomeView])
   useLayoutEffect(() => {
     const input = textarea.current
     if (!input) return
@@ -1154,7 +1456,7 @@ export function MobileWorkspace() {
   }
   const handleWorkspaceTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     const point = event.touches[0]
-    if (!point || sheet || workbenchOpened || isLearningRoute) return
+    if (!point || sheet || workbenchOpened || effectiveLearningRoute) return
     if (!startsAtSessionDrawerEdge(point.clientX)) { edgeTouch.current = null; return }
     edgeTouch.current = { x: point.clientX, y: point.clientY }
   }
@@ -1191,10 +1493,10 @@ export function MobileWorkspace() {
         const next = (prev?.items || []).filter((item) => item.id !== group.id)
         return { items: next, count: next.length }
       })
-      if (isGroupRoute && routeGroupId === group.id) {
+      if (effectiveGroupRoute && routeGroupId === group.id) {
         const remaining = botGroupList.filter((item) => item.id !== group.id)
-        if (remaining.length > 0) navigate(`/mobile/groups/${encodeURIComponent(remaining[0].id)}`, { replace: true })
-        else navigate('/mobile/groups', { replace: true })
+        if (remaining.length > 0) navigate(mobileUrl(`/mobile/groups/${encodeURIComponent(remaining[0].id)}`), { replace: true })
+        else navigate(mobileUrl('/mobile/groups'), { replace: true })
       }
       notify(`已解散群聊“${group.name}”`)
     } catch (err) {
@@ -1244,35 +1546,173 @@ export function MobileWorkspace() {
       || null
   }
 
-  return <AgyQuotaRefreshProvider sessionEnvironment={accountTarget?.environment ?? ''} sessionPlatform={accountTarget?.platform ?? 'antigravity'}><div ref={workspaceRef} className={`mobile-workspace${isGroupRoute ? ' m-groups-workspace' : ''}`} data-mobile-shell="independent" data-mobile-mode={isGroupRoute ? 'groups' : 'sessions'} data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
+  const handleToggleAppProfile = () => {
+    const nextProfile = isOfficeProfile ? 'developer' : 'office'
+    setAppProfile(nextProfile)
+    setSheet(null)
+    notify(nextProfile === 'office' ? '已切换至办公模式' : '已切换至研发模式', 'teal')
+  }
+
+  const openModuleRoute = (path: string) => {
+    setSheet(null)
+    navigate(mobileUrl(path), { replace: true })
+  }
+
+  const pageHeaderMeta = effectiveGroupRoute
+    ? { title: selectedGroup ? selectedGroup.name : '群聊', ariaLabel: selectedGroup ? `当前群聊 ${selectedGroup.name}，打开群聊列表` : '群聊列表', drawerTab: 'groups' as const }
+    : isOfficeHomeView
+      ? { title: '办公首页', ariaLabel: '办公首页，打开会话列表', drawerTab: 'sessions' as const }
+      : effectiveInboxRoute
+        ? { title: '待办', ariaLabel: '待办中心，打开会话列表', drawerTab: 'sessions' as const }
+        : effectiveMeetingsRoute
+          ? { title: '会议', ariaLabel: '会议记录，打开会话列表', drawerTab: 'sessions' as const }
+          : effectiveDigestRoute
+            ? { title: '复盘', ariaLabel: '工作复盘，打开会话列表', drawerTab: 'sessions' as const }
+            : effectiveBotsRoute
+              ? { title: 'Bot 工作室', ariaLabel: 'Bot 工作室，打开会话列表', drawerTab: 'sessions' as const }
+              : effectiveAnalyticsRoute
+                ? { title: '用量统计', ariaLabel: '用量统计，打开会话列表', drawerTab: 'sessions' as const }
+                : effectiveBackupsRoute
+                  ? { title: '备份同步', ariaLabel: '备份同步，打开会话列表', drawerTab: 'sessions' as const }
+                  : effectivePluginsRoute
+                    ? { title: '功能与插件', ariaLabel: '功能与插件，打开会话列表', drawerTab: 'sessions' as const }
+                    : effectiveSettingsRoute
+                      ? { title: '设置', ariaLabel: '设置，打开会话列表', drawerTab: 'sessions' as const }
+                      : effectiveIntegrationRoute
+                        ? { title: activeIntegrationTitle, ariaLabel: `${activeIntegrationTitle}，打开会话列表`, drawerTab: 'sessions' as const }
+                        : effectiveExtPage
+                          ? {
+                              title: effectiveExtPage.mobileHeaderTitle || effectiveExtPage.mobileLabel || effectiveExtPage.title,
+                              ariaLabel: effectiveExtPage.mobileHeaderAriaLabel || `${effectiveExtPage.mobileLabel || effectiveExtPage.title}，打开会话列表`,
+                              drawerTab: 'sessions' as const,
+                            }
+                          : isExtPagePending
+                            ? {
+                                title: routeExtPluginItem?.name || '正在加载扩展…',
+                                ariaLabel: `${routeExtPluginItem?.name || '扩展页面'}，打开会话列表`,
+                                drawerTab: 'sessions' as const,
+                              }
+                            : null
+
+  const mobileModeAttr = effectiveGroupRoute
+    ? 'groups'
+    : isOfficeHomeView
+      ? 'home'
+      : effectiveInboxRoute
+        ? 'inbox'
+        : effectiveMeetingsRoute
+          ? 'meetings'
+          : effectiveDigestRoute
+            ? 'digest'
+            : effectiveBotsRoute
+              ? 'bots'
+              : effectiveAnalyticsRoute
+                ? 'analytics'
+                : effectiveBackupsRoute
+                  ? 'backups'
+                  : effectivePluginsRoute
+                    ? 'plugins'
+                    : effectiveSettingsRoute
+                      ? 'settings'
+                      : effectiveIntegrationRoute
+                        ? 'integration'
+                        : effectiveExtPageRoute || isExtPagePending
+                          ? 'ext-page'
+                          : 'sessions'
+
+  const appNavItems: Array<{
+    id: string
+    label: string
+    icon: ReactNode
+    active: boolean
+    badge?: number
+    urgent?: boolean
+    onSelect: () => void
+  }> = [
+    ...(isOfficeMode
+      ? [{ id: 'home', label: '办公首页', icon: <IconHome size={20} />, active: isOfficeHomeView, onSelect: () => openModuleRoute('/mobile/home') }]
+      : []),
+    { id: 'chat', label: '对话', icon: <IconMessageCircle size={20} />, active: !isNonChatRoute && !isOfficeHomeView, onSelect: returnToChat },
+    { id: 'inbox', label: '待办', icon: <IconInbox size={20} />, active: effectiveInboxRoute, badge: inboxTotalCount, urgent: inboxUrgentCount > 0, onSelect: () => openModuleRoute('/mobile/inbox') },
+    ...(meetingsPluginEnabled
+      ? [{ id: 'meetings', label: '会议', icon: <IconMicrophone size={20} />, active: effectiveMeetingsRoute, onSelect: () => openModuleRoute('/mobile/meetings') }]
+      : []),
+    ...(digestPluginEnabled
+      ? [{ id: 'digest', label: '复盘', icon: <IconNotebook size={20} />, active: effectiveDigestRoute, onSelect: () => openModuleRoute('/mobile/digest') }]
+      : []),
+    ...(showGroupsEntry
+      ? [{ id: 'groups', label: '群聊', icon: <IconUsers size={20} />, active: effectiveGroupRoute, onSelect: () => openModuleRoute('/mobile/groups') }]
+      : []),
+    ...(showBotsEntry
+      ? [{ id: 'bots', label: 'Bot 工作室', icon: <IconRobot size={20} />, active: effectiveBotsRoute, onSelect: () => openModuleRoute('/mobile/bots') }]
+      : []),
+    ...(showLearningEntry
+      ? [{ id: 'learning', label: '成长雷达', icon: <IconCompass size={20} />, active: effectiveLearningRoute, onSelect: () => { setSheet(null); navigate(mobileUrl('/mobile/learning')) } }]
+      : []),
+    ...(showAnalyticsEntry
+      ? [{ id: 'analytics', label: '用量统计', icon: <IconChartBar size={20} />, active: effectiveAnalyticsRoute, onSelect: () => openModuleRoute('/mobile/analytics') }]
+      : []),
+    ...(showBackupsEntry
+      ? [{ id: 'backups', label: '备份同步', icon: <IconArchive size={20} />, active: effectiveBackupsRoute, onSelect: () => openModuleRoute('/mobile/backups') }]
+      : []),
+    ...dynamicMobilePages.map((page) => {
+      const PageIcon = page.mobileIcon || page.icon
+      return {
+        id: `ext-page:${page.pluginId}:${page.id}`,
+        label: page.mobileLabel || page.title,
+        icon: PageIcon ? <PageIcon size={20} /> : <IconPuzzle size={20} />,
+        active:
+          effectiveExtPageRoute &&
+          effectiveExtPage?.pluginId === page.pluginId &&
+          effectiveExtPage?.id === page.id,
+        onSelect: () => openModuleRoute(resolveExtensionPageMobilePath(page)),
+      }
+    }),
+    { id: 'plugins', label: '功能与插件', icon: <IconPuzzle size={20} />, active: effectivePluginsRoute, onSelect: () => openModuleRoute('/mobile/plugins') },
+    { id: 'settings', label: '设置', icon: <IconSettings size={20} />, active: effectiveSettingsRoute, onSelect: () => openModuleRoute('/mobile/settings') },
+  ]
+
+  return <AgyQuotaRefreshProvider sessionEnvironment={accountTarget?.environment ?? ''} sessionPlatform={accountTarget?.platform ?? 'antigravity'}><div ref={workspaceRef} className={`mobile-workspace${effectiveGroupRoute ? ' m-groups-workspace' : ''}`} data-mobile-shell="independent" data-mobile-mode={mobileModeAttr} data-office-mode={isOfficeMode ? 'true' : undefined} data-sheet={sheet || undefined} data-queue-drop={queueLift?.zone || undefined} onContextMenuCapture={(event) => suppressNativeHold(event.nativeEvent)} onTouchStartCapture={handleWorkspaceTouchStart} onTouchMoveCapture={handleWorkspaceTouchMove} onTouchEndCapture={handleWorkspaceTouchEnd} onTouchCancelCapture={() => { edgeTouch.current = null }}>
     {addProjectOpened && <AddProjectModal opened={addProjectOpened} onClose={() => setAddProjectOpened(false)} agents={agents} />}
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
-    {createGroupOpened && <CreateBotGroupDialog agents={agents} opened={createGroupOpened} onClose={() => setCreateGroupOpened(false)} onCreated={created => { upsertGroupInCache(created); setCreateGroupOpened(false); setGroupSearch(''); selectGroup(created) }} />}
-    {!(isLearningRoute && learningPluginEnabled) && <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label={isGroupRoute ? '打开群聊列表' : '打开会话列表'} onClick={() => openDrawer()}>{isGroupRoute ? <IconUsers size={21} /> : <IconMessageCircle size={21} />}</button>{isGroupRoute ? <button type="button" className="m-brand-home-btn is-project" onClick={() => openDrawer('groups')} aria-label={selectedGroup ? `当前群聊 ${selectedGroup.name}，打开群聊列表` : '群聊列表'} title={selectedGroup?.name || '群聊'}><strong>{selectedGroup ? selectedGroup.name : '群聊'}</strong></button> : <button type="button" className={`m-brand-home-btn${headerProjectName ? ' is-project' : ''}`} onClick={() => openDrawer('sessions')} aria-label={headerProjectName ? `当前项目 ${headerProjectName}，打开会话列表` : '星序导航'} title={headerProjectName || undefined}>{headerProjectName ? <strong>{headerProjectName}</strong> : <><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></>}</button>}<span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
-      {learningPluginEnabled && (
-        <button className="m-learning-trigger" aria-label="成长雷达知识流" onClick={() => navigate('/mobile/learning')}>
-          <IconCompass size={20} />
+    {!isOfficeMode && createGroupOpened && <CreateBotGroupDialog agents={agents} opened={createGroupOpened} onClose={() => setCreateGroupOpened(false)} onCreated={created => { upsertGroupInCache(created); setCreateGroupOpened(false); setGroupSearch(''); selectGroup(created) }} />}
+    {!effectiveLearningRoute && <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label={effectiveGroupRoute ? '打开群聊列表' : '打开会话列表'} onClick={() => openDrawer()}>{effectiveGroupRoute ? <IconUsers size={21} /> : <IconMessageCircle size={21} />}</button>{pageHeaderMeta ? <button type="button" className="m-brand-home-btn is-project" onClick={() => openDrawer(pageHeaderMeta.drawerTab)} aria-label={pageHeaderMeta.ariaLabel} title={pageHeaderMeta.title}><strong>{pageHeaderMeta.title}</strong></button> : <button type="button" className={`m-brand-home-btn${headerProjectName ? ' is-project' : ''}`} onClick={() => openDrawer('sessions')} aria-label={headerProjectName ? `当前项目 ${headerProjectName}，打开会话列表` : '星序导航'} title={headerProjectName || undefined}>{headerProjectName ? <strong>{headerProjectName}</strong> : <><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></>}</button>}<span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+      {isModuleRoute && (
+        <button type="button" className="m-return-chat-btn" aria-label="返回对话" onClick={returnToChat}>
+          <IconMessageCircle size={17} aria-hidden="true" />
+          <span>对话</span>
         </button>
       )}
-      <button className="m-inbox-trigger" aria-label={inboxTotalCount > 0 ? `待办收件箱，${inboxTotalCount} 项待处理` : '待办收件箱'} onClick={() => setSheet('inbox')}>
-        <IconInbox size={20} />
-        {inboxTotalCount > 0 && <span className={`m-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">{inboxTotalCount > 99 ? '99+' : inboxTotalCount}</span>}
+      <button type="button" className="m-apps-trigger" aria-label="工作台导航" onClick={() => setSheet('apps')}>
+        <IconLayoutGrid size={20} />
       </button>
-      {isGroupRoute
+      {!isModuleRoute && (
+        <button className="m-inbox-trigger" aria-label={inboxTotalCount > 0 ? `待办收件箱，${inboxTotalCount} 项待处理` : '待办收件箱'} onClick={() => { if (isOfficeMode) { openModuleRoute('/mobile/inbox') } else { setSheet('inbox') } }}>
+          <IconInbox size={20} />
+          {inboxTotalCount > 0 && <span className={`m-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">{inboxTotalCount > 99 ? '99+' : inboxTotalCount}</span>}
+        </button>
+      )}
+      {!isModuleRoute && showGroupsEntry && (effectiveGroupRoute
         ? <button aria-label="对话" onClick={() => openDrawer('sessions')}><IconMessageCircle size={20} /></button>
-        : <button aria-label="群聊" onClick={() => openDrawer('groups')}><IconUsers size={20} /></button>}
-      {isGroupRoute
+        : <button aria-label="群聊" onClick={() => openDrawer('groups')}><IconUsers size={20} /></button>)}
+      {effectiveGroupRoute
         ? <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={21} /></button>
         : <button aria-label="新建会话" onClick={() => { setCreateProject(resolveCurrentProject()); setCreateOpened(true) }}><IconPlus size={21} /></button>}
-      <Menu position="bottom-end" width={210} withinPortal>
+      <Menu position="bottom-end" width={220} withinPortal hideDetached={false}>
         <Menu.Target><button aria-label="应用设置"><IconDotsVertical size={21} /></button></Menu.Target>
         <Menu.Dropdown>
           <Menu.Label>星序</Menu.Label>
+          <Menu.Item leftSection={<IconLayoutGrid size={17} />} onClick={() => setSheet('apps')}>工作台导航</Menu.Item>
+          <Menu.Item leftSection={isOfficeProfile ? <IconCode size={17} /> : <IconBriefcase size={17} />} onClick={handleToggleAppProfile}>{isOfficeProfile ? '切换至研发模式' : '切换至办公模式'}</Menu.Item>
+          <Menu.Item leftSection={<IconSparkles size={17} />} onClick={() => openOnboardingWizard()}>AI 快速配置向导</Menu.Item>
+          <Menu.Item leftSection={<IconSettings size={17} />} onClick={() => openModuleRoute('/mobile/settings')}>应用设置</Menu.Item>
+          <Menu.Item leftSection={<IconPuzzle size={17} />} onClick={() => openModuleRoute('/mobile/plugins')}>功能与插件</Menu.Item>
+          <Menu.Divider />
           <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={() => navigate('/auth/qr/scan')}>扫码登录电脑</Menu.Item>
-          <Menu.Item leftSection={<IconCpu size={17} />} onClick={() => setSheet('kernels')}>内核管理</Menu.Item>
-          {agentAccountsPluginEnabled && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
-          <Menu.Item leftSection={<IconPlugConnected size={17} />} onClick={() => setSheet('connections')}>连接管理</Menu.Item>
-          {analyticsGatewayPluginEnabled && <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>}
+          {!isOfficeMode && <Menu.Item leftSection={<IconCpu size={17} />} onClick={() => setSheet('kernels')}>内核管理</Menu.Item>}
+          {!isOfficeMode && agentAccountsPluginEnabled && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
+          {!isOfficeMode && <Menu.Item leftSection={<IconPlugConnected size={17} />} onClick={() => setSheet('connections')}>连接管理</Menu.Item>}
+          {!isOfficeMode && analyticsGatewayPluginEnabled && <Menu.Item leftSection={<IconCloudDataConnection size={17} />} onClick={() => setSheet('gateway')}>模型网关</Menu.Item>}
           <Menu.Item leftSection={colorScheme === 'auto' ? <IconDeviceDesktop size={17} /> : colorScheme === 'light' ? <IconSun size={17} /> : <IconMoon size={17} />} onClick={() => setColorScheme(colorScheme === 'auto' ? 'light' : colorScheme === 'light' ? 'dark' : 'auto')}>切换主题</Menu.Item>
           <Menu.Item leftSection={<IconRefresh size={17} />} onClick={() => void refresh()}>刷新</Menu.Item>
           <Menu.Divider />
@@ -1281,9 +1721,155 @@ export function MobileWorkspace() {
         </Menu.Dropdown>
       </Menu>
     </div></header>}
-    {isGroupRoute ? (
+    {isOfficeMode && !effectiveLearningRoute && (
+      <nav className="m-office-nav" aria-label="办公导航">
+        <button
+          type="button"
+          className={`m-office-nav-btn${activeOfficePage === 'home' ? ' is-active' : ''}`}
+          aria-current={activeOfficePage === 'home' ? 'page' : undefined}
+          onClick={() => openModuleRoute('/mobile/home')}
+        >
+          <IconHome size={16} aria-hidden="true" />
+          <span>首页</span>
+        </button>
+        <button
+          type="button"
+          className={`m-office-nav-btn${activeOfficePage === 'chat' ? ' is-active' : ''}`}
+          aria-current={activeOfficePage === 'chat' ? 'page' : undefined}
+          onClick={openChatFromOfficeNav}
+        >
+          <IconMessageCircle size={16} aria-hidden="true" />
+          <span>对话</span>
+        </button>
+        <button
+          type="button"
+          className={`m-office-nav-btn${activeOfficePage === 'inbox' ? ' is-active' : ''}`}
+          aria-current={activeOfficePage === 'inbox' ? 'page' : undefined}
+          onClick={() => openModuleRoute('/mobile/inbox')}
+        >
+          <IconInbox size={16} aria-hidden="true" />
+          <span>待办</span>
+          {inboxTotalCount > 0 && (
+            <small className={`m-office-nav-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">
+              {inboxTotalCount > 99 ? '99+' : inboxTotalCount}
+            </small>
+          )}
+        </button>
+        {meetingsPluginEnabled && (
+          <button
+            type="button"
+            className={`m-office-nav-btn${activeOfficePage === 'meetings' ? ' is-active' : ''}`}
+            aria-current={activeOfficePage === 'meetings' ? 'page' : undefined}
+            onClick={() => openModuleRoute('/mobile/meetings')}
+          >
+            <IconMicrophone size={16} aria-hidden="true" />
+            <span>会议</span>
+          </button>
+        )}
+        {digestPluginEnabled && (
+          <button
+            type="button"
+            className={`m-office-nav-btn${activeOfficePage === 'digest' ? ' is-active' : ''}`}
+            aria-current={activeOfficePage === 'digest' ? 'page' : undefined}
+            onClick={() => openModuleRoute('/mobile/digest')}
+          >
+            <IconNotebook size={16} aria-hidden="true" />
+            <span>复盘</span>
+          </button>
+        )}
+      </nav>
+    )}
+    <Suspense fallback={<main className="m-main m-module-page-main"><div className="m-office-page-loading">正在加载页面…</div></main>}>
+    {effectiveGroupRoute ? (
       <main className="m-main m-groups-main">
         <GroupsPage groupId={routeGroupId || undefined} routePrefix="/mobile" surface="mobile" onGroupUpdated={upsertGroupInCache} />
+      </main>
+    ) : effectiveInboxRoute ? (
+      <main className="m-main m-office-page-main">
+        <div className="m-office-page-scroll">
+          <ActionInboxView onOpenSession={openSessionById} />
+        </div>
+      </main>
+    ) : (effectiveMeetingsRoute || effectiveDigestRoute || effectiveBotsRoute || effectiveAnalyticsRoute || effectiveBackupsRoute || effectivePluginsRoute || effectiveSettingsRoute || effectiveIntegrationRoute || effectiveExtPageRoute || isExtPagePending || isOfficeHomeView) ? (
+      <main className={`m-main ${effectiveMeetingsRoute || effectiveDigestRoute || isOfficeHomeView || effectiveExtPage?.mobileLayout === 'office' ? 'm-office-page-main' : 'm-module-page-main'}${effectiveSettingsRoute ? ' m-settings-page-main' : ''}${effectiveIntegrationRoute ? ' m-integration-page-main' : ''}`}>
+          {effectiveMeetingsRoute && meetingsPage ? (
+            <div className="m-office-page-scroll">
+              <PluginErrorBoundary pluginId={meetingsPage.pluginId} pluginName={meetingsPage.title}>
+                <meetingsPage.component pluginId={meetingsPage.pluginId} pageId={meetingsPage.id} surface="mobile" />
+              </PluginErrorBoundary>
+            </div>
+          ) : effectiveDigestRoute && digestPage ? (
+            <div className="m-office-page-scroll">
+              <PluginErrorBoundary pluginId={digestPage.pluginId} pluginName={digestPage.title}>
+                <digestPage.component pluginId={digestPage.pluginId} pageId={digestPage.id} surface="mobile" />
+              </PluginErrorBoundary>
+            </div>
+          ) : effectiveBotsRoute ? (
+            <MobileBotsPage />
+          ) : effectiveAnalyticsRoute && analyticsPage ? (
+            <PluginErrorBoundary pluginId={analyticsPage.pluginId} pluginName={analyticsPage.title}>
+              <analyticsPage.component pluginId={analyticsPage.pluginId} pageId={analyticsPage.id} surface="mobile" />
+            </PluginErrorBoundary>
+          ) : effectiveBackupsRoute && backupsPage ? (
+            <PluginErrorBoundary pluginId={backupsPage.pluginId} pluginName={backupsPage.title}>
+              <backupsPage.component pluginId={backupsPage.pluginId} pageId={backupsPage.id} surface="mobile" />
+            </PluginErrorBoundary>
+          ) : effectiveExtPageRoute && effectiveExtPage ? (() => {
+            const ExtPageComponent = effectiveExtPage.mobileComponent || effectiveExtPage.component
+            const content = (
+              <PluginErrorBoundary
+                pluginId={effectiveExtPage.pluginId}
+                pluginName={effectiveExtPage.title}
+                resetKey={`${effectiveExtPage.pluginId}:${effectiveExtPage.id}:${extensionRegistryVersion}`}
+              >
+                <ExtPageComponent
+                  pluginId={effectiveExtPage.pluginId}
+                  pageId={effectiveExtPage.id}
+                  surface="mobile"
+                />
+              </PluginErrorBoundary>
+            )
+            return effectiveExtPage.mobileLayout === 'office'
+              ? <div className="m-office-page-scroll">{content}</div>
+              : content
+          })() : isExtPagePending ? (
+            <div className="m-office-page-loading" role="status" aria-label="正在加载扩展页面">正在加载扩展页面…</div>
+          ) : effectivePluginsRoute ? (
+            <div className="m-office-page-scroll">
+              <MobilePluginsPage />
+            </div>
+          ) : effectiveSettingsRoute ? (
+            <div className="settings-modal m-settings-shell">
+              <MobileSettingsWorkbench
+                mobile
+                tab={settingsTab}
+                pluginId={settingsPluginId}
+                onTabChange={(nextTab) => {
+                  navigate(mobileUrl(`/mobile/settings?tab=${encodeURIComponent(nextTab)}`), { replace: true })
+                }}
+              />
+            </div>
+          ) : effectiveIntegrationRoute ? (
+            <Routes>
+              <Route path="/integrations/:integrationId" element={<MobileIntegrationPage />} />
+              <Route path="/mobile/integrations/:integrationId" element={<MobileIntegrationPage />} />
+            </Routes>
+          ) : (
+            <MobileOfficeHomeDashboard
+              sessions={sessions}
+              agents={agents}
+              mobile
+              onNewSession={() => {
+                setCreateProject(resolveCurrentProject())
+                setCreateOpened(true)
+              }}
+              onOpenSession={(session) => select(session)}
+              onNavigatePath={(path) => {
+                setSheet(null)
+                navigate(mobileUrl(path))
+              }}
+            />
+          )}
       </main>
     ) : (
       <>
@@ -1295,8 +1881,10 @@ export function MobileWorkspace() {
             <button className="m-model-chip" aria-label="选择会话模型" title={sessionModel.label} onClick={() => void openModels()}>
               <IconCpu size={13} /><span>{mobileModelChipText}</span>
             </button>
-            <button className="m-usage-chip" aria-label="上下文用量" title={`${sessionUsage.data?.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}${sessionUsage.data?.speed && sessionUsage.data.speed > 0 ? ` · ${Number(sessionUsage.data.speed.toFixed(1))} tok/s` : ''}`} onClick={() => setSheet('status')}>{sessionUsage.data ? sessionUsage.data.context_available === false ? '上下文未取得' : sessionUsage.data.context_window > 0 ? `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k / ${(sessionUsage.data.context_window / 1000).toFixed(0)}k` : `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k` : sessionUsage.isError ? '用量暂不可读' : '读取用量…'}</button>
-            {enabledSchedules.length > 0 && (
+            {!isOfficeMode && (
+              <button className="m-usage-chip" aria-label="上下文用量" title={`${sessionUsage.data?.source === 'native_last_request' ? '原生记录的上次请求输入用量' : '当前上下文用量'}${sessionUsage.data?.speed && sessionUsage.data.speed > 0 ? ` · ${Number(sessionUsage.data.speed.toFixed(1))} tok/s` : ''}`} onClick={() => setSheet('status')}>{sessionUsage.data ? sessionUsage.data.context_available === false ? '上下文未取得' : sessionUsage.data.context_window > 0 ? `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k / ${(sessionUsage.data.context_window / 1000).toFixed(0)}k` : `${(sessionUsage.data.last_input_tokens / 1000).toFixed(1)}k` : sessionUsage.isError ? '用量暂不可读' : '读取用量…'}</button>
+            )}
+            {!isOfficeMode && enabledSchedules.length > 0 && (
               <button
                 className="m-sched-chip"
                 aria-label="定时任务"
@@ -1313,20 +1901,20 @@ export function MobileWorkspace() {
           <Menu.Target><button aria-label="会话操作"><IconDotsVertical size={20} /></button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Item disabled={readOnly} leftSection={<IconPlayerPlay size={17} />} onClick={() => void send('继续')}>继续</Menu.Item>
-            <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>
-            {isAntigravity && <Menu.Item leftSection={<IconUsersGroup size={17} />} onClick={() => setSheet('swarm')}>Swarm 团队</Menu.Item>}
-            <Menu.Item leftSection={<IconClock size={17} />} onClick={() => setSheet('schedules')}>定时任务{enabledSchedules.length > 0 ? ` (${enabledSchedules.length})` : ''}</Menu.Item>
-            <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>
-            {goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
+            {!isOfficeMode && <Menu.Item leftSection={<IconInfoCircle size={17} />} onClick={() => setSheet('status')}>运行状态</Menu.Item>}
+            {!isOfficeMode && isAntigravity && <Menu.Item leftSection={<IconUsersGroup size={17} />} onClick={() => setSheet('swarm')}>Swarm 团队</Menu.Item>}
+            {!isOfficeMode && <Menu.Item leftSection={<IconClock size={17} />} onClick={() => setSheet('schedules')}>定时任务{enabledSchedules.length > 0 ? ` (${enabledSchedules.length})` : ''}</Menu.Item>}
+            {!isOfficeMode && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('tasks')}>任务与子代理</Menu.Item>}
+            {!isOfficeMode && goal && <Menu.Item leftSection={<IconNotes size={17} />} onClick={() => setSheet('goal')}>目标管理</Menu.Item>}
             <Menu.Item leftSection={<IconDeviceDesktop size={17} />} onClick={openWorkbench}>工作区</Menu.Item>
             {!isOfficeMode && selected.workspace && <Menu.Item leftSection={<IconHistory size={17} />} onClick={() => { setFocusedCheckpointId(null); setSheet('checkpoints') }}>代码检查点{sessionCheckpoints.items.length > 0 ? ` (${sessionCheckpoints.items.length})` : ''}</Menu.Item>}
-            {agentAccountsPluginEnabled && accountTarget && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
-            {blackboardPluginEnabled && <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>}
-            {browserPluginEnabled && <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>}
+            {!isOfficeMode && agentAccountsPluginEnabled && accountTarget && <Menu.Item leftSection={<IconSwitchHorizontal size={17} />} onClick={() => setSheet('accounts')}>账号切换</Menu.Item>}
+            {!isOfficeMode && blackboardPluginEnabled && <Menu.Item leftSection={<IconChalkboard size={17} />} onClick={() => setSheet('blackboard')}>黑板</Menu.Item>}
+            {!isOfficeMode && browserPluginEnabled && <Menu.Item leftSection={<IconWorld size={17} />} onClick={() => setSheet('browser')}>浏览器镜像</Menu.Item>}
             <Menu.Item leftSection={<IconEdit size={17} />} onClick={() => openRename(selected)}>重命名</Menu.Item>
-            <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>
+            {!isOfficeMode && <Menu.Item leftSection={<IconCopy size={17} />} onClick={() => copySessionId(selected)}>复制 ID</Menu.Item>}
             <Menu.Item disabled={readOnly} leftSection={<IconNotes size={17} />} onClick={() => void send('帮我总结当前会话的最新进展与遗留事项')}>总结进展</Menu.Item>
-            {handoffPeer && (
+            {!isOfficeMode && handoffPeer && (
               <Menu.Item
                 leftSection={<IconTransfer size={17} />}
                 onClick={() => select(handoffPeer.session)}
@@ -1334,7 +1922,7 @@ export function MobileWorkspace() {
                 {handoffPeer.label}
               </Menu.Item>
             )}
-            {selected && handoffTargets(selected).length > 0 && (
+            {!isOfficeMode && selected && handoffTargets(selected).length > 0 && (
               <Menu.Item
                 leftSection={<IconTransfer size={17} />}
                 disabled={selected.status !== 'idle'}
@@ -1349,8 +1937,8 @@ export function MobileWorkspace() {
           </Menu.Dropdown>
         </Menu>
       </div>
-      {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
-      {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
+      {!isOfficeMode && goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
+      {!isOfficeMode && !!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
       {!isOfficeMode && activeWorktreeState.activeWorktree && (
         <button
           type="button"
@@ -1380,7 +1968,7 @@ export function MobileWorkspace() {
       {visibleError && (
         <InlineNotice alert title={parsedGatewayError?.isKnownGatewayIssue ? parsedGatewayError.title : '请求未完成'} onClose={() => { setSessionError(null); setSubmittedCommandId(null) }}>
           <div>{parsedGatewayError?.description || visibleError}</div>
-          {parsedGatewayError?.type === "quota" && (parsedGatewayError.recommendedModel || accountTarget) && selected && (
+          {parsedGatewayError?.type === "quota" && (parsedGatewayError.recommendedModel || (!isOfficeMode && accountTarget)) && selected && (
             <div className="m-gateway-alert-actions">
               {parsedGatewayError.recommendedModel && (
                 <>
@@ -1406,7 +1994,7 @@ export function MobileWorkspace() {
                   </button>
                 </>
               )}
-              {accountTarget && (
+              {!isOfficeMode && accountTarget && (
                 <button
                   type="button"
                   className="m-gateway-rec-btn"
@@ -1439,7 +2027,7 @@ export function MobileWorkspace() {
         ))}
       </AnimatePresence>
       </div>}
-      <MobileTaskNotices key={`task-notices:${key}`} scope={key} tasks={activeTasks} onOpen={item => item.kind === 'background' ? setSheet('tasks') : openTask(item)} />
+      {!isOfficeMode && <MobileTaskNotices key={`task-notices:${key}`} scope={key} tasks={activeTasks} onOpen={item => item.kind === 'background' ? setSheet('tasks') : openTask(item)} />}
       {!!approvals.length && <button className="m-queue-banner" onClick={() => setSheet('status')}>{approvals.some(isUserInput) ? '等待回答' : '等待授权'} · {approvals.length} 项</button>}
       {quote && <div className="m-quote"><span>{quote}</span><button aria-label="取消引用" onClick={() => setQuote('')}><IconX size={16} /></button></div>}
       {!!files.length && <div className="m-attachments">{files.map((file, i) => <MobileAttachmentPreview key={`${file.name}-${i}`} file={file} onOpen={url => openImagePreview(url)} onRemove={() => updateFiles(files.filter((_, n) => n !== i))} />)}</div>}
@@ -1471,44 +2059,99 @@ export function MobileWorkspace() {
     </section>
       </>
     )}
-    {!isGroupRoute && messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
-    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'inbox' ? '待办收件箱' : sheet === 'checkpoints' ? '代码检查点' : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (drawerTab === 'groups' ? '群聊' : '会话') : ({ inbox: '待我决策', checkpoints: '代码检查点', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && drawerTab === 'sessions' && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
-      {sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
-      {sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredPlatform={accountTarget?.platform ?? 'antigravity'} preferredEnvironment={accountTarget?.environment ?? ''} /></div>}
-      {sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
-      {sheet === 'gateway' && <div className="m-sheet-body m-gateway-body"><UsageGatewaySettingsCard /></div>}
-      {sheet === 'sessions' && groupsPluginEnabled && <div className="m-drawer-nav" role="tablist" aria-label="移动端模式切换" data-active-tab={drawerTab}>
+    </Suspense>
+    {!isNonChatRoute && !isOfficeHomeView && messageAction?.sessionKey === key && <MobileMessageMenu anchor={messageAction} onClose={closeMessageMenu} onCopy={() => void copy(messageAction.text)} onQuote={() => { setQuote(messageAction.text); textarea.current?.focus({ preventScroll: true }) }} />}
+    {sheet && <div className={`m-backdrop ${sheet === 'sessions' ? 'm-session-backdrop' : ''}`} onClick={() => setSheet(null)} onTouchStartCapture={handleDrawerTouchStart} onTouchMoveCapture={handleDrawerTouchMove} onTouchEndCapture={handleDrawerTouchEnd} onTouchCancelCapture={handleDrawerTouchCancel}><section ref={node => { drawerSheet.current = node }} style={sheet === 'sessions' && drawerOffset !== null ? { transform: `translate3d(${drawerOffset}px, 0, 0)`, transition: drawerSettling ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none', animation: 'none' } : undefined} className={`m-sheet ${sheet === 'connections' ? 'm-connections-sheet' : sheet === 'accounts' ? 'm-accounts-sheet' : sheet === 'sessions' ? 'm-session-sheet' : sheet === 'apps' ? 'm-apps-sheet' : sheet === 'blackboard' || sheet === 'browser' ? 'm-blackboard-dialog' : ''}`} role="dialog" aria-label={sheet === 'sessions' ? (showGroupsEntry && drawerTab === 'groups' ? '群聊列表' : '会话列表') : sheet === 'apps' ? '工作台导航' : sheet === 'inbox' ? '待办收件箱' : sheet === 'checkpoints' ? '代码检查点' : sheet === 'accounts' ? '账号切换' : sheet === 'swarm' ? 'Swarm 团队' : sheet === 'schedules' ? '定时任务' : sheet === 'blackboard' ? '会话黑板' : sheet === 'browser' ? '浏览器镜像' : sheet === 'kernels' ? '内核管理' : '详情'} onClick={e => e.stopPropagation()} onTouchStart={handleDrawerTouchStart} onTouchMove={handleDrawerTouchMove} onTouchEnd={handleDrawerTouchEnd} onTouchCancel={handleDrawerTouchCancel}><div className="m-handle" /><header><h2>{sheet === 'sessions' ? (showGroupsEntry && drawerTab === 'groups' ? '群聊' : '会话') : ({ apps: '工作台导航', inbox: isOfficeMode ? '待办中心' : '待我决策', checkpoints: '代码检查点', status: '运行状态', goal: '目标管理', tasks: '任务与子代理', task: '任务详情', swarm: 'Swarm 团队', schedules: '定时任务', models: '选择模型', connections: '连接管理', accounts: '账号切换', gateway: '模型网关', blackboard: '黑板', browser: '浏览器镜像', kernels: '内核管理' })[sheet]}</h2><div className="m-sheet-header-actions">{sheet === 'sessions' && (!showGroupsEntry || drawerTab === 'sessions') && <><button aria-label="筛选" aria-pressed={filtersOpen} onClick={() => setFiltersOpen(open => !open)}><IconFilter size={18} /></button><button aria-label="新建项目" onClick={() => setAddProjectOpened(true)}><IconPlus size={20} /></button></>}{sheet === 'sessions' && showGroupsEntry && drawerTab === 'groups' && <button aria-label="新建群聊" onClick={() => setCreateGroupOpened(true)}><IconPlus size={20} /></button>}{!isOfficeMode && sheet === 'swarm' && <button aria-label="刷新 Swarm" onClick={() => void sessionSwarm.refetch()}><IconRefresh size={18} /></button>}<button aria-label="关闭面板" onClick={() => setSheet(null)}><IconX size={20} /></button></div></header>
+      {sheet === 'apps' && (
+        <div className="m-sheet-body m-apps-body">
+          <div className="m-apps-grid" role="navigation" aria-label="工作台模块列表">
+            {appNavItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`m-apps-card${item.active ? ' is-active' : ''}`}
+                aria-current={item.active ? 'page' : undefined}
+                onClick={item.onSelect}
+              >
+                <span className="m-apps-card-icon" aria-hidden="true">{item.icon}</span>
+                <span className="m-apps-card-label">{item.label}</span>
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <span className={`m-apps-card-badge${item.urgent ? ' is-urgent' : ''}`} aria-hidden="true">
+                    {item.badge > 99 ? '99+' : item.badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {showIntegrationsEntry && (
+            <section className="m-apps-integrations" aria-label={isOfficeMode ? '常用网站' : '侧边栏集成'}>
+              <div className="m-apps-section-head">
+                <h3>{isOfficeMode ? '常用网站' : '侧边栏集成'}</h3>
+                <button type="button" className="m-apps-manage-btn" onClick={() => openModuleRoute('/mobile/settings?tab=integrations')}>
+                  管理集成
+                </button>
+              </div>
+              {integrationItems.length > 0 ? (
+                <div className="m-apps-integration-list">
+                  {integrationItems.map((item) => {
+                    const label = item.name.trim() || (() => {
+                      try { return new URL(item.url).hostname || item.url } catch { return item.url }
+                    })()
+                    const isCurrent = effectiveIntegrationRoute && routeIntegrationId === item.id
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`m-apps-integration-item${isCurrent ? ' is-active' : ''}`}
+                        aria-current={isCurrent ? 'page' : undefined}
+                        onClick={() => openModuleRoute(`/mobile/integrations/${encodeURIComponent(item.id)}`)}
+                      >
+                        <IntegrationIcon name={item.name} url={item.url} iconType={item.icon_type} iconValue={item.icon_value} size={18} />
+                        <span className="m-apps-integration-name">{label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="m-apps-empty-hint">暂无自定义外链集成，点击右上角「管理集成」即可添加。</p>
+              )}
+            </section>
+          )}
+        </div>
+      )}
+      {!isOfficeMode && sheet === 'connections' && <div className="m-sheet-body m-connections-body"><EnvironmentConnections embedded /></div>}
+      {!isOfficeMode && sheet === 'accounts' && <div className="m-sheet-body m-accounts-body"><MobileAccountsPanel preferredPlatform={accountTarget?.platform ?? 'antigravity'} preferredEnvironment={accountTarget?.environment ?? ''} /></div>}
+      {!isOfficeMode && sheet === 'kernels' && <div className="m-sheet-body"><KernelManagementPanel /></div>}
+      {!isOfficeMode && sheet === 'gateway' && <div className="m-sheet-body m-gateway-body"><UsageGatewaySettingsCard /></div>}
+      {sheet === 'sessions' && showGroupsEntry && <div className="m-drawer-nav" role="tablist" aria-label="移动端模式切换" data-active-tab={drawerTab}>
         <span className="m-drawer-nav-thumb" aria-hidden="true" />
         <button type="button" role="tab" aria-selected={drawerTab === 'sessions'} aria-current={drawerTab === 'sessions' ? 'page' : undefined} onClick={() => { setDrawerTab('sessions'); void openState.refetch() }}><IconMessageCircle size={16} /><span>对话</span></button>
         <button type="button" role="tab" aria-selected={drawerTab === 'groups'} aria-current={drawerTab === 'groups' ? 'page' : undefined} onClick={() => { setDrawerTab('groups'); void botGroupsQuery.refetch() }}><IconUsers size={16} /><span>群聊</span>{botGroupList.length > 0 && <small className="m-drawer-nav-count">{botGroupList.length}</small>}</button>
       </div>}
-      {sheet === 'sessions' && (!groupsPluginEnabled || drawerTab === 'sessions') && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
-      {sheet === 'sessions' && (!groupsPluginEnabled || drawerTab === 'sessions') && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话或历史消息" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={setHandoffTarget} onRenameSession={openRename} onCopySessionId={copySessionId} onForkSession={handleForkChatBranch} onForkWorktreeSession={worktreePluginEnabled ? setForkWorktreeTarget : undefined} isSearching={Boolean(search.trim())} searchHits={searchHits} searchLoading={searchLoading} onSelectSearchHit={(hit) => { navigate(`/mobile/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`, { replace: true }); setSheet(null) }} /></>}
-      {sheet === 'sessions' && groupsPluginEnabled && drawerTab === 'groups' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索群聊" placeholder="搜索群聊" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />{groupSearch && <button aria-label="清空搜索" onClick={() => setGroupSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileGroupDrawer groups={botGroupList} selectedGroupId={isGroupRoute ? routeGroupId : ''} agents={agents} loading={botGroupsQuery.isLoading} search={groupSearch} onSelect={selectGroup} onCreate={() => setCreateGroupOpened(true)} onDeleteGroup={requestDeleteGroup} /></>}
+      {sheet === 'sessions' && (!showGroupsEntry || drawerTab === 'sessions') && filtersOpen && <><div className="m-drawer-filter-row"><AgentSessionFilter agents={agents} sessions={sessions} value={agentFilter} onChange={updateAgentFilter} /></div><nav className="m-filters">{[['all','全部'],['unread','未读'],['open','开放中'],['pinned','置顶'],['recent','24小时']].map(([id,label]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{label}</button>)}</nav></>}
+      {sheet === 'sessions' && (!showGroupsEntry || drawerTab === 'sessions') && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索会话" placeholder="搜索会话或历史消息" value={search} onChange={e => setSearch(e.target.value)} />{search && <button aria-label="清空搜索" onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileSessionDrawer groups={groups} pins={pins} pinnedProjects={pinnedProjects} onPinProject={project => { void updatePreferences(value => ({ pinned_projects: value.pinned_projects.includes(project.key) ? value.pinned_projects.filter(key => key !== project.key) : [project.key, ...value.pinned_projects] })) }} selectedKey={key} appearance={appearance} onSelect={select} onCreate={project => { setCreateProject(project); setCreateOpened(true) }} onDeleteProject={requestDeleteProject} onDeleteSession={requestDeleteSession} onManageProjectDatabase={!isOfficeMode && hasDatabaseTool ? (project) => { setSheet(null); setDatabaseTarget(project) } : undefined} onPin={s => { const sessionKey = scopeKey(s.agent_id, s.id); void updatePreferences(value => ({ session_pins: { [sessionKey]: !value.session_pins[sessionKey] } })) }} agents={agents} onHandoffSession={!isOfficeMode ? setHandoffTarget : undefined} onRenameSession={openRename} onCopySessionId={!isOfficeMode ? copySessionId : undefined} onForkSession={!isOfficeMode ? handleForkChatBranch : undefined} onForkWorktreeSession={!isOfficeMode && worktreePluginEnabled ? setForkWorktreeTarget : undefined} isSearching={Boolean(search.trim())} searchHits={searchHits} searchLoading={searchLoading} onSelectSearchHit={(hit) => { navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(hit.session_id)}?agent_id=${encodeURIComponent(hit.agent_id)}&message_id=${encodeURIComponent(hit.id)}`), { replace: true }); setSheet(null) }} /></>}
+      {sheet === 'sessions' && showGroupsEntry && drawerTab === 'groups' && <><div className="m-search-wrap"><input className="m-search" aria-label="搜索群聊" placeholder="搜索群聊" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />{groupSearch && <button aria-label="清空搜索" onClick={() => setGroupSearch('')} style={{ position: 'absolute', right: 8, padding: 6, display: 'inline-flex', alignItems: 'center', color: 'var(--m-muted)' }}><IconX size={16} /></button>}</div><MobileGroupDrawer groups={botGroupList} selectedGroupId={effectiveGroupRoute ? routeGroupId : ''} agents={agents} loading={botGroupsQuery.isLoading} search={groupSearch} onSelect={selectGroup} onCreate={() => setCreateGroupOpened(true)} onDeleteGroup={requestDeleteGroup} /></>}
       {sheet === 'inbox' && (
         <div className="m-sheet-body">
           <ActionInboxView
             compact
-            onOpenSession={(aid, sid) => {
-              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
-                || sessions.find(s => s.agent_id === aid && s.id === sid)
-              if (target) {
-                select(target)
-              } else {
-                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
-                setSheet(null)
-              }
-            }}
+            onOpenSession={openSessionById}
           />
         </div>
       )}
-      {sheet === 'checkpoints' && selected && <div className="m-sheet-body m-checkpoints-sheet"><SessionCheckpointsPanel compact session={selected} initialCheckpointId={focusedCheckpointId} /></div>}
-      {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} /><SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} />{agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
-      {sheet === 'goal' && selected && <div className="m-sheet-body m-goal-panel"><GoalManager key={key} session={selected} agent={agents[selected.agent_id]} tasks={tasks} disabled={readOnly} /></div>}
-      {sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
-      {sheet === 'browser' && selected && <div className="m-sheet-body m-blackboard-sheet"><BrowserMirrorPanel agentId={selected.agent_id} sessionId={selected.id} /></div>}
-      {sheet === 'tasks' && <div className="m-sheet-body m-runtime-panel"><SessionRuntimeBar key={key} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={openTask} />{!visibleTasks.length && <p>当前会话暂无任务记录。</p>}</div>}
-      {sheet === 'swarm' && selected && (
+      {!isOfficeMode && sheet === 'checkpoints' && selected && <div className="m-sheet-body m-checkpoints-sheet"><SessionCheckpointsPanel compact session={selected} initialCheckpointId={focusedCheckpointId} /></div>}
+      {sheet === 'status' && selected && <div className="m-sheet-body"><MobileApprovals session={selected} approvals={approvals} />{!isOfficeMode && <SessionRuntimeFacts session={selected} agent={agents[selected.agent_id]} />}{!isOfficeMode && agents[selected.agent_id]?.kind==='codex' && <NativeObservationPanel agentId={selected.agent_id} sessionId={selected.id} />}</div>}
+      {!isOfficeMode && sheet === 'goal' && selected && <div className="m-sheet-body m-goal-panel"><GoalManager key={key} session={selected} agent={agents[selected.agent_id]} tasks={tasks} disabled={readOnly} /></div>}
+      {!isOfficeMode && sheet === 'blackboard' && selected && <div className="m-sheet-body m-blackboard-sheet"><MobileBlackboardPanel namespace={`session:${selected.agent_id}::${selected.id}`} /></div>}
+      {!isOfficeMode && sheet === 'browser' && selected && (
+        <div className="m-sheet-body m-blackboard-sheet">
+          <Suspense fallback={<div className="m-office-page-loading">正在加载浏览器镜像…</div>}>
+            <LazyBrowserMirrorPanel agentId={selected.agent_id} sessionId={selected.id} />
+          </Suspense>
+        </div>
+      )}
+      {!isOfficeMode && sheet === 'tasks' && <div className="m-sheet-body m-runtime-panel"><SessionRuntimeBar key={key} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={openTask} />{!visibleTasks.length && <p>当前会话暂无任务记录。</p>}</div>}
+      {!isOfficeMode && sheet === 'swarm' && selected && (
         <div className="m-sheet-body m-swarm-sheet">
           <SessionSwarmView
             compact
@@ -1519,20 +2162,11 @@ export function MobileWorkspace() {
             fetching={sessionSwarm.isFetching}
             error={sessionSwarm.error}
             onRefresh={() => void sessionSwarm.refetch()}
-            onOpenSession={(aid, sid) => {
-              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
-                || sessions.find(s => s.agent_id === aid && s.id === sid)
-              if (target) {
-                select(target)
-              } else {
-                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
-                setSheet(null)
-              }
-            }}
+            onOpenSession={openSessionById}
           />
         </div>
       )}
-      {sheet === 'schedules' && selected && (
+      {!isOfficeMode && sheet === 'schedules' && selected && (
         <div className="m-sheet-body m-swarm-sheet">
           <SessionSchedulesView
             compact
@@ -1541,16 +2175,7 @@ export function MobileWorkspace() {
             schedules={sessionSchedules.data || []}
             loading={sessionSchedules.isPending}
             error={sessionSchedules.error}
-            onOpenSession={(aid, sid) => {
-              const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
-                || sessions.find(s => s.agent_id === aid && s.id === sid)
-              if (target) {
-                select(target)
-              } else {
-                navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`, { replace: true })
-                setSheet(null)
-              }
-            }}
+            onOpenSession={openSessionById}
           />
         </div>
       )}
@@ -1641,25 +2266,42 @@ export function MobileWorkspace() {
         </Group>
       </form>
     </Modal>
-    {isLearningRoute && learningPluginEnabled && (
+    {!isOfficeMode && hasDatabaseTool && databaseTarget && (
+      <ProjectDatabaseModal
+        opened={databaseTarget !== null}
+        onClose={() => setDatabaseTarget(null)}
+        projectKey={databaseTarget.key}
+        workspaceKey={(() => {
+          const sample = databaseTarget.sessions[0]
+          const ownerAgent = databaseTarget.agentId ? agents[databaseTarget.agentId] : undefined
+          return buildWorkspaceScopeKey(
+            databaseTarget.workspace,
+            sample?.connection_id || ownerAgent?.connection_id,
+            sample?.source_id || ownerAgent?.source_id,
+            ownerAgent,
+          )
+        })()}
+        projectLabel={databaseTarget.label}
+      />
+    )}
+    {effectiveLearningRoute && (
       <MobileLearningFeed
         onClose={() => {
           const next = sessions[0]
-          if (next) navigate(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`)
-          else navigate('/mobile')
+          if (next) navigate(mobileUrl(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`))
+          else navigate(mobileUrl('/mobile'))
         }}
-        onOpenSession={(aid, sid) => {
-          const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
-            || sessions.find(s => s.agent_id === aid && s.id === sid)
-          if (target) {
-            select(target)
-          } else {
-            navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`)
-          }
-        }}
+        onOpenSession={openSessionById}
       />
     )}
     {queueLift && <div className="m-queue-ghost" data-zone={queueLift.zone || undefined} style={{ left: queueLift.x, top: queueLift.y }}>{queueLift.text}</div>}
     <BackgroundTasks />
+    <FirstLaunchProfileModal
+      ready={connection === 'connected' || Object.keys(agents).length > 0}
+      hasExistingData={projects.length > 0 || sessions.length > 0}
+    />
+    <NotificationOptInPrompt
+      ready={connection === 'connected' || Object.keys(agents).length > 0}
+    />
   </div></AgyQuotaRefreshProvider>
 }

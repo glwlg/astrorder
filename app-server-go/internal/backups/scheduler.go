@@ -5,12 +5,32 @@ import (
 	"io"
 	"log/slog"
 	"time"
+
+	"astrorder.dev/app-server/internal/store"
 )
 
 const (
+	// PluginID is the built-in workspace plugin toggle key controlling scheduled backups.
+	PluginID               = "workspace-backups"
 	defaultSchedulerTick   = 20 * time.Second
 	maxConcurrentScheduled = 2
 )
+
+func (s *Service) isPluginEnabled(ctx context.Context) bool {
+	if s == nil || s.store == nil {
+		return true
+	}
+	pref, err := s.store.GetPreference(ctx, store.PrefPluginsEnabled)
+	if err != nil || !pref.Exists {
+		return true
+	}
+	if saved, ok := pref.Value.(map[string]any); ok {
+		if flag, ok := saved[PluginID].(bool); ok {
+			return flag
+		}
+	}
+	return true
+}
 
 // NewService constructs a backup service with safe defaults.
 func NewService(options Options) *Service {
@@ -69,6 +89,9 @@ func (s *Service) RunScheduler(ctx context.Context) {
 
 func (s *Service) runDueJobs(ctx context.Context) {
 	if ctx.Err() != nil {
+		return
+	}
+	if !s.isPluginEnabled(ctx) {
 		return
 	}
 	now := s.now().UTC()

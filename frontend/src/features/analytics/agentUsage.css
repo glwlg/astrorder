@@ -24,6 +24,60 @@
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 600px) {
-  .agent-usage-content { padding: 16px; }
+@media (max-width: 767px) {
+  .agent-usage-content {
+    padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+    min-width: 0;
+  }
+
+  .agent-usage-range {
+    margin: 12px 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .agent-usage-range::-webkit-scrollbar {
+    display: none;
+  }
+
+  .agent-usage-metric,
+  .agent-usage-panel {
+    padding: 12px !important;
+    overflow: hidden;
+  }
+
+  .agent-usage-content .mantine-TableScrollContainer-scrollContainer {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+.mobile-workspace .agent-usage-content {
+  padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+  min-width: 0;
+}
+
+.mobile-workspace .agent-usage-range {
+  margin: 12px 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .agent-usage-range::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-workspace .agent-usage-metric,
+.mobile-workspace .agent-usage-panel {
+  padding: 12px !important;
+  overflow: hidden;
+}
+
+.mobile-workspace .agent-usage-content .mantine-TableScrollContainer-scrollContainer {
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
 }

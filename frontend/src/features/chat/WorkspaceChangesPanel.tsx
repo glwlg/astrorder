@@ -50,7 +50,7 @@ export function WorkspaceChangesPanel({
     <aside
       id="workspace-changes-panel"
       className="workspace-changes-panel"
-      aria-label={showSwarm ? 'Swarm、定时与产物' : '定时与产物'}
+      aria-label={isOfficeMode ? '产物' : showSwarm ? 'Swarm、定时与产物' : '定时与产物'}
     >
       <WorkspaceChangesContent
         key={`${session.agent_id}:${session.id}`}

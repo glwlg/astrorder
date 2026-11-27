@@ -13,6 +13,7 @@ import {
 } from '../sidecar/viewers/monaco/markdownHtmlCodec'
 import { SheetViewer } from '../sidecar/viewers/sheet/SheetViewer'
 import { OfficeHomeDashboard } from './OfficeHomeDashboard'
+import { OPEN_ONBOARDING_WIZARD_EVENT } from './OnboardingWizard'
 import { OfficePersonaCard } from './OfficePersonaCard'
 import { OfficeSourcesBar, type PinnedOfficeSource } from './OfficeSourcesBar'
 import { OfficeTemplateModal } from './OfficeTemplateModal'
@@ -284,6 +285,42 @@ describe('Native Office Workstation — 5 Pillars', () => {
     // 8 office templates rendered on home dashboard
     expect(screen.getByText('方案立项')).toBeTruthy()
     expect(screen.getByText('PPT 大纲')).toBeTruthy()
+  })
+
+  it('opens generated template document in inline writing/preview workbench instead of swallowing it when no session or agent exists', async () => {
+    vi.spyOn(api, 'getOfficeProfile').mockResolvedValue(SAMPLE_PERSONA)
+    vi.spyOn(api, 'listRecentOfficeDocs').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'listTodos').mockResolvedValue({ items: [], open_count: 0 })
+    vi.spyOn(api, 'listMeetingActionItems').mockResolvedValue({ items: [], open_count: 0 })
+    vi.spyOn(api, 'listMeetings').mockResolvedValue({ items: [] })
+    vi.spyOn(api, 'synthesizeOfficeSources').mockResolvedValue({
+      ok: true,
+      mode: 'llm',
+      llm_configured: true,
+      model: 'gpt-4o',
+      title: '年度渠道扩展计划',
+      markdown: '# 年度渠道扩展计划\n\n核心目标：华东区新增 50 家核心伙伴。',
+      assembled_prompt: '',
+      sources: [],
+    })
+
+    const wizardSpy = vi.fn()
+    window.addEventListener(OPEN_ONBOARDING_WIZARD_EVENT, wizardSpy)
+
+    render(wrapWithProviders(<OfficeHomeDashboard sessions={[]} agents={{}} />))
+
+    fireEvent.click(screen.getByText('方案立项'))
+    fireEvent.change(await screen.findByLabelText(/方案主题/), { target: { value: '年度渠道扩展计划' } })
+    fireEvent.change(screen.getByLabelText(/核心目标与预期收益/), { target: { value: '华东区新增 50 家核心伙伴' } })
+    fireEvent.click(screen.getByRole('button', { name: /直接生成到写作台/ }))
+
+    // Generated markdown MUST appear in the inline writing/preview modal rather than being silently dropped
+    expect(await screen.findByText('写作预览台')).toBeInTheDocument()
+    expect(screen.getByText(/核心目标：华东区新增 50 家核心伙伴/)).toBeInTheDocument()
+    const onboardingBtn = screen.getByRole('button', { name: /前往初始化向导/ })
+    fireEvent.click(onboardingBtn)
+    expect(wizardSpy).toHaveBeenCalledTimes(1)
+    window.removeEventListener(OPEN_ONBOARDING_WIZARD_EVENT, wizardSpy)
   })
 
   it('renders Excel visual charts (Bar + Donut), pivot summary table, and AI analysis prompts in SheetViewer', async () => {

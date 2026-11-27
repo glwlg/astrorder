@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -5,8 +6,85 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Session } from '../../domain/types'
 import userEvent from '@testing-library/user-event'
 import { bootstrapBuiltinExtensions } from '../extensions/bootstrapBuiltins'
+import { extensionRegistry } from '../extensions/extensionRegistry'
+import type { StatusBarSlotContext } from '../extensions/types'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { GitStatusBar } from './GitStatusBar'
+
+function registerTestGitLabSlot() {
+  return extensionRegistry.registerBuiltin({
+    pluginId: 'gitlab-ci-viewer',
+    statusBarComponent: function TestGitLabStatusPill({
+      session: s,
+      statusUnavailable,
+      statusLoading,
+      branch,
+    }: StatusBarSlotContext) {
+      const [pipeline, setPipeline] = useState<{ id: number; status: string } | null>(null)
+      useEffect(() => {
+        if (statusUnavailable || statusLoading || !branch || !s.workspace) {
+          setPipeline(null)
+          return
+        }
+        let active = true
+        const q = new URLSearchParams({ workspace: s.workspace, session_id: s.id })
+        void fetch(`/api/v1/gitlab/pipelines?${q.toString()}`)
+          .then((r) => r.json())
+          .then((data: { matched?: boolean; latest_pipeline?: { id: number; status: string } }) => {
+            if (!active) return
+            setPipeline(data.matched && data.latest_pipeline ? data.latest_pipeline : null)
+          })
+          .catch(() => {
+            if (active) setPipeline(null)
+          })
+        return () => {
+          active = false
+        }
+      }, [s.workspace, s.id, statusUnavailable, statusLoading, branch])
+
+      if (!pipeline) return null
+      return (
+        <button
+          type="button"
+          aria-label="查看 GitLab CI 流水线"
+          onClick={() =>
+            useSidecarStore.getState().openPluginPanel('gitlab-ci-viewer', 'ci-panel', {
+              title: 'GitLab CI',
+              mediaType: 'application/x-gitlab-ci',
+              viewerId: 'gitlab-ci-viewer',
+              sessionId: s.id,
+              agentId: s.agent_id,
+              workspacePath: s.workspace || undefined,
+              connectionId: s.connection_id || undefined,
+              params: { pipeline_id: pipeline.id },
+            })
+          }
+        >
+          <span>#{pipeline.id}</span>
+          <span>{pipeline.status === 'running' ? '运行中' : '通过'}</span>
+        </button>
+      )
+    },
+    gitMenuItems: [
+      {
+        id: 'open-gitlab-ci',
+        groupLabel: 'CI / CD',
+        label: '查看 GitLab CI 流水线...',
+        requiresWorkspace: true,
+        onClick: (s) =>
+          useSidecarStore.getState().openPluginPanel('gitlab-ci-viewer', 'ci-panel', {
+            title: 'GitLab CI',
+            mediaType: 'application/x-gitlab-ci',
+            viewerId: 'gitlab-ci-viewer',
+            sessionId: s.id,
+            agentId: s.agent_id,
+            workspacePath: s.workspace || undefined,
+            connectionId: s.connection_id || undefined,
+          }),
+      },
+    ],
+  })
+}
 
 const session: Session = {
   id: 's1', agent_id: 'codex', title: 'Test', workspace: 'P:/workspace/project',
@@ -29,6 +107,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  extensionRegistry.clear()
   vi.unstubAllGlobals()
 })
 
@@ -103,6 +182,7 @@ it('does not carry a previous session branch into a different workspace', async 
 })
 
 it('shows live GitLab CI pill for matched repos and opens the GitLab CI viewer on click', async () => {
+  registerTestGitLabSlot()
   useSidecarStore.getState().resetSessionSidecar()
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const raw = String(url)
@@ -141,6 +221,7 @@ it('shows live GitLab CI pill for matched repos and opens the GitLab CI viewer o
 })
 
 it('renders extension-registered Git menu items and opens plugin panel via Sidecar', async () => {
+  registerTestGitLabSlot()
   useSidecarStore.getState().resetSessionSidecar()
   vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
     const raw = String(url)
@@ -167,4 +248,87 @@ it('renders extension-registered Git menu items and opens plugin panel via Sidec
   const state = useSidecarStore.getState()
   expect(state.isOpen).toBe(true)
   expect(state.tabs.some((tab) => tab.id === 'ext:gitlab-ci-viewer:ci-panel:s1' && tab.viewerId === 'gitlab-ci-viewer')).toBe(true)
+})
+
+it('switches branch, WT badge, diff stats, GitLab CI pill, and diff target when the same session switches to a worktree view', async () => {
+  registerTestGitLabSlot()
+  useSidecarStore.getState().resetSessionSidecar()
+  const mainPath = '/home/luwei/workspace/OpsCore'
+  const wtPath = '/home/luwei/workspace/OpsCore/.worktrees/security-drill-guide-v4'
+
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    const raw = String(url)
+    const isWt = raw.includes(encodeURIComponent(wtPath)) || raw.includes(wtPath)
+    if (raw.includes('/api/v1/gitlab/pipelines')) {
+      return new Response(JSON.stringify({
+        configured: true,
+        matched: true,
+        repo: {
+          host: 'gitlab.internal',
+          project_path: 'platform/opscore',
+          branch: isWt ? 'feat/security-drill-guide-v4' : 'master',
+          head_sha: isWt ? '222222222222' : '111111111111',
+        },
+        latest_pipeline: {
+          id: isWt ? 3201 : 3192,
+          status: isWt ? 'success' : 'running',
+          ref: isWt ? 'feat/security-drill-guide-v4' : 'master',
+          sha: isWt ? '222222222222' : '111111111111',
+          short_sha: isWt ? '22222222' : '11111111',
+          web_url: `https://gitlab.internal/platform/opscore/-/pipelines/${isWt ? 3201 : 3192}`,
+          matches_head: true,
+        },
+        pipelines: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return new Response(JSON.stringify(
+      isWt
+        ? { branch: 'feat/security-drill-guide-v4', branches: ['feat/security-drill-guide-v4', 'master'], changed_files: 6, insertions: 240, deletions: 12 }
+        : { branch: 'master', branches: ['master'], changed_files: 117, insertions: 8583, deletions: 1629 },
+    ), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }))
+
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const mainSession: Session = { ...session, workspace: mainPath }
+  const view = render(
+    <MantineProvider env="test">
+      <QueryClientProvider client={client}>
+        <GitStatusBar session={mainSession} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+
+  expect(await screen.findByText('master')).toBeInTheDocument()
+  expect(await screen.findByText('117 个文件变更')).toBeInTheDocument()
+  expect(await screen.findByText('#3192')).toBeInTheDocument()
+  expect(screen.queryByText('WT')).not.toBeInTheDocument()
+
+  // Open diff tab while on main workspace so we verify switching updates the existing tab path too
+  fireEvent.click(screen.getByRole('button', { name: '查看工作区 Git Diff' }))
+  expect(useSidecarStore.getState().tabs.find((t) => t.viewerId === 'git-diff-viewer')?.artifact?.path).toBe(mainPath)
+
+  // Switch the SAME session to the linked worktree view (as ChatPage passes activeWorktreeState.effectiveSession)
+  const wtSession: Session = {
+    ...mainSession,
+    workspace: wtPath,
+    worktree_root_workspace: mainPath,
+    worktree_branch: 'feat/security-drill-guide-v4',
+  }
+  view.rerender(
+    <MantineProvider env="test">
+      <QueryClientProvider client={client}>
+        <GitStatusBar session={wtSession} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  )
+
+  expect(await screen.findByText('feat/security-drill-guide-v4')).toBeInTheDocument()
+  expect(screen.getByText('WT')).toBeInTheDocument()
+  expect(await screen.findByText('6 个文件变更')).toBeInTheDocument()
+  expect(await screen.findByText('+240')).toBeInTheDocument()
+  expect(await screen.findByText('-12')).toBeInTheDocument()
+  expect(await screen.findByText('#3201')).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: '查看工作区 Git Diff' }))
+  expect(useSidecarStore.getState().tabs.find((t) => t.viewerId === 'git-diff-viewer')?.artifact?.path).toBe(wtPath)
 })

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,11 +25,15 @@ import (
 )
 
 const (
-	ModelName  = "Confucius4-R2T2-Q8_0.gguf"
-	MMProjName = "mmproj-Confucius4-R2T2-Q8_0.gguf"
-	EnabledKey = "plugin:r2t2:enabled"
-	ModelBase  = "https://huggingface.co/netease-youdao/Confucius4-R2T2-GGUF/resolve/main/"
-	RuntimeURL = "https://github.com/ggml-org/llama.cpp/releases/download/b10950/llama-b10950-bin-win-vulkan-x64.zip"
+	ModelName            = "Confucius4-R2T2-Q8_0.gguf"
+	MMProjName           = "mmproj-Confucius4-R2T2-Q8_0.gguf"
+	EnabledKey           = "plugin:r2t2:enabled"
+	ModelBase            = "https://huggingface.co/netease-youdao/Confucius4-R2T2-GGUF/resolve/main/"
+	RuntimeURL           = "https://github.com/ggml-org/llama.cpp/releases/download/b10950/llama-b10950-bin-win-vulkan-x64.zip"
+	DefaultCNHFMirror    = "https://hf-mirror.com"
+	DefaultCNGitHubProxy = "https://ghfast.top"
+	modelRepoSuffix      = "/netease-youdao/Confucius4-R2T2-GGUF/resolve/main/"
+	prefToolchainNetwork = "toolchain:network"
 )
 
 type LocalR2T2Manager struct {
@@ -82,11 +87,6 @@ func newLocalR2T2Manager(opts Options, appCtx context.Context) (*LocalR2T2Manage
 	modelPath := filepath.Join(modelDir, ModelName)
 	mmprojPath := filepath.Join(modelDir, MMProjName)
 
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
-	}
-
 	m := &LocalR2T2Manager{
 		store:          opts.Store,
 		resourceDir:    resourceDir,
@@ -95,7 +95,7 @@ func newLocalR2T2Manager(opts Options, appCtx context.Context) (*LocalR2T2Manage
 		serverPath:     serverPath,
 		modelPath:      modelPath,
 		mmprojPath:     mmprojPath,
-		httpClient:     client,
+		httpClient:     opts.HTTPClient,
 		processFactory: opts.ProcessFactory,
 		appCtx:         appCtx,
 		state:          "disabled",
@@ -306,7 +306,10 @@ func (m *LocalR2T2Manager) IsHealthy(ctx context.Context) bool {
 	checkURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	client := m.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 1 * time.Second}
+		client = &http.Client{
+			Timeout:   1 * time.Second,
+			Transport: &http.Transport{Proxy: nil},
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 	if err != nil {
@@ -526,7 +529,10 @@ func (m *LocalR2T2Manager) startWorker(ctx context.Context, readyChan chan<- err
 func (m *LocalR2T2Manager) waitUntilReady(ctx context.Context, port int) error {
 	deadline := time.Now().Add(120 * time.Second)
 	checkURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	client := &http.Client{Timeout: 1 * time.Second}
+	client := &http.Client{
+		Timeout:   1 * time.Second,
+		Transport: &http.Transport{Proxy: nil},
+	}
 
 	for time.Now().Before(deadline) {
 		select {
@@ -562,6 +568,223 @@ func (m *LocalR2T2Manager) waitUntilReady(ctx context.Context, port int) error {
 	return errors.New("本地语音模型加载超时。")
 }
 
+type downloadNetworkConfig struct {
+	ProxyURL        string
+	Mirror          string
+	HFEndpoint      string
+	GitHubMirror    string
+	ModelBaseURL    string
+	RuntimeOverride string
+}
+
+func (m *LocalR2T2Manager) resolveDownloadNetworkConfig(ctx context.Context) downloadNetworkConfig {
+	cfg := downloadNetworkConfig{}
+
+	// 1. Read unified Astrorder toolchain network settings (default + local override).
+	if m.store != nil {
+		if pref, err := m.store.GetPreference(ctx, prefToolchainNetwork); err == nil && pref.Exists && pref.Value != nil {
+			if raw, err := json.Marshal(pref.Value); err == nil {
+				var parsed struct {
+					Default struct {
+						ProxyURL string `json:"proxy_url"`
+						Mirror   string `json:"mirror"`
+					} `json:"default"`
+					ByEnvironment map[string]struct {
+						ProxyURL string `json:"proxy_url"`
+						Mirror   string `json:"mirror"`
+					} `json:"by_environment"`
+				}
+				if json.Unmarshal(raw, &parsed) == nil {
+					cfg.ProxyURL = strings.TrimSpace(parsed.Default.ProxyURL)
+					cfg.Mirror = strings.TrimSpace(parsed.Default.Mirror)
+					if localNet, ok := parsed.ByEnvironment["local"]; ok {
+						if p := strings.TrimSpace(localNet.ProxyURL); p != "" {
+							cfg.ProxyURL = p
+						}
+						if mir := strings.TrimSpace(localNet.Mirror); mir != "" {
+							cfg.Mirror = mir
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Optional R2T2-specific plugin config overrides under plugins:config.
+		if pref, err := m.store.GetPreference(ctx, store.PrefPluginsConfig); err == nil && pref.Exists && pref.Value != nil {
+			if allCfg, ok := pref.Value.(map[string]any); ok {
+				for _, key := range []string{"r2t2", "r2t2-local-voice"} {
+					sub, ok := allCfg[key].(map[string]any)
+					if !ok {
+						continue
+					}
+					if v, ok := sub["proxy_url"].(string); ok && strings.TrimSpace(v) != "" {
+						cfg.ProxyURL = strings.TrimSpace(v)
+					}
+					if v, ok := sub["mirror"].(string); ok && strings.TrimSpace(v) != "" {
+						cfg.Mirror = strings.TrimSpace(v)
+					}
+					if v, ok := sub["hf_endpoint"].(string); ok && strings.TrimSpace(v) != "" {
+						cfg.HFEndpoint = strings.TrimSpace(v)
+					}
+					if v, ok := sub["github_mirror"].(string); ok && strings.TrimSpace(v) != "" {
+						cfg.GitHubMirror = strings.TrimSpace(v)
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Environment variable fallbacks / explicit mirror overrides.
+	if cfg.ProxyURL == "" {
+		cfg.ProxyURL = strings.TrimSpace(os.Getenv("ASTRORDER_PROXY_URL"))
+	}
+	if cfg.Mirror == "" {
+		cfg.Mirror = strings.TrimSpace(os.Getenv("ASTRORDER_MIRROR"))
+	}
+	for _, envKey := range []string{"ASTRORDER_HF_ENDPOINT", "HF_ENDPOINT"} {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			cfg.HFEndpoint = v
+			break
+		}
+	}
+	for _, envKey := range []string{"ASTRORDER_GITHUB_MIRROR", "GITHUB_MIRROR", "GH_PROXY"} {
+		if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
+			cfg.GitHubMirror = v
+			break
+		}
+	}
+	cfg.ModelBaseURL = strings.TrimSpace(os.Getenv("ASTRORDER_R2T2_MODEL_BASE"))
+	cfg.RuntimeOverride = strings.TrimSpace(os.Getenv("ASTRORDER_R2T2_RUNTIME_URL"))
+
+	return cfg
+}
+
+func isChinaMirrorSetting(mirror string) bool {
+	switch strings.ToLower(strings.TrimSpace(mirror)) {
+	case "cn", "china":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveModelURLs(cfg downloadNetworkConfig, filename string) []string {
+	var candidates []string
+	if base := strings.TrimRight(strings.TrimSpace(cfg.ModelBaseURL), "/"); base != "" {
+		candidates = append(candidates, base+"/"+filename)
+	}
+	if ep := strings.TrimRight(strings.TrimSpace(cfg.HFEndpoint), "/"); ep != "" {
+		candidates = append(candidates, ep+modelRepoSuffix+filename)
+	}
+	if isChinaMirrorSetting(cfg.Mirror) {
+		candidates = append(candidates, DefaultCNHFMirror+modelRepoSuffix+filename)
+	}
+	candidates = append(candidates, ModelBase+filename)
+	return dedupeURLs(candidates)
+}
+
+func resolveRuntimeURLs(cfg downloadNetworkConfig) []string {
+	var candidates []string
+	if override := strings.TrimSpace(cfg.RuntimeOverride); override != "" {
+		candidates = append(candidates, override)
+	}
+	if mirrored := applyGitHubMirror(RuntimeURL, cfg.GitHubMirror); mirrored != "" {
+		candidates = append(candidates, mirrored)
+	}
+	if isChinaMirrorSetting(cfg.Mirror) {
+		candidates = append(candidates, DefaultCNGitHubProxy+"/"+RuntimeURL)
+	}
+	candidates = append(candidates, RuntimeURL)
+	return dedupeURLs(candidates)
+}
+
+func applyGitHubMirror(rawURL, mirror string) string {
+	m := strings.TrimSpace(mirror)
+	if m == "" {
+		return ""
+	}
+	if strings.Contains(m, "{url}") {
+		return strings.ReplaceAll(m, "{url}", rawURL)
+	}
+	lower := strings.ToLower(m)
+	if strings.HasSuffix(lower, "/https://") || strings.HasSuffix(lower, "/http://") {
+		idx := strings.LastIndex(lower, "/http")
+		return m[:idx+1] + rawURL
+	}
+	parsed, err := url.Parse(m)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	hostLower := strings.ToLower(parsed.Host)
+	for _, prefixHint := range []string{"ghproxy", "gh-proxy", "ghfast", "ghp.ci", "gh.llkk.cc"} {
+		if strings.Contains(hostLower, prefixHint) {
+			return strings.TrimRight(m, "/") + "/" + rawURL
+		}
+	}
+	const githubOrigin = "https://github.com"
+	if strings.HasPrefix(rawURL, githubOrigin) {
+		return strings.TrimRight(m, "/") + strings.TrimPrefix(rawURL, githubOrigin)
+	}
+	return strings.TrimRight(m, "/") + "/" + rawURL
+}
+
+func dedupeURLs(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, u := range in {
+		trimmed := strings.TrimSpace(u)
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func (m *LocalR2T2Manager) buildDownloadClient(cfg downloadNetworkConfig) (*http.Client, error) {
+	proxyFn := http.ProxyFromEnvironment
+	if cfg.ProxyURL != "" {
+		parsedProxy, err := url.Parse(cfg.ProxyURL)
+		if err != nil || parsedProxy.Scheme == "" || parsedProxy.Host == "" {
+			return nil, fmt.Errorf("代理地址格式无效: %q", cfg.ProxyURL)
+		}
+		proxyFn = http.ProxyURL(parsedProxy)
+	}
+
+	if m.httpClient != nil {
+		if m.httpClient.Transport == nil {
+			cloned := http.DefaultTransport.(*http.Transport).Clone()
+			cloned.Proxy = proxyFn
+			cp := *m.httpClient
+			cp.Transport = cloned
+			return &cp, nil
+		}
+		if tr, ok := m.httpClient.Transport.(*http.Transport); ok {
+			cloned := tr.Clone()
+			cloned.Proxy = proxyFn
+			cp := *m.httpClient
+			cp.Transport = cloned
+			return &cp, nil
+		}
+		return m.httpClient, nil
+	}
+
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 proxyFn,
+			DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}, nil
+}
+
 func (m *LocalR2T2Manager) ensureResources(ctx context.Context) error {
 	if fileExists(m.serverPath) && fileExists(m.modelPath) && fileExists(m.mmprojPath) {
 		return nil
@@ -576,26 +799,32 @@ func (m *LocalR2T2Manager) ensureResources(ctx context.Context) error {
 	_ = os.MkdirAll(m.runtimeDir, 0o755)
 	_ = os.MkdirAll(m.modelDir, 0o755)
 
+	netCfg := m.resolveDownloadNetworkConfig(ctx)
+	dlClient, err := m.buildDownloadClient(netCfg)
+	if err != nil {
+		return err
+	}
+
 	type dlTask struct {
-		url    string
+		urls   []string
 		target string
 	}
 	var downloads []dlTask
 	runtimeZip := filepath.Join(m.resourceDir, "llama-vulkan.zip")
 
 	if !fileExists(m.serverPath) {
-		downloads = append(downloads, dlTask{url: RuntimeURL, target: runtimeZip})
+		downloads = append(downloads, dlTask{urls: resolveRuntimeURLs(netCfg), target: runtimeZip})
 	}
 	if !fileExists(m.modelPath) {
-		downloads = append(downloads, dlTask{url: ModelBase + ModelName, target: m.modelPath})
+		downloads = append(downloads, dlTask{urls: resolveModelURLs(netCfg, ModelName), target: m.modelPath})
 	}
 	if !fileExists(m.mmprojPath) {
-		downloads = append(downloads, dlTask{url: ModelBase + MMProjName, target: m.mmprojPath})
+		downloads = append(downloads, dlTask{urls: resolveModelURLs(netCfg, MMProjName), target: m.mmprojPath})
 	}
 
 	total := len(downloads)
 	for i, t := range downloads {
-		if err := m.downloadFile(ctx, t.url, t.target, i, total); err != nil {
+		if err := m.downloadFileFromCandidates(ctx, dlClient, t.urls, t.target, i, total); err != nil {
 			return err
 		}
 	}
@@ -614,33 +843,65 @@ func (m *LocalR2T2Manager) ensureResources(ctx context.Context) error {
 	return nil
 }
 
-func (m *LocalR2T2Manager) downloadFile(ctx context.Context, url, target string, index, total int) error {
+func (m *LocalR2T2Manager) downloadFileFromCandidates(ctx context.Context, client *http.Client, urls []string, target string, index, total int) error {
+	if len(urls) == 0 {
+		return errors.New("未配置有效的下载地址。")
+	}
+	var lastErr error
+	for _, candidate := range urls {
+		if ctx.Err() != nil {
+			return errors.New("安装已取消。")
+		}
+		err := m.downloadFile(ctx, client, candidate, target, index, total)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return errors.New("安装已取消。")
+		}
+	}
+	return lastErr
+}
+
+func (m *LocalR2T2Manager) downloadFile(ctx context.Context, client *http.Client, targetURL, target string, index, total int) error {
 	part := target + ".part"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "Astrorder/0.1")
 
-	resp, err := m.httpClient.Do(req)
+	if client == nil {
+		client = m.httpClient
+	}
+	if client == nil {
+		client = &http.Client{}
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return errors.New("安装已取消。")
 		}
-		return fmt.Errorf("download error: %w", err)
+		return fmt.Errorf("download error (%s): %w", targetURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download status %d for %s", resp.StatusCode, url)
+		return fmt.Errorf("download status %d for %s", resp.StatusCode, targetURL)
 	}
 
 	out, err := os.Create(part)
 	if err != nil {
 		return err
 	}
+	completed := false
 	defer func() {
-		_ = out.Close()
+		if !completed {
+			_ = out.Close()
+			_ = os.Remove(part)
+		}
 	}()
 
 	contentLength := resp.ContentLength
@@ -677,8 +938,15 @@ func (m *LocalR2T2Manager) downloadFile(ctx context.Context, url, target string,
 		}
 	}
 
-	_ = out.Close()
-	return os.Rename(part, target)
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(part, target); err != nil {
+		_ = os.Remove(part)
+		return err
+	}
+	completed = true
+	return nil
 }
 
 func unzip(src, dest string) error {
@@ -803,7 +1071,10 @@ func (m *LocalR2T2Manager) TranscribeAudio(ctx context.Context, audioBytes []byt
 
 	client := m.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
+		client = &http.Client{
+			Timeout:   120 * time.Second,
+			Transport: &http.Transport{Proxy: nil},
+		}
 	}
 
 	resp, err := client.Do(req)

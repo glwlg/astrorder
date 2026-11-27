@@ -1,5 +1,13 @@
+import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+
+vi.mock('../../components/renderMermaid', () => ({
+  renderMermaid: vi.fn(async () => ({
+    svg: '<svg aria-label="transcript-mermaid-svg" viewBox="0 0 640 320"><rect width="640" height="320" /></svg>',
+  })),
+}))
+
 import { MobileTranscript } from './MobileTranscript'
 import type { Approval, Message } from '../../domain/types'
 
@@ -208,4 +216,113 @@ it('hides handoff summary card on mobile while loading, unresolved, or in multi-
 
   view.rerender(<MobileTranscript {...baseProps} loading={false} hasOlder={false} messages={[u1, a1]} />)
   expect(screen.getByTestId('handoff-summary-card')).toBeInTheDocument()
+})
+
+it('prevents diagonal session swipes when touching inside Mermaid cards, tables, or code blocks', async () => {
+  const onSwipe = vi.fn()
+  const onSwipePreview = vi.fn()
+  const msg: Message = {
+    ...row,
+    id: 'rich-1',
+    role: 'assistant',
+    kind: 'message',
+    text: [
+      '普通说明文本',
+      '',
+      '```mermaid',
+      'graph LR',
+      '  A --> B',
+      '```',
+      '',
+      '| 列一 | 列二 |',
+      '| --- | --- |',
+      '| 值一 | 值二 |',
+      '',
+      '```ts',
+      'const horizontalScrollCode = true',
+      '```',
+    ].join('\n'),
+  }
+  const view = render(
+    <MobileTranscript
+      messages={[msg]}
+      busy={false}
+      hasOlder={false}
+      loadingOlder={false}
+      loadOlder={vi.fn()}
+      onMessageAction={vi.fn()}
+      onImage={vi.fn()}
+      onSwipe={onSwipe}
+      onSwipePreview={onSwipePreview}
+    />,
+  )
+
+  const swipeDiagonal = (target: Element) => {
+    fireEvent.touchStart(target, { touches: [{ clientX: 260, clientY: 300 }] })
+    fireEvent.touchMove(target, { touches: [{ clientX: 190, clientY: 335 }] })
+    fireEvent.touchEnd(target, { changedTouches: [{ clientX: 140, clientY: 360 }] })
+  }
+
+  const mermaidCard = view.container.querySelector('.m-mermaid-card')!
+  const tableWrap = view.container.querySelector('.m-table-wrap table')!
+  const codeBlock = view.container.querySelector('.m-code-block pre')!
+  expect(mermaidCard).toBeTruthy()
+  expect(tableWrap).toBeTruthy()
+  expect(codeBlock).toBeTruthy()
+
+  swipeDiagonal(mermaidCard)
+  swipeDiagonal(tableWrap)
+  swipeDiagonal(codeBlock)
+  expect(onSwipe).not.toHaveBeenCalled()
+  expect(onSwipePreview.mock.calls.every(([pose]) => pose === null)).toBe(true)
+
+  // Normal text outside interactive horizontal regions keeps diagonal session swipe working
+  swipeDiagonal(screen.getByText('普通说明文本'))
+  expect(onSwipe).toHaveBeenCalledWith({ direction: 1, vertical: 1, cut: 'next-down' })
+})
+
+it('does not leak touch gestures from DiagramLightboxModal portal into MobileTranscript swipe or hold handlers', async () => {
+  const onSwipe = vi.fn()
+  const onMessageAction = vi.fn()
+  const msg: Message = {
+    ...row,
+    id: 'mermaid-portal-1',
+    role: 'assistant',
+    kind: 'message',
+    text: '```mermaid\nflowchart LR\n  Client --> Server\n```',
+  }
+  render(
+    <MantineProvider>
+      <MobileTranscript
+        messages={[msg]}
+        busy={false}
+        hasOlder={false}
+        loadingOlder={false}
+        loadOlder={vi.fn()}
+        onMessageAction={onMessageAction}
+        onImage={vi.fn()}
+        onSwipe={onSwipe}
+      />
+    </MantineProvider>,
+  )
+
+  const stage = await screen.findByRole('button', { name: '点击全屏放大查看 Mermaid 图表' })
+  fireEvent.click(stage)
+  const canvas = await screen.findByLabelText('Mermaid 架构图缩放画布')
+
+  fireEvent.touchStart(canvas, {
+    touches: [{ clientX: 280, clientY: 260 }],
+    changedTouches: [{ clientX: 280, clientY: 260 }],
+  })
+  fireEvent.touchMove(canvas, {
+    touches: [{ clientX: 160, clientY: 330 }],
+    changedTouches: [{ clientX: 160, clientY: 330 }],
+  })
+  fireEvent.touchEnd(canvas, {
+    touches: [],
+    changedTouches: [{ clientX: 140, clientY: 340 }],
+  })
+
+  expect(onSwipe).not.toHaveBeenCalled()
+  expect(onMessageAction).not.toHaveBeenCalled()
 })

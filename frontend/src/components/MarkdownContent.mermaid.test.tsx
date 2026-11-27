@@ -12,6 +12,7 @@ vi.mock('mermaid', () => ({
 }))
 
 import { MarkdownContent } from './MarkdownContent'
+import { extractSvgIntrinsicSize } from './PanZoomCanvas'
 
 describe('MarkdownContent Mermaid diagrams', () => {
   afterEach(() => cleanup())
@@ -56,5 +57,37 @@ describe('MarkdownContent Mermaid diagrams', () => {
     const state = useSidecarStore.getState()
     expect(state.isOpen).toBe(true)
     expect(state.tabs.some(t => t.type === 'artifact' && t.viewerId === 'mermaid-viewer' && t.artifact?.metadata?.inlineContent === 'graph LR\nA --> B')).toBe(true)
+  })
+
+  it('opens an interactive zoom/pan lightbox modal when clicking the Mermaid diagram itself', async () => {
+    render(
+      <MantineProvider>
+        <MarkdownContent value={'```mermaid\ngraph LR\nA --> B\n```'} />
+      </MantineProvider>,
+    )
+
+    const stageBtn = await screen.findByRole('button', { name: '点击放大查看 Mermaid 图表' })
+    fireEvent.click(stageBtn)
+
+    const canvas = await screen.findByLabelText('Mermaid 架构图缩放画布')
+    expect(canvas).toBeInTheDocument()
+
+    // Wheel zoom in
+    fireEvent.wheel(canvas, { deltaY: -120, clientX: 200, clientY: 200 })
+    expect(Number(canvas.getAttribute('data-zoom-scale'))).toBeGreaterThan(1)
+
+    // Pointer drag pan
+    fireEvent.pointerDown(canvas, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 165, clientY: 140 })
+    fireEvent.pointerUp(canvas, { pointerId: 1, pointerType: 'mouse', clientX: 165, clientY: 140 })
+    expect(Number(canvas.getAttribute('data-pan-x'))).not.toBe(0)
+    expect(Number(canvas.getAttribute('data-pan-y'))).not.toBe(0)
+  })
+
+  it('extracts SVG intrinsic viewBox dimensions for crisp vector layout scaling', () => {
+    const size = extractSvgIntrinsicSize(
+      '<svg id="mermaid-1" width="100%" style="max-width: 1942.5px;" viewBox="0 0 1942.5 2418"></svg>',
+    )
+    expect(size).toEqual({ width: 1942.5, height: 2418 })
   })
 })

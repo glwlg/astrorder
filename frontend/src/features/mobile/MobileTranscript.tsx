@@ -24,6 +24,17 @@ import { HandoffSummaryCard, shouldShowHandoffSummaryCard } from '../chat/Handof
 
 export interface MessageActionAnchor { text: string; x: number; y: number; element: HTMLElement; selectText?: () => void }
 
+const SWIPE_BLOCKING_INTERACTIVE_SELECTOR =
+  '.m-select-text, .m-mermaid-card, .m-table-wrap, .m-code-block, .astr-panzoom-viewport, .astr-diagram-modal'
+const HOLD_BLOCKING_INTERACTIVE_SELECTOR =
+  '.m-select-text, .m-mermaid-card, .astr-panzoom-viewport, .astr-diagram-modal'
+
+function getTouchTargetElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target
+  if (target instanceof Node) return target.parentElement
+  return null
+}
+
 export function MobileTranscript({ session, messages, activityBreaks, commands = [], approvals = [], onApproval, busy, loading = false, historyResolved = true, loadOlder, hasOlder, loadingOlder, onMessageAction, onImage, onVideo, onFile, onSqlOpen, workspace, connectionId, readOnly = false, onSwipe, onSwipePreview, checkpoints, onOpenCheckpoint, highlightMessageId }: {
   session?: Session | null
   messages: Message[]; commands?: import('../../domain/types').Command[]; approvals?: Approval[]; onApproval?: (approval: Approval, action: 'approve' | 'cancel') => void
@@ -105,9 +116,33 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
   }, [hasOlder, highlightMessageId, loadOlder, loadingOlder, rows])
   return <>
     <div className="m-transcript" role="log" ref={(node) => { setContainerRef(node); listNodeRef.current = node }} onScroll={e => { onScroll(); older.onScroll(e) }} onWheel={older.onWheel}
-      onTouchStart={e => { older.onTouchStart(e); if ((e.target as Element).closest('.m-select-text') || startsAtSessionDrawerEdge(e.touches[0].clientX)) { touch.current = null; onSwipePreview?.(null); return }; touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
+      onTouchStart={e => {
+        older.onTouchStart(e)
+        const targetEl = getTouchTargetElement(e.target)
+        if (
+          e.touches.length !== 1 ||
+          targetEl?.closest(SWIPE_BLOCKING_INTERACTIVE_SELECTOR) ||
+          startsAtSessionDrawerEdge(e.touches[0].clientX)
+        ) {
+          touch.current = null
+          onSwipePreview?.(null)
+          return
+        }
+        touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      }}
       onTouchEnd={e => { cancelHold(); onSwipePreview?.(null); if (!touch.current) return; const start = touch.current; const end = e.changedTouches[0]; touch.current = null; const gesture = sessionSwipeGesture(start.x, start.y, end.clientX, end.clientY); if (gesture) onSwipe(gesture) }}
-      onTouchMove={e => { cancelHold(); older.onTouchMove(e); if (!touch.current || !onSwipePreview) return; onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y)) }} onTouchCancel={cancelHold}>
+      onTouchMove={e => {
+        cancelHold()
+        older.onTouchMove(e)
+        if (e.touches.length !== 1) {
+          touch.current = null
+          onSwipePreview?.(null)
+          return
+        }
+        if (!touch.current || !onSwipePreview) return
+        onSwipePreview(sessionDragPreview(e.touches[0].clientX - touch.current.x, e.touches[0].clientY - touch.current.y))
+      }}
+      onTouchCancel={() => { cancelHold(); touch.current = null; onSwipePreview?.(null) }}>
       {shouldShowHandoffSummaryCard({
         session,
         loading,
@@ -220,8 +255,8 @@ export function MobileTranscript({ session, messages, activityBreaks, commands =
         const msgArtifacts = turnArtifacts.byMessageIndex.get(i)
         return <Fragment key={m.id}><article className={`m-msg m-hold ${m.role === 'user' ? 'm-user' : 'm-assistant'}${activeHighlightId === m.id ? ' is-search-highlight' : ''}`} data-message-id={m.id}
           tabIndex={0}
-          onContextMenu={e => { if ((e.target as Element).closest('.m-select-text')) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
-          onTouchStart={e => { cancelHold(); if ((e.target as Element).closest('.m-select-text')) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
+          onContextMenu={e => { if (getTouchTargetElement(e.target)?.closest(HOLD_BLOCKING_INTERACTIVE_SELECTOR)) return; e.preventDefault(); e.stopPropagation(); cancelHold(); const rect = e.currentTarget.getBoundingClientRect(); action(m, e.currentTarget, e.clientX || rect.left + rect.width / 2, e.clientY || rect.top + 20) }}
+          onTouchStart={e => { cancelHold(); if (e.touches.length !== 1 || getTouchTargetElement(e.target)?.closest(HOLD_BLOCKING_INTERACTIVE_SELECTOR)) return; const element = e.currentTarget; const point = e.touches[0]; hold.current = setTimeout(() => { action(m, element, point.clientX, point.clientY); navigator.vibrate?.(20) }, 500) }}>
           {isAsyncQuestion(m) && <AsyncUserInputCard message={m} commands={commands} readOnly={readOnly} continued={hasLaterNativeInput(rows, i)} />}
           {!isAsyncQuestion(m) && m.text.trim() && <div className="m-bubble"><MessageBody value={m.text} user={m.role === 'user'} onImageClick={onImage} attachmentNames={m.attachments.filter((attachment) => attachment.media_type.startsWith('image/')).map((attachment) => attachment.name)} renderMarkdown={value => <MarkdownContent value={value} onFileClick={onFile} onImageClick={onImage} onVideoClick={onVideo} onSqlOpen={onSqlOpen} workspace={workspace} sessionId={m.session_id} connectionId={connectionId} />} sessionId={m.session_id} connectionId={connectionId || undefined} /></div>}
           {!!m.attachments.length && (() => {

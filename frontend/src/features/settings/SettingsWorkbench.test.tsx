@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeSettingsTab, StandaloneSettingsPage } from './SettingsWorkbench'
+import { openOnboardingWizard } from '../office/OnboardingWizard'
+import { clearStoredAppProfileForTest, setAppProfile } from '../office/appProfile'
 
 vi.mock('./GeneralSettingsPage', () => ({ GeneralSettingsPage: () => <div>GENERAL_TAB_PANEL</div> }))
 vi.mock('../agents/AgentsPage', () => ({ AgentsPage: () => <div>AGENTS_TAB_PANEL</div> }))
@@ -40,6 +42,7 @@ vi.mock('../integrations/integrationStore', () => {
 afterEach(() => {
   cleanup()
   localStorage.clear()
+  clearStoredAppProfileForTest()
   delete (window as unknown as { astrorderDesktop?: unknown }).astrorderDesktop
 })
 
@@ -126,5 +129,33 @@ describe('SettingsWorkbench & StandaloneSettingsPage (basic vs advanced mode)', 
     // Clicking "返回主窗口" focuses the main OS window
     fireEvent.click(screen.getByRole('button', { name: /返回主窗口/ }))
     expect(focusMain).toHaveBeenCalledWith('')
+
+    // Triggering the onboarding wizard from inside the standalone settings window opens the modal
+    openOnboardingWizard()
+    expect(await screen.findByText('欢迎使用星序 · 1 分钟完成初始化')).toBeInTheDocument()
+  })
+
+  it('locks settings into office mode hiding mode switcher, advanced tabs, and CapabilitiesSettingsCard even on /settings?tab=skills', async () => {
+    setAppProfile('office', { syncPluginStore: false })
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/settings?tab=skills']}>
+          <StandaloneSettingsPage />
+        </MemoryRouter>
+      </MantineProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('GENERAL_TAB_PANEL')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('SKILLS_TAB_PANEL')).toBeNull()
+    expect(screen.queryByRole('tab', { name: '能力中心' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: '环境与 Agent 连接' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: '命令输出压缩' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: '网络与远程访问' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /展开高级与开发配置/ })).toBeNull()
+    expect(screen.queryByText('高级配置')).toBeNull()
+    expect(screen.getByRole('tab', { name: '功能开关' })).toBeInTheDocument()
   })
 })

@@ -125,7 +125,7 @@ func TestPatchReadFailureRollsBackChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.DB().ExecContext(ctx, `INSERT INTO workspace_preferences("key",value) VALUES('corrupt-fixture','invalid-json')`); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO workspace_preferences("key",value) VALUES('appearance:corrupt-fixture','invalid-json')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Apply(ctx, st, Patch{SessionPins: map[string]any{"new-pin": true}}); err == nil {

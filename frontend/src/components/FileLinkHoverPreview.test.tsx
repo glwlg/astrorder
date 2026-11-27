@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearStoredAppProfileForTest, setAppProfile } from '../features/office/appProfile'
 import { FileLinkHoverPreview } from './FileLinkHoverPreview'
 
 const mockAuthenticatedApiFetch = vi.fn()
@@ -15,6 +16,7 @@ describe('FileLinkHoverPreview worktree fallback presentation', () => {
 
   afterEach(() => {
     cleanup()
+    clearStoredAppProfileForTest()
   })
 
   it('renders worktree origin bar and forwards real resolved path to copy/open actions', async () => {
@@ -77,5 +79,45 @@ describe('FileLinkHoverPreview worktree fallback presentation', () => {
 
     fireEvent.click(screen.getByLabelText('在侧边栏打开文件'))
     expect(onOpen).toHaveBeenCalledWith(resolvedPath)
+  })
+
+  it('hides Xftp tooltip and Worktree bar in office mode', async () => {
+    setAppProfile('office', { syncPluginStore: false })
+    const headers = new Headers({
+      'X-Astrorder-Resolved-Path': encodeURIComponent('/tmp/office-wt/report.md'),
+      'X-Astrorder-Worktree-Path': encodeURIComponent('/tmp/office-wt'),
+      'X-Astrorder-Worktree-Branch': encodeURIComponent('feat/draft'),
+    })
+    mockAuthenticatedApiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers,
+      arrayBuffer: async () => new TextEncoder().encode('# 季度报告\n').buffer,
+    })
+
+    render(
+      <FileLinkHoverPreview
+        target={{
+          rect: { left: 120, right: 320, top: 100, bottom: 124, width: 200, height: 24 },
+          path: '/workspace/office/report.md',
+          displayName: 'report.md',
+          readUrl: '/api/v1/files/raw?path=%2Fworkspace%2Foffice%2Freport.md&session_id=s-office',
+          isImage: false,
+          isNonPreviewable: false,
+        }}
+        onMouseEnter={() => {}}
+        onMouseLeave={() => {}}
+        onCopyFile={vi.fn().mockResolvedValue(true)}
+        onOpen={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('季度报告')).toBeTruthy()
+    })
+    expect(screen.queryByText(/来自 Worktree:/)).toBeNull()
+    const copyFileBtn = screen.getByLabelText('复制文件到剪贴板')
+    expect(copyFileBtn.getAttribute('title')).not.toContain('Xftp')
   })
 })

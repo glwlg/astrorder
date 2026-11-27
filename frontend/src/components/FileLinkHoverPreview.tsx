@@ -16,6 +16,7 @@ import {
   IconPhoto,
 } from '@tabler/icons-react'
 import { authenticatedApiFetch } from '../api/client'
+import { useIsOfficeProfile } from '../features/office/appProfile'
 import { highlightCode } from './markdownHighlight'
 
 export interface FileHoverTarget {
@@ -190,6 +191,7 @@ function shortParentPath(fullPath: string): string {
 
 export function FileLinkHoverPreview({
   target,
+  officeMode,
   onMouseEnter,
   onMouseLeave,
   onCopyFile,
@@ -197,12 +199,15 @@ export function FileLinkHoverPreview({
   onClose,
 }: {
   target: FileHoverTarget | null
+  officeMode?: boolean
   onMouseEnter: () => void
   onMouseLeave: () => void
   onCopyFile?: (resolvedPath?: string) => Promise<boolean> | void
   onOpen: (resolvedPath?: string) => void
   onClose: () => void
 }) {
+  const isOfficeProfile = useIsOfficeProfile()
+  const isOfficeMode = officeMode ?? isOfficeProfile
   const cardRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{
     left: number
@@ -460,7 +465,11 @@ export function FileLinkHoverPreview({
               disabled={copyingFile}
               onClick={() => void handleCopyFileClick()}
               aria-label="复制文件到剪贴板"
-              title="复制文件到系统剪贴板（可直接 Ctrl+V 粘贴到 Xftp 或资源管理器）"
+              title={
+                isOfficeMode
+                  ? '复制文件到系统剪贴板（可直接 Ctrl+V 粘贴到本地文件夹）'
+                  : '复制文件到系统剪贴板（可直接 Ctrl+V 粘贴到 Xftp 或资源管理器）'
+              }
             >
               {copyingFile ? (
                 <IconLoader2 size={12} className="rotating-icon" />
@@ -510,7 +519,7 @@ export function FileLinkHoverPreview({
         </div>
       </header>
 
-      {state.worktreePath && (
+      {!isOfficeMode && state.worktreePath && (
         <div className="file-hover-worktree-bar" title={effectivePath}>
           <div className="file-hover-worktree-meta">
             <IconGitBranch size={12} aria-hidden="true" />

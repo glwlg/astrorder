@@ -85,6 +85,36 @@
   background: var(--oh-rail-hover);
 }
 
+.office-home-agent-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--oh-border, var(--astr-border, #e5e7eb));
+  background: var(--oh-paper, var(--astr-surface, #ffffff));
+}
+
+.office-home-agent-banner-copy {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.office-home-agent-banner-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--oh-ink, var(--astr-text, #111827));
+}
+
+.office-home-agent-banner-desc {
+  font-size: 12px;
+  color: var(--oh-muted, var(--astr-muted, #6b7280));
+  margin-top: 2px;
+  line-height: 1.5;
+}
+
 .office-home-composer {
   border: 1px solid var(--oh-border);
   border-radius: 14px;
@@ -516,4 +546,378 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ============================================================================
+   Mobile & Narrow Viewport Refinement (375px–430px / .mobile-workspace)
+   ============================================================================ */
+@media (max-width: 767px) {
+  .office-home-stage {
+    padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .office-home-inner {
+    gap: 14px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .office-home-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .office-home-header-copy {
+    min-width: 0;
+  }
+
+  .office-home-greeting {
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  .office-home-date {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .office-home-header-actions {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    max-width: 100%;
+  }
+
+  .office-home-header-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .office-home-persona-pill {
+    flex: 0 0 auto;
+    min-height: 36px;
+    height: auto;
+    padding: 6px 12px;
+    white-space: nowrap;
+  }
+
+  .office-home-agent-banner {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .office-home-agent-banner .office-home-submit {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .office-home-composer {
+    padding: 10px 12px;
+    border-radius: 12px;
+    min-width: 0;
+  }
+
+  .office-home-textarea {
+    min-height: 68px;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  .office-home-composer-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .office-home-composer-tools {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap !important;
+  }
+
+  .office-home-composer .office-tool-chip {
+    min-height: 34px;
+    height: auto;
+    padding: 5px 10px;
+    max-width: 100%;
+  }
+
+  .office-home-composer .office-tool-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
+  }
+
+  .office-home-submit {
+    width: 100%;
+    justify-content: center;
+    min-height: 40px;
+    height: auto;
+    padding: 8px 14px;
+    font-size: 13.5px;
+  }
+
+  .office-tpl-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .office-tpl-card {
+    min-width: 0;
+    min-height: 76px;
+    padding: 10px 11px;
+  }
+
+  .office-tpl-card-head {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .office-bento-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .office-bento-card {
+    padding: 12px;
+    border-radius: 12px;
+    min-width: 0;
+  }
+
+  .office-bento-row {
+    min-height: 42px;
+    padding: 8px;
+  }
+
+  .office-home-quick-todo {
+    min-height: 40px;
+    padding: 4px 10px;
+  }
+
+  .office-home-quick-todo input {
+    height: 30px;
+    font-size: 15px;
+  }
+
+  .office-home-link {
+    min-height: 32px;
+    padding: 4px 8px;
+  }
+
+  .office-sources-strip,
+  .office-sources-row,
+  .office-sources-actions {
+    min-width: 0;
+  }
+
+  .office-source-pill {
+    max-width: 100%;
+  }
+}
+
+.mobile-workspace .office-home-stage,
+.office-home-stage.is-mobile {
+  padding: 14px 12px calc(28px + env(safe-area-inset-bottom, 0px));
+  min-width: 0;
+  width: 100%;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-workspace .m-office-page-scroll > .office-home-stage {
+  padding: 2px 0 calc(24px + env(safe-area-inset-bottom, 0px));
+  height: auto;
+  overflow-y: visible;
+}
+
+.mobile-workspace .office-home-inner,
+.office-home-stage.is-mobile .office-home-inner {
+  gap: 14px;
+  min-width: 0;
+  width: 100%;
+}
+
+.mobile-workspace .office-home-header,
+.office-home-stage.is-mobile .office-home-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.mobile-workspace .office-home-header-copy,
+.office-home-stage.is-mobile .office-home-header-copy {
+  min-width: 0;
+}
+
+.mobile-workspace .office-home-greeting,
+.office-home-stage.is-mobile .office-home-greeting {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.mobile-workspace .office-home-date,
+.office-home-stage.is-mobile .office-home-date {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mobile-workspace .office-home-header-actions,
+.office-home-stage.is-mobile .office-home-header-actions {
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  max-width: 100%;
+}
+
+.mobile-workspace .office-home-header-actions::-webkit-scrollbar,
+.office-home-stage.is-mobile .office-home-header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-workspace .office-home-persona-pill,
+.office-home-stage.is-mobile .office-home-persona-pill {
+  flex: 0 0 auto;
+  min-height: 36px;
+  height: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-rail);
+  color: var(--oh-body);
+  white-space: nowrap;
+}
+
+.mobile-workspace .office-home-agent-banner,
+.office-home-stage.is-mobile .office-home-agent-banner {
+  padding: 12px;
+  gap: 10px;
+}
+
+.mobile-workspace .office-home-agent-banner .office-home-submit,
+.office-home-stage.is-mobile .office-home-agent-banner .office-home-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.mobile-workspace .office-home-composer,
+.office-home-stage.is-mobile .office-home-composer {
+  padding: 10px 12px;
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.mobile-workspace .office-home-textarea,
+.office-home-stage.is-mobile .office-home-textarea {
+  min-height: 68px;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.mobile-workspace .office-home-composer-bar,
+.office-home-stage.is-mobile .office-home-composer-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.mobile-workspace .office-home-composer-tools,
+.office-home-stage.is-mobile .office-home-composer-tools {
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap !important;
+}
+
+.mobile-workspace .office-home-composer .office-tool-chip,
+.office-home-stage.is-mobile .office-home-composer .office-tool-chip {
+  min-height: 34px;
+  height: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-paper);
+  color: var(--oh-ink);
+  max-width: 100%;
+}
+
+.mobile-workspace .office-home-composer .office-tool-chip span,
+.office-home-stage.is-mobile .office-home-composer .office-tool-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.mobile-workspace .office-home-submit,
+.office-home-stage.is-mobile .office-home-submit {
+  width: 100%;
+  justify-content: center;
+  min-height: 40px;
+  height: auto;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  background: var(--oh-obsidian);
+  color: var(--oh-obsidian-text);
+}
+
+.mobile-workspace .office-tpl-grid,
+.office-home-stage.is-mobile .office-tpl-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-workspace .office-tpl-card,
+.office-home-stage.is-mobile .office-tpl-card {
+  min-width: 0;
+  min-height: 76px;
+  padding: 10px 11px;
+  border: 1px solid var(--oh-border);
+  background: var(--oh-paper);
+}
+
+.mobile-workspace .office-tpl-card-head,
+.office-home-stage.is-mobile .office-tpl-card-head {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mobile-workspace .office-bento-grid,
+.office-home-stage.is-mobile .office-bento-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.mobile-workspace .office-bento-card,
+.office-home-stage.is-mobile .office-bento-card {
+  padding: 12px;
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.mobile-workspace .office-bento-row,
+.office-home-stage.is-mobile .office-bento-row {
+  min-height: 42px;
+  padding: 8px;
+}
+
+.mobile-workspace .office-home-quick-todo,
+.office-home-stage.is-mobile .office-home-quick-todo {
+  min-height: 40px;
+  padding: 4px 10px;
+}
+
+.mobile-workspace .office-home-quick-todo input,
+.office-home-stage.is-mobile .office-home-quick-todo input {
+  height: 30px;
+  font-size: 15px;
+}
+
+.mobile-workspace .office-home-link,
+.office-home-stage.is-mobile .office-home-link {
+  min-height: 32px;
+  padding: 4px 8px;
 }

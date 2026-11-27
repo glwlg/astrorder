@@ -552,26 +552,29 @@ export function SessionRail({
     )
   }
 
-  const distillToBotMenuItem = (session: Session) => (
-    <Menu.Item
-      leftSection={<IconRobot size={14} />}
-      onClick={() => {
-        storePendingDistillIntent({
-          sessionKey: scopeKey(session.agent_id, session.id),
-          sessionTitle: displaySessionTitle(session),
-          workspace: session.workspace || undefined,
-          connectionId: session.connection_id || undefined,
-          agentId: session.agent_id,
-        })
-        window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/bots' } }))
-      }}
-    >
-      沉淀为 Bot
-    </Menu.Item>
-  )
+  const distillToBotMenuItem = (session: Session) => {
+    if (isOfficeProfile) return null
+    return (
+      <Menu.Item
+        leftSection={<IconRobot size={14} />}
+        onClick={() => {
+          storePendingDistillIntent({
+            sessionKey: scopeKey(session.agent_id, session.id),
+            sessionTitle: displaySessionTitle(session),
+            workspace: session.workspace || undefined,
+            connectionId: session.connection_id || undefined,
+            agentId: session.agent_id,
+          })
+          window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/bots' } }))
+        }}
+      >
+        沉淀为 Bot
+      </Menu.Item>
+    )
+  }
 
   const handoffToBotMenuItem = (session: Session) => {
-    if (registeredBots.length === 0) return null
+    if (isOfficeProfile || registeredBots.length === 0) return null
     return (
       <Menu.Item
         leftSection={<IconTransfer size={14} />}
@@ -632,7 +635,7 @@ export function SessionRail({
     setDeleteRemoveWorktree(false)
     setDeleteWorktreeBranch(true)
     setDeleteForceWorktree(false)
-    if (isLinkedWorktreeSession(session)) {
+    if (!isSessionOffice(session) && isLinkedWorktreeSession(session)) {
       const norm = (v?: string | null) => (v || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
       const otherSessions = sessions.filter(
         (s) => !(s.agent_id === session.agent_id && s.id === session.id)
@@ -649,7 +652,7 @@ export function SessionRail({
   useEffect(() => {
     if (confirmation?.kind !== 'delete-session') return
     const target = confirmation.session
-    if (!isLinkedWorktreeSession(target)) return
+    if (isSessionOffice(target) || !isLinkedWorktreeSession(target)) return
     if (!deleteWorktreeStatus || !deleteWorktreeStatus.loading) return
     const controller = new AbortController()
     api.listGitWorktrees(
@@ -680,7 +683,7 @@ export function SessionRail({
 
   const deleteSession = async (session: Session) => {
     try {
-      const wantRemoveWT = isLinkedWorktreeSession(session) && deleteRemoveWorktree && (deleteWorktreeStatus?.otherSessions ?? 0) === 0
+      const wantRemoveWT = !isSessionOffice(session) && isLinkedWorktreeSession(session) && deleteRemoveWorktree && (deleteWorktreeStatus?.otherSessions ?? 0) === 0
       const res = await api.deleteSession(
         session.id,
         session.agent_id,
@@ -975,7 +978,7 @@ export function SessionRail({
           <kbd
             role="button"
             tabIndex={0}
-            title={isOfficeProfile ? '打开快捷搜索面板 (Ctrl+K)' : '打开全能星令面板 (Ctrl+K)'}
+            title={isOfficeProfile ? '打开全局搜索 (Ctrl+K)' : '打开全能星令面板 (Ctrl+K)'}
             style={{ cursor: 'pointer' }}
             onClick={() => window.dispatchEvent(new CustomEvent('astrorder:open-command-palette'))}
             onKeyDown={(e) => {
@@ -1012,7 +1015,7 @@ export function SessionRail({
           setBatchMode(prev => !prev)
           setSelectedSessionKeys(new Set())
         }}>{batchMode ? '退出批量管理' : '批量管理会话'}</Menu.Item>
-        <Menu.Item leftSection={<IconPlus size={17} />} onClick={() => setAddProjectOpened(true)}>新增项目</Menu.Item>
+        <Menu.Item leftSection={<IconPlus size={17} />} onClick={() => setAddProjectOpened(true)}>{isOfficeProfile ? '新建办公空间' : '新增项目'}</Menu.Item>
         </Menu.Dropdown>
       </Menu>
       </SessionQuickFilters>
@@ -1133,7 +1136,7 @@ export function SessionRail({
                   }}
                 >
                   <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
-                  <span className="session-row-title" title={session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
+                  <span className="session-row-title" title={!isSessionOffice(session) && session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
                     {projectCustom?.icon && (
                       <ProjectGlyph
                         iconName={projectCustom.icon}
@@ -1143,7 +1146,7 @@ export function SessionRail({
                       />
                     )}
                     {displaySessionTitle(session)}
-                    {session.worktree_branch && isLinkedWorktreeSession(session) && (
+                    {!isSessionOffice(session) && session.worktree_branch && isLinkedWorktreeSession(session) && (
                       <span
                         title={`Git Worktree 分支：${session.worktree_branch}\n路径：${session.workspace}`}
                         style={{
@@ -1205,7 +1208,7 @@ export function SessionRail({
               <div className="session-project-section-heading">
                 <span>{isOfficeProfile ? '工作空间' : '项目'}</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {botProjectCount > 0 && (
+                  {!isOfficeProfile && botProjectCount > 0 && (
                     <button
                       type="button"
                       onClick={toggleHideBotProjects}
@@ -1229,8 +1232,9 @@ export function SessionRail({
           const projectCollapseKey = `project:${project.key}`
           const projectCollapsed = collapsed[projectCollapseKey] === true
           const isProjectPinned = pinnedProjects.includes(project.key)
-          const isOfficeProject = isOfficeProfile || isProjectInOfficeMode(officeModeRegistry, project.key, project.workspace)
-          const matchedBot = botForGroup(project)
+          const isProjectExplicitOffice = isProjectInOfficeMode(officeModeRegistry, project.key, project.workspace)
+          const isOfficeProject = isOfficeProfile || isProjectExplicitOffice
+          const matchedBot = isOfficeProfile ? undefined : botForGroup(project)
           const projectCustom = projectAppearance[project.key]
           const visibleCount = expandedCountMap[project.key] ?? 4
           const regularSessions = project.sessions.filter(s => !pinnedSessions[scopeKey(s.agent_id, s.id)])
@@ -1295,7 +1299,7 @@ export function SessionRail({
                       Bot
                     </span>
                   )}
-                  {isOfficeProject && (
+                  {!isOfficeProfile && isProjectExplicitOffice && (
                     <span
                       className="session-project-source"
                       title="办公空间模式（已隐藏 Git / 终端 / 数据库等开发工具）"
@@ -1406,23 +1410,25 @@ export function SessionRail({
                       >
                         外观设置
                       </Menu.Item>
-                      <Menu.Item
-                        leftSection={isOfficeProject ? <IconCode size={14} /> : <IconBriefcase size={14} />}
-                        onClick={() => {
-                          setProjectOfficeMode(
-                            { projectKey: project.key, workspace: project.workspace },
-                            !isOfficeProject,
-                          )
-                          notifications.show({
-                            color: 'teal',
-                            message: isOfficeProject
-                              ? `已将「${project.label}」切换回开发项目`
-                              : `已将「${project.label}」切换为办公空间`,
-                          })
-                        }}
-                      >
-                        {isOfficeProject ? '切换回开发项目' : '切换为办公空间'}
-                      </Menu.Item>
+                      {!isOfficeProfile && (
+                        <Menu.Item
+                          leftSection={isProjectExplicitOffice ? <IconCode size={14} /> : <IconBriefcase size={14} />}
+                          onClick={() => {
+                            setProjectOfficeMode(
+                              { projectKey: project.key, workspace: project.workspace },
+                              !isProjectExplicitOffice,
+                            )
+                            notifications.show({
+                              color: 'teal',
+                              message: isProjectExplicitOffice
+                                ? `已将「${project.label}」切换回开发项目`
+                                : `已将「${project.label}」切换为办公空间`,
+                            })
+                          }}
+                        >
+                          {isProjectExplicitOffice ? '切换回开发项目' : '切换为办公空间'}
+                        </Menu.Item>
+                      )}
                       {!isOfficeProject && dbxDirectExecEnabled && (
                         <Menu.Item
                           leftSection={<IconDatabase size={14} />}
@@ -1535,9 +1541,9 @@ export function SessionRail({
                           }}
                         >
                           <span className="session-row-glyph"><AgentKindBadge agent={agents[session.agent_id]} iconOnly /></span>
-                          <span className="session-row-title" title={session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
+                          <span className="session-row-title" title={!isOfficeProject && session.worktree_branch && isLinkedWorktreeSession(session) ? `${displaySessionTitle(session)} · Worktree: ${session.worktree_branch} (${session.workspace})` : displaySessionTitle(session)}>
                             {displaySessionTitle(session)}
-                            {session.worktree_branch && isLinkedWorktreeSession(session) && (
+                            {!isOfficeProject && session.worktree_branch && isLinkedWorktreeSession(session) && (
                               <span
                                 title={`Git Worktree 分支：${session.worktree_branch}\n路径：${session.workspace}`}
                                 style={{
@@ -1834,7 +1840,7 @@ export function SessionRail({
         coords={confirmation?.coords}
         title={confirmationTitle}
         message={confirmationMessage}
-        extraContent={confirmation?.kind === 'delete-session' && deleteWorktreeStatus ? (
+        extraContent={confirmation?.kind === 'delete-session' && !isSessionOffice(confirmation.session) && deleteWorktreeStatus ? (
           <Stack gap={6} pt={2}>
             {deleteWorktreeStatus.otherSessions > 0 ? (
               <Text size="xs" c="dimmed">

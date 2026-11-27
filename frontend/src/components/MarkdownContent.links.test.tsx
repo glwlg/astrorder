@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core'
 import { afterEach } from 'vitest'
 import { MarkdownContent } from './MarkdownContent'
 import type { Session } from '../domain/types'
+import { artifactViewerRegistry } from '../features/sidecar/registry'
 import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { api } from '../api/client'
 
@@ -22,16 +23,30 @@ describe('MarkdownContent Links Handling', () => {
     useSidecarStore.setState({ isOpen: false, activeTabId: '', tabs: [], activeSessionKey: null, sessionMemories: {} })
   })
   it('intercepts http artifact url and does not render raw refreshable link', () => {
-    const text = '访问 [order-flow.excalidraw](https://ao.example.com/abs/path/artifacts/order-flow.excalidraw)'
-    render(
-      <MantineProvider>
-        <MarkdownContent value={text} session={mockSession} />
-      </MantineProvider>,
-    )
+    const excalidrawDisposable = artifactViewerRegistry.register({
+      id: 'excalidraw-viewer',
+      pluginId: 'excalidraw-viewer',
+      source: 'esm',
+      title: '手绘白板',
+      icon: () => null,
+      extensions: ['.excalidraw', '.excalidraw.json', '.excalidraw.svg'],
+      component: () => null,
+      capabilities: { canEdit: true },
+    })
+    try {
+      const text = '访问 [order-flow.excalidraw](https://ao.example.com/abs/path/artifacts/order-flow.excalidraw)'
+      render(
+        <MantineProvider>
+          <MarkdownContent value={text} session={mockSession} />
+        </MantineProvider>,
+      )
 
-    const btn = screen.getByRole('button', { name: /order-flow\.excalidraw/ })
-    expect(btn).toBeInTheDocument()
-    expect(btn).toHaveClass('markdown-file-link')
+      const btn = screen.getByRole('button', { name: /order-flow\.excalidraw/ })
+      expect(btn).toBeInTheDocument()
+      expect(btn).toHaveClass('markdown-file-link')
+    } finally {
+      excalidrawDisposable.dispose()
+    }
   })
 
   it('automatically detects plain text path like artifacts/order-flow.mmd', async () => {

@@ -42,6 +42,7 @@ export interface InterpretedGatewayError {
   title: string
   description: string
   isKnownGatewayIssue: boolean
+  suggestions?: string[]
   recommendedModel?: { provider: string; model: string; label: string }
 }
 
@@ -59,10 +60,10 @@ export function interpretGatewayError(rawError?: string | null): InterpretedGate
   ) {
     return {
       type: 'quota',
-      title: '网关模型配额已耗尽',
-      description: '当前模型上游配额已耗尽或触发速率限制，建议切换至其他充裕模型继续对话。',
+      title: '当前模型额度已用完或请求受限',
+      description: '所选模型的调用额度已用完或暂时触发速率限制，建议在下方切换其他可用模型，或精简对话内容后稍后重试。',
       isKnownGatewayIssue: true,
-      recommendedModel: { provider: 'google-antigravity', model: 'gemini-3.8-flash', label: 'gemini-3.8-flash' },
+      suggestions: ['在下方模型选择器中切换其他可用模型', '开启新对话或精简当前对话内容后重试'],
     }
   }
   if (
@@ -388,16 +389,19 @@ export function ChatComposer({
   const mentionText = mentionMatch?.[0].trim().slice(1) || ''
   const mentionQuery = useAgentMentions(session, resourcesReady)
   const fileMentionQuery = useFileMentions(session, mentionText, mentionMenuOpen && resourcesReady)
-  const botsMentionQuery = useBots(mentionMenuOpen && resourcesReady)
+  const botsMentionQuery = useBots(mentionMenuOpen && resourcesReady && !isOfficeWorkspace)
   const botMentions = useMemo<import('../../domain/types').AgentMention[]>(
-    () => (botsMentionQuery.data?.items || []).map((bot) => ({
-      name: `Bot:${bot.slug}`,
-      description: `${bot.name}${bot.description ? ` · ${bot.description}` : ''}`,
-      kind: 'bot' as const,
-      path: `bot:${bot.slug}`,
-      botSlug: bot.slug,
-    })),
-    [botsMentionQuery.data?.items],
+    () =>
+      isOfficeWorkspace
+        ? []
+        : (botsMentionQuery.data?.items || []).map((bot) => ({
+            name: `Bot:${bot.slug}`,
+            description: `${bot.name}${bot.description ? ` · ${bot.description}` : ''}`,
+            kind: 'bot' as const,
+            path: `bot:${bot.slug}`,
+            botSlug: bot.slug,
+          })),
+    [botsMentionQuery.data?.items, isOfficeWorkspace],
   )
   const agentMentions = useMemo(
     () => (mentionMenuOpen
@@ -920,7 +924,7 @@ ${draft.text}` : entry.payload.text)
         }}
         onDrop={handleSessionDrop}
       >
-        <MemoGoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />
+        {!isOfficeWorkspace && <MemoGoalManager key={`${session.agent_id}::${session.id}`} session={session} agent={agent} tasks={tasks} />}
         {!isOfficeWorkspace && <MemoGitStatusBar session={session} />}
         {isOfficeWorkspace && (
           <OfficeSourcesBar
@@ -1006,22 +1010,19 @@ ${draft.text}` : entry.payload.text)
               onClose={() => { setError(null); setSubmittedCommandId(null) }}
             >
               <div>{parsed?.description || visibleError}</div>
-              {parsed?.type === 'quota' && parsed.recommendedModel && (
-                <Group gap="xs" mt={6}>
-                  <Text size="xs" c="dimmed">推荐切换至高可用模型：</Text>
+              {parsed?.type === 'quota' && (
+                <Group gap="xs" mt={6} wrap="wrap">
+                  <Text size="xs" c="dimmed">
+                    {parsed.suggestions?.join('；') || '可在下方切换其他可用模型或精简对话后重试'}
+                  </Text>
                   <Button
                     size="compact-xs"
                     variant="default"
                     onClick={() => {
-                      const rec = parsed.recommendedModel
-                      if (!rec) return
-                      const provider = agent?.kind === 'antigravity' ? 'antigravity' : rec.provider
-                      void api.setSessionModel(session.id, session.agent_id, provider, rec.model)
-                        .then(() => setError(null))
-                        .catch((e) => setError(errorMessage(e)))
+                      window.dispatchEvent(new CustomEvent('astrorder:open-settings', { detail: { tab: 'models' } }))
                     }}
                   >
-                    切换至 {parsed.recommendedModel.label}
+                    检查 AI 供应商
                   </Button>
                 </Group>
               )}

@@ -52,18 +52,208 @@ var artIconColors = map[string]string{
 	"glass-layers": "emerald", "glass-cube": "cyan", "glass-flower": "fuchsia",
 }
 
+const (
+	// DefaultMaxValueBytes caps single-row value size returned by unfiltered Query calls
+	// when the caller did not explicitly request that key or prefix.
+	DefaultMaxValueBytes = 256 * 1024
+)
+
+var (
+	p02ExactKeys = []string{"appearance", "session_pins", "pinned_projects", "project_order"}
+	p02Prefixes  = []string{"appearance:", "session_pins:", "pinned_projects:", "project_order:"}
+
+	// DefaultExcludedKeys are giant non-core preference keys skipped by default unless
+	// explicitly requested by key or matching prefix.
+	DefaultExcludedKeys = []string{"meetings:records:v1", "meetings:records"}
+
+	// DefaultExcludedPrefixes are heavy key prefixes skipped by default unless
+	// explicitly requested by key or matching prefix.
+	DefaultExcludedPrefixes = []string{"meetings:records:"}
+)
+
+// QueryOptions filters workspace_preferences rows using indexed SQL WHERE predicates.
+// When Keys and Prefixes are both empty, DefaultExcludedKeys, DefaultExcludedPrefixes,
+// and oversized rows (larger than MaxValueBytes / DefaultMaxValueBytes) are excluded
+// unless IncludeHeavyKeys is true. When a caller explicitly names a key in Keys or a
+// matching prefix in Prefixes, matching rows are returned in full regardless of size.
+type QueryOptions struct {
+	Keys             []string
+	Prefixes         []string
+	IncludeHeavyKeys bool
+	MaxValueBytes    int
+}
+
 // Read returns only the four public P02 namespaces; tombstone appearance values are omitted.
 func Read(ctx context.Context, st *store.Store) (State, error) {
 	return readPreferences(ctx, st.DB())
+}
+
+// ReadKey returns one preference by exact primary-key lookup (including heavy blobs such
+// as meetings:records:v1 when explicitly requested).
+func ReadKey(ctx context.Context, st *store.Store, key string) (any, bool, error) {
+	if st == nil || key == "" {
+		return nil, false, nil
+	}
+	return readKey(ctx, st.DB(), key)
+}
+
+// Query returns workspace_preferences rows matching opts using indexed SQL filters.
+func Query(ctx context.Context, st *store.Store, opts QueryOptions) (map[string]any, error) {
+	if st == nil {
+		return map[string]any{}, nil
+	}
+	return queryPreferences(ctx, st.DB(), opts)
 }
 
 type preferenceQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+func prefixUpperBound(prefix string) (string, bool) {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < 0xFF {
+			b[i]++
+			return string(b[:i+1]), true
+		}
+	}
+	return "", false
+}
+
+// buildIndexedFilterQuery builds a case-sensitive, index-friendly SQL query on
+// workspace_preferences("key" PRIMARY KEY) from exact keys and key prefixes.
+// Overlapping keys/prefixes are collapsed so all UNION ALL branches are disjoint.
+func buildIndexedFilterQuery(exactKeys, prefixes []string) (string, []any) {
+	rawPrefixes := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p != "" {
+			rawPrefixes = append(rawPrefixes, p)
+		}
+	}
+	sort.Slice(rawPrefixes, func(i, j int) bool {
+		if len(rawPrefixes[i]) != len(rawPrefixes[j]) {
+			return len(rawPrefixes[i]) < len(rawPrefixes[j])
+		}
+		return rawPrefixes[i] < rawPrefixes[j]
+	})
+	keptPrefixes := make([]string, 0, len(rawPrefixes))
+	for _, p := range rawPrefixes {
+		covered := false
+		for _, kept := range keptPrefixes {
+			if strings.HasPrefix(p, kept) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			keptPrefixes = append(keptPrefixes, p)
+		}
+	}
+
+	seenKeys := make(map[string]bool, len(exactKeys))
+	keptKeys := make([]string, 0, len(exactKeys))
+	for _, k := range exactKeys {
+		if k == "" || seenKeys[k] {
+			continue
+		}
+		covered := false
+		for _, p := range keptPrefixes {
+			if strings.HasPrefix(k, p) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			seenKeys[k] = true
+			keptKeys = append(keptKeys, k)
+		}
+	}
+	sort.Strings(keptKeys)
+
+	if len(keptKeys) == 0 && len(keptPrefixes) == 0 {
+		return "", nil
+	}
+
+	branches := make([]string, 0, 1+len(keptPrefixes))
+	args := make([]any, 0, len(keptKeys)+2*len(keptPrefixes))
+
+	if len(keptKeys) > 0 {
+		placeholders := make([]string, len(keptKeys))
+		for i, k := range keptKeys {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		branches = append(branches, `SELECT "key",value FROM workspace_preferences WHERE "key" IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	for _, p := range keptPrefixes {
+		if upper, ok := prefixUpperBound(p); ok {
+			branches = append(branches, `SELECT "key",value FROM workspace_preferences WHERE "key">=? AND "key"<?`)
+			args = append(args, p, upper)
+		} else {
+			branches = append(branches, `SELECT "key",value FROM workspace_preferences WHERE "key">=?`)
+			args = append(args, p)
+		}
+	}
+
+	return strings.Join(branches, " UNION ALL ") + ` ORDER BY "key"`, args
+}
+
+func buildDefaultFilteredQuery(opts QueryOptions) (string, []any) {
+	if opts.IncludeHeavyKeys {
+		return `SELECT "key",value FROM workspace_preferences ORDER BY "key"`, nil
+	}
+	maxBytes := opts.MaxValueBytes
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxValueBytes
+	}
+
+	conds := make([]string, 0, 2+len(DefaultExcludedPrefixes))
+	args := make([]any, 0, len(DefaultExcludedKeys)+2*len(DefaultExcludedPrefixes)+1)
+
+	if len(DefaultExcludedKeys) > 0 {
+		placeholders := make([]string, len(DefaultExcludedKeys))
+		for i, k := range DefaultExcludedKeys {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		conds = append(conds, `"key" NOT IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	for _, p := range DefaultExcludedPrefixes {
+		if upper, ok := prefixUpperBound(p); ok {
+			conds = append(conds, `NOT ("key">=? AND "key"<?)`)
+			args = append(args, p, upper)
+		} else {
+			conds = append(conds, `NOT ("key">=?)`)
+			args = append(args, p)
+		}
+	}
+	conds = append(conds, `coalesce(length(value),0)<=?`)
+	args = append(args, maxBytes)
+
+	return `SELECT "key",value FROM workspace_preferences WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY "key"`, args
+}
+
+func decodePreferenceJSON(raw sql.NullString) (any, error) {
+	if !raw.Valid {
+		return nil, nil
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw.String))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("stored preference must contain exactly one JSON value")
+	}
+	return value, nil
+}
+
 func readPreferences(ctx context.Context, db preferenceQuery) (State, error) {
 	result := emptyState()
-	rows, err := db.QueryContext(ctx, `SELECT "key",value FROM workspace_preferences ORDER BY "key"`)
+	query, args := buildIndexedFilterQuery(p02ExactKeys, p02Prefixes)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return result, err
 	}
@@ -74,17 +264,9 @@ func readPreferences(ctx context.Context, db preferenceQuery) (State, error) {
 		if err := rows.Scan(&key, &raw); err != nil {
 			return State{}, err
 		}
-		var value any
-		if raw.Valid {
-			decoder := json.NewDecoder(strings.NewReader(raw.String))
-			decoder.UseNumber()
-			if err := decoder.Decode(&value); err != nil {
-				return State{}, err
-			}
-			var trailing any
-			if err := decoder.Decode(&trailing); err != io.EOF {
-				return State{}, errors.New("stored preference must contain exactly one JSON value")
-			}
+		value, err := decodePreferenceJSON(raw)
+		if err != nil {
+			return State{}, err
 		}
 		category, suffix, _ := strings.Cut(key, ":")
 		switch category {
@@ -101,6 +283,61 @@ func readPreferences(ctx context.Context, db preferenceQuery) (State, error) {
 		case "project_order":
 			result.ProjectOrder = value
 		}
+	}
+	return result, rows.Err()
+}
+
+func readKey(ctx context.Context, db preferenceQuery, key string) (any, bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT "key",value FROM workspace_preferences WHERE "key"=?`, key)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, false, rows.Err()
+	}
+	var foundKey string
+	var raw sql.NullString
+	if err := rows.Scan(&foundKey, &raw); err != nil {
+		return nil, false, err
+	}
+	value, err := decodePreferenceJSON(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	return value, true, rows.Err()
+}
+
+func queryPreferences(ctx context.Context, db preferenceQuery, opts QueryOptions) (map[string]any, error) {
+	var query string
+	var args []any
+	if len(opts.Keys) > 0 || len(opts.Prefixes) > 0 {
+		query, args = buildIndexedFilterQuery(opts.Keys, opts.Prefixes)
+		if query == "" {
+			return map[string]any{}, nil
+		}
+	} else {
+		query, args = buildDefaultFilteredQuery(opts)
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := map[string]any{}
+	for rows.Next() {
+		var key string
+		var raw sql.NullString
+		if err := rows.Scan(&key, &raw); err != nil {
+			return nil, err
+		}
+		value, err := decodePreferenceJSON(raw)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = value
 	}
 	return result, rows.Err()
 }

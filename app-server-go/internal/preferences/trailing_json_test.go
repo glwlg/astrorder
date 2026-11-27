@@ -16,7 +16,7 @@ func TestMalformedStoredJSONRollsBackWholePreferenceWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer st.Close()
-			if _, err := st.DB().Exec(`INSERT INTO workspace_preferences("key",value) VALUES('another-domain',?)`, malformed); err != nil {
+			if _, err := st.DB().Exec(`INSERT INTO workspace_preferences("key",value) VALUES('appearance:corrupt-domain',?)`, malformed); err != nil {
 				t.Fatal(err)
 			}
 			for _, importing := range []bool{false, true} {

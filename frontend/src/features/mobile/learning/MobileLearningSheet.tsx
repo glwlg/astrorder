@@ -258,7 +258,7 @@ export function MobileLearningSheet({
               type="text"
               className="m-learning-quicknote-input"
               aria-label="快捷速记输入"
-              placeholder="记一句你的理解，如：剥离符号表会导致 PE 熵值升高…"
+              placeholder="记一句你的理解或待办想法，按回车即可保存…"
               value={quickNote}
               onChange={(e) => setQuickNote(e.target.value)}
               onKeyDown={(e) => {

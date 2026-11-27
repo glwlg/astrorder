@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core'
 import { MarkdownContent } from './MarkdownContent'
 import { api } from '../api/client'
 import type { Session } from '../domain/types'
+import { artifactViewerRegistry } from '../features/sidecar/registry'
 
 const session: Session = {
   id: 'autolink-test',
@@ -16,23 +17,37 @@ const session: Session = {
 
 describe('MarkdownContent Auto-Link Artifacts', () => {
   it('only links bare filenames confirmed in the session workspace root', async () => {
-    vi.spyOn(api, 'getWorkspaceRootFiles').mockResolvedValue({
-      root: session.workspace!,
-      items: [{ name: '集团对接_方案一_直连中台结果库.drawio', is_dir: false }],
+    const drawioDisposable = artifactViewerRegistry.register({
+      id: 'drawio-viewer',
+      pluginId: 'drawio-viewer',
+      source: 'esm',
+      title: '矢量流程图',
+      icon: () => null,
+      extensions: ['.drawio', '.drawio.xml', '.drawio.svg'],
+      component: () => null,
+      capabilities: { canEdit: true },
     })
-    const text = '方案一交付物：集团对接_方案一_直连中台结果库.drawio，周报_20260929.html 不在这里'
-    render(
-      <MantineProvider>
-        <MarkdownContent value={text} session={session} />
-      </MantineProvider>,
-    )
+    try {
+      vi.spyOn(api, 'getWorkspaceRootFiles').mockResolvedValue({
+        root: session.workspace!,
+        items: [{ name: '集团对接_方案一_直连中台结果库.drawio', is_dir: false }],
+      })
+      const text = '方案一交付物：集团对接_方案一_直连中台结果库.drawio，周报_20260929.html 不在这里'
+      render(
+        <MantineProvider>
+          <MarkdownContent value={text} session={session} />
+        </MantineProvider>,
+      )
 
-    expect(screen.queryByRole('button', { name: /集团对接_方案一_直连中台结果库\.drawio/ })).toBeNull()
-    const btn = await screen.findByRole('button', { name: /集团对接_方案一_直连中台结果库\.drawio/ })
-    expect(btn).toBeInTheDocument()
-    expect(btn).toHaveClass('markdown-file-link')
-    expect(screen.queryByRole('button', { name: /周报_20260929\.html/ })).toBeNull()
-    vi.restoreAllMocks()
+      expect(screen.queryByRole('button', { name: /集团对接_方案一_直连中台结果库\.drawio/ })).toBeNull()
+      const btn = await screen.findByRole('button', { name: /集团对接_方案一_直连中台结果库\.drawio/ })
+      expect(btn).toBeInTheDocument()
+      expect(btn).toHaveClass('markdown-file-link')
+      expect(screen.queryByRole('button', { name: /周报_20260929\.html/ })).toBeNull()
+    } finally {
+      drawioDisposable.dispose()
+      vi.restoreAllMocks()
+    }
   })
 
   it('renders markdown local image link as preview button', () => {

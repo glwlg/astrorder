@@ -2,7 +2,6 @@ import {
   IconGitBranch,
   IconGitFork,
   IconSearch,
-  IconSparkles,
   IconX,
 } from '@tabler/icons-react'
 import { ClockCounterClockwiseIcon, ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
@@ -18,7 +17,6 @@ import { ApiError, api } from '../../api/client'
 import { messageForkModeForAgent } from '../../domain/handoff'
 import { findSessionHandoff, newCommandId, scopeKey } from '../../domain/semantics'
 import type { Approval, Command, Message, Session, Task } from '../../domain/types'
-import { EmptyState } from '../../components/EmptyState'
 import { ImageLightbox } from '../../components/ImageLightbox'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
@@ -544,13 +542,13 @@ function ChatPageBody() {
     return undefined
   }, [agents, selected])
 
-  const background = useBackgroundProcesses(selected, Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
-  const sessionSwarm = useSessionSwarm(selected, agent, changesOpened)
-  const sessionSchedules = useSessionSchedules(selected)
+  const background = useBackgroundProcesses(selected, !isOfficeMode && Boolean(agent && ['hermes', 'codex'].includes(agent.kind)))
+  const sessionSwarm = useSessionSwarm(selected, agent, !isOfficeMode && changesOpened)
+  const sessionSchedules = useSessionSchedules(isOfficeMode ? null : selected)
   const sessionCheckpoints = useSessionCheckpoints(selected, Boolean(selected?.workspace) && !isOfficeMode)
   const enabledScheduleCount = useMemo(
-    () => (sessionSchedules.data || []).filter((item) => item.enabled).length,
-    [sessionSchedules.data],
+    () => (isOfficeMode ? 0 : (sessionSchedules.data || []).filter((item) => item.enabled).length),
+    [isOfficeMode, sessionSchedules.data],
   )
   const showSwarmPanel = !isOfficeMode && isAntigravityAgent(agent)
   const sessionExportMarkdown = useMemo(() => {
@@ -683,10 +681,6 @@ function ChatPageBody() {
         <BotGroupChatPage group={activeBotGroup} agents={agents} />
       </div>
     )
-  }
-
-  if (sessions.length === 0) {
-    return <EmptyState icon={<IconSparkles />} title="还没有可用会话" description="认证成功，但服务端没有返回 Agent 会话。连接真实 Agent 后，会话会出现在这里。" />
   }
 
   if (!selected) {
@@ -840,29 +834,35 @@ function ChatPageBody() {
                 </Tooltip>
                 <Tooltip
                   label={
-                    showSwarmPanel
-                      ? sessionSwarm.data?.active
-                        ? 'Swarm 运行中 · 定时 · 产物'
+                    isOfficeMode
+                      ? '文档与产物'
+                      : showSwarmPanel
+                        ? sessionSwarm.data?.active
+                          ? 'Swarm 运行中 · 定时 · 产物'
+                          : enabledScheduleCount > 0
+                            ? `Swarm · ${enabledScheduleCount} 个定时运行中 · 产物`
+                            : 'Swarm · 定时 · 产物'
                         : enabledScheduleCount > 0
-                          ? `Swarm · ${enabledScheduleCount} 个定时运行中 · 产物`
-                          : 'Swarm · 定时 · 产物'
-                      : enabledScheduleCount > 0
-                        ? `${enabledScheduleCount} 个定时运行中 · 产物`
-                        : '定时 · 产物'
+                          ? `${enabledScheduleCount} 个定时运行中 · 产物`
+                          : '定时 · 产物'
                   }
                   position="bottom"
                 >
                   <ActionIcon
-                    className={`chat-changes-toggle${sessionSwarm.data?.active ? ' has-swarm-active' : enabledScheduleCount > 0 ? ' has-schedules-active' : ''}`}
+                    className={`chat-changes-toggle${!isOfficeMode && sessionSwarm.data?.active ? ' has-swarm-active' : !isOfficeMode && enabledScheduleCount > 0 ? ' has-schedules-active' : ''}`}
                     variant="subtle"
                     aria-label={
-                      changesOpened
-                        ? showSwarmPanel
-                          ? '收起 Swarm、定时与产物悬浮面板'
-                          : '收起定时与产物悬浮面板'
-                        : showSwarmPanel
-                          ? '打开 Swarm、定时与产物悬浮面板'
-                          : '打开定时与产物悬浮面板'
+                      isOfficeMode
+                        ? changesOpened
+                          ? '收起产物悬浮面板'
+                          : '打开产物悬浮面板'
+                        : changesOpened
+                          ? showSwarmPanel
+                            ? '收起 Swarm、定时与产物悬浮面板'
+                            : '收起定时与产物悬浮面板'
+                          : showSwarmPanel
+                            ? '打开 Swarm、定时与产物悬浮面板'
+                            : '打开定时与产物悬浮面板'
                     }
                     aria-expanded={changesOpened}
                     aria-controls="workspace-changes-panel"
@@ -895,7 +895,9 @@ function ChatPageBody() {
         }}
       >
         <section className="chat-column">
-          <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
+          {!isOfficeMode && (
+            <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
+          )}
           {!isOfficeMode && activeWorktreeState.activeWorktree && (
             <div className="chat-worktree-banner is-active" role="status">
               <div className="chat-worktree-banner-info">
@@ -1000,7 +1002,7 @@ function ChatPageBody() {
           <PerfProfiler id="ChatComposer">
           <ChatComposer
             key={`composer:${scopeKey(selected.agent_id, selected.id)}`}
-            session={selected}
+            session={activeWorktreeState.effectiveSession ?? selected}
             agent={agent}
             tasks={tasks}
             usage={sessionUsage.data}
@@ -1056,7 +1058,7 @@ function ChatPageBody() {
             {!sidecarOpen && detailsPinned && (
               <div className="pinned-session-details">
                 <SessionDetails
-                  session={selected}
+                  session={activeWorktreeState.effectiveSession ?? selected}
                   agent={agent}
                   commands={commands}
                   messages={messages}
@@ -1100,7 +1102,7 @@ function ChatPageBody() {
         opened={detailsOpened}
         onClose={closeDetails}
         onPin={() => { setDetailsPinned(true); closeDetails() }}
-        session={selected}
+        session={activeWorktreeState.effectiveSession ?? selected}
         agent={agent}
         commands={commands}
         messages={messages}
@@ -1251,16 +1253,20 @@ function DrawerDetails({
   handoffLink?: { label: string; title?: string; onOpen: () => void } | null
 }) {
   return (
-    <Drawer
+    <Drawer.Root
       opened={opened}
       onClose={onClose}
-      withCloseButton={false}
       padding={0}
       className="session-inspector-drawer"
       position="right"
       size="min(92vw, 392px)"
     >
-      <SessionDetails {...props} mode="drawer" onPin={onPin} onClose={onClose} />
-    </Drawer>
+      <Drawer.Overlay />
+      <Drawer.Content aria-label="会话详情">
+        <Drawer.Body p={0}>
+          <SessionDetails {...props} mode="drawer" onPin={onPin} onClose={onClose} />
+        </Drawer.Body>
+      </Drawer.Content>
+    </Drawer.Root>
   )
 }

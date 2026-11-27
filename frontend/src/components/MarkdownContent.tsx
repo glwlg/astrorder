@@ -7,13 +7,14 @@ import {
   IconCopy,
   IconDatabase,
   IconExternalLink,
-  IconEye,
   IconFile,
   IconFileCode,
   IconFileDescription,
   IconFlame,
   IconInfoCircle,
+  IconLayoutSidebarRight,
   IconLoader2,
+  IconMaximize,
   IconPhoto,
   IconPlayerPlay,
   IconTextWrap,
@@ -46,6 +47,8 @@ import { useSidecarStore } from '../features/sidecar/sidecarStore'
 import { useIsOfficeExperience } from '../features/office/appProfile'
 import { useAstrorderStore } from '../state/store'
 import { renderMermaid } from './renderMermaid'
+import { DiagramLightboxModal } from './DiagramLightboxModal'
+import { ImageLightbox } from './ImageLightbox'
 import { CodexVisualization, extractVisualizations } from './CodexVisualization'
 import { MarkdownLinkMenu, type MarkdownLinkMenuTarget } from './MarkdownLinkMenu'
 import { FileSourceContext } from '../features/sidecar/FileSourceContext'
@@ -67,6 +70,7 @@ function hashSnippet(value: string): string {
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState('')
   const [failed, setFailed] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
   const openArtifact = useSidecarStore((state) => state.openArtifact)
 
   useEffect(() => {
@@ -101,19 +105,67 @@ function MermaidDiagram({ code }: { code: string }) {
 
   if (failed) return <MarkdownCodeBlock><code>{code}</code></MarkdownCodeBlock>
   return (
-    <div className="markdown-mermaid" aria-label="Mermaid 图表">
-      <button
-        type="button"
-        className="markdown-canvas-btn markdown-mermaid-canvas-btn"
-        onClick={openInSidecar}
-        aria-label="在侧边画布查看 Mermaid 图表"
-        title="在右侧画布展开与缩放查看"
-      >
-        <IconEye size={12} aria-hidden="true" />
-        <span>画布查看</span>
-      </button>
-      {svg ? <div dangerouslySetInnerHTML={{ __html: svg }} /> : <span>正在渲染图表…</span>}
-    </div>
+    <>
+      <div className="markdown-mermaid" aria-label="Mermaid 图表">
+        <div className="markdown-mermaid-toolbar" role="toolbar" aria-label="图表操作">
+          <button
+            type="button"
+            className="markdown-mermaid-action-btn"
+            disabled={!svg}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (svg) setLightboxOpen(true)
+            }}
+            aria-label="弹窗放大查看 Mermaid 图表"
+            title="弹窗放大查看（支持滚轮缩放与拖拽）"
+          >
+            <IconMaximize size={13} aria-hidden="true" />
+            <span>放大</span>
+          </button>
+          <span className="markdown-mermaid-toolbar-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="markdown-canvas-btn markdown-mermaid-canvas-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              openInSidecar()
+            }}
+            aria-label="在侧边画布查看 Mermaid 图表"
+            title="在右侧画布展开编辑与缩放"
+          >
+            <IconLayoutSidebarRight size={13} aria-hidden="true" />
+            <span>侧栏打开</span>
+          </button>
+        </div>
+        {svg ? (
+          <div
+            className="markdown-mermaid-stage"
+            role="button"
+            tabIndex={0}
+            aria-label="点击放大查看 Mermaid 图表"
+            title="点击弹窗放大查看（支持滚轮缩放与拖拽）"
+            onClick={() => setLightboxOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setLightboxOpen(true)
+              }
+            }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        ) : (
+          <span>正在渲染图表…</span>
+        )}
+      </div>
+
+      <DiagramLightboxModal
+        opened={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+        title="Mermaid 架构图"
+        svg={svg}
+        onOpenInSidecar={openInSidecar}
+      />
+    </>
   )
 }
 
@@ -524,6 +576,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   const [rootFiles, setRootFiles] = useState<{ key: string; names: Set<string> } | null>(null)
   const [checkedPaths, setCheckedPaths] = useState<{ key: string; names: Set<string> } | null>(null)
   const [linkMenu, setLinkMenu] = useState<MarkdownLinkMenuTarget | null>(null)
+  const [fallbackImageSrc, setFallbackImageSrc] = useState<string | null>(null)
   const [hoverTarget, setHoverTarget] = useState<(FileHoverTarget & { onOpen: () => void }) | null>(null)
   const hoverOpenTimer = useRef<number | null>(null)
   const hoverCloseTimer = useRef<number | null>(null)
@@ -967,18 +1020,17 @@ export const MarkdownContent = memo(function MarkdownContent({
             if (!src) return null
             const menuKind = isFile ? 'file' : /^https?:\/\//i.test(cleaned) ? 'url' : null
             const onContextMenu = menuKind ? (event: React.MouseEvent) => openLinkMenu(event, menuKind, isFile ? filePath : cleaned) : undefined
-            return onImageClick ? (
+            const handleImagePreview = onImageClick || ((nextSrc: string) => setFallbackImageSrc(nextSrc))
+            return (
               <button
                 type="button"
                 className="markdown-image-button"
-                onClick={() => onImageClick(src)}
+                onClick={() => handleImagePreview(src)}
                 onContextMenu={onContextMenu}
                 aria-label={`放大图片：${props.alt || ''}`}
               >
                 <img src={src} alt={props.alt || ''} loading="lazy" />
               </button>
-            ) : (
-              <img src={src} alt={props.alt || ''} loading="lazy" onContextMenu={onContextMenu} />
             )
           },
           table: (props) => <div className="markdown-table-wrap"><table>{props.children}</table></div>,
@@ -1019,6 +1071,7 @@ export const MarkdownContent = memo(function MarkdownContent({
       {hoverTarget && (
         <FileLinkHoverPreview
           target={hoverTarget}
+          officeMode={isOfficeMode}
           onMouseEnter={clearHoverTimers}
           onMouseLeave={scheduleHoverClose}
           onCopyFile={currentSession ? (resolvedPath) => copyFilesToClipboard([resolvedPath || hoverTarget.path], {
@@ -1067,6 +1120,9 @@ export const MarkdownContent = memo(function MarkdownContent({
           projectLabel={sqlExec.identity.projectLabel}
           onSaved={sqlExec.handleBindModalSaved}
         />
+      )}
+      {fallbackImageSrc && (
+        <ImageLightbox src={fallbackImageSrc} onClose={() => setFallbackImageSrc(null)} />
       )}
     </div>
     </MarkdownSqlExecContext.Provider>

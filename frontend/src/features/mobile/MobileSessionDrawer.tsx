@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { IconChevronDown, IconChevronRight, IconCopy, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer, IconDeviceDesktop, IconGitBranch } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronRight, IconCopy, IconDatabase, IconDotsVertical, IconEdit, IconPin, IconPinned, IconPlus, IconTrash, IconTransfer, IconDeviceDesktop, IconGitBranch } from '@tabler/icons-react'
 import type { Agent, Session } from '../../domain/types'
 import type { MessageSearchHit } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
@@ -19,13 +19,14 @@ import { hapticFeedback } from './mobileGestures'
 type SessionMenu = { session: Session; x: number; y: number }
 type ProjectMenu = { project: ProjectGroup; x: number; y: number }
 
-export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, agents, onHandoffSession, onRenameSession, onCopySessionId, onForkSession, onForkWorktreeSession, isSearching, searchHits, searchLoading, onSelectSearchHit }: {
+export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey, appearance, onSelect, onPin, onPinProject, onCreate, onDeleteProject, onDeleteSession, onManageProjectDatabase, agents, onHandoffSession, onRenameSession, onCopySessionId, onForkSession, onForkWorktreeSession, isSearching, searchHits, searchLoading, onSelectSearchHit }: {
   groups: ProjectGroup[]; pins: Record<string, boolean>; selectedKey: string; appearance: ProjectAppearanceMap
   onSelect: (session: Session) => void; onPin: (session: Session) => void
   pinnedProjects: string[]; onPinProject: (project: ProjectGroup) => void
   onCreate?: (project: ProjectGroup) => void
   onDeleteProject?: (project: ProjectGroup, event?: { clientX: number; clientY: number }) => void
   onDeleteSession?: (session: Session, event?: { clientX: number; clientY: number }) => void
+  onManageProjectDatabase?: (project: ProjectGroup) => void
   agents?: Record<string, Agent>
   onHandoffSession?: (session: Session) => void
   onRenameSession?: (session: Session) => void
@@ -303,9 +304,11 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
             <IconEdit size={17} />重命名
           </button>
         )}
-        <button role="menuitem" onClick={() => { void (onCopySessionId ? onCopySessionId(sessionMenu.session) : navigator.clipboard?.writeText(sessionMenu.session.id)); setSessionMenu(null) }}>
-          <IconCopy size={17} />复制 ID
-        </button>
+        {onCopySessionId && (
+          <button role="menuitem" onClick={() => { onCopySessionId(sessionMenu.session); setSessionMenu(null) }}>
+            <IconCopy size={17} />复制 ID
+          </button>
+        )}
         {onForkSession && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity' && agents?.[sessionMenu.session.agent_id]?.kind !== 'antigravity-ssh' && (
           <button role="menuitem" onClick={() => { onForkSession(sessionMenu.session); setSessionMenu(null) }}>
             <IconDeviceDesktop size={17} />创建聊天分支
@@ -341,6 +344,11 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
           {pinnedProjects.includes(projectMenu.project.key) ? '取消置顶项目' : '置顶项目'}
         </button>
         {onCreate && <button role="menuitem" onClick={() => { onCreate(projectMenu.project); setProjectMenu(null) }}><IconPlus size={17} />新建会话</button>}
+        {onManageProjectDatabase && !projectMenu.project.key.startsWith('unmarked:') && (
+          <button role="menuitem" onClick={() => { onManageProjectDatabase(projectMenu.project); setProjectMenu(null) }}>
+            <IconDatabase size={17} />关联数据库
+          </button>
+        )}
         {onDeleteProject && !projectMenu.project.key.startsWith('unmarked:') && (
           <button role="menuitem" onClick={(event) => { onDeleteProject(projectMenu.project, event); setProjectMenu(null) }}>
             <IconTrash size={17} />删除项目

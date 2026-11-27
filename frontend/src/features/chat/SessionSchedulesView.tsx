@@ -30,6 +30,7 @@ import {
 import { isAntigravityAgent } from '../../hooks/useSessionSwarm'
 import { resolveSessionDisplayTitle } from '../../components/sessionRailModel'
 import { useAstrorderStore } from '../../state/store'
+import { useIsOfficeExperience } from '../office/appProfile'
 import './workspaceChanges.css'
 
 export interface SessionSchedulesViewProps {
@@ -201,6 +202,7 @@ export function SessionSchedulesView({
   compact = false,
 }: SessionSchedulesViewProps) {
   const queryClient = useQueryClient()
+  const isOfficeMode = useIsOfficeExperience(session)
   const [form, setForm] = useState<FormState | null>(null)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -348,6 +350,8 @@ export function SessionSchedulesView({
       setBusyId(null)
     }
   }
+
+  if (isOfficeMode) return null
 
   if (form) {
     const canSave = Boolean(form.prompt.trim()) && !previewError && !saving
