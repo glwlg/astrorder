@@ -23,6 +23,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"astrorder.dev/app-server/internal/agentapi"
@@ -42,6 +43,7 @@ import (
 	"astrorder.dev/app-server/internal/connector"
 	"astrorder.dev/app-server/internal/daemonclient"
 	"astrorder.dev/app-server/internal/dbxplugin"
+	"astrorder.dev/app-server/internal/desktopcontrol"
 	"astrorder.dev/app-server/internal/digest"
 	"astrorder.dev/app-server/internal/files"
 	"astrorder.dev/app-server/internal/git"
@@ -49,6 +51,7 @@ import (
 	"astrorder.dev/app-server/internal/integrations"
 	"astrorder.dev/app-server/internal/learning"
 	"astrorder.dev/app-server/internal/lifecycle"
+	"astrorder.dev/app-server/internal/llmcompat"
 	"astrorder.dev/app-server/internal/meetings"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
@@ -67,9 +70,10 @@ import (
 )
 
 const (
-	protocolVersion = 1
-	gzipMinimumSize = 1000
-	maxAuthBody     = 8192
+	protocolVersion       = 1
+	gzipMinimumSize       = 1000
+	maxAuthBody           = 8192
+	pluginShutdownTimeout = 5 * time.Second
 )
 
 type Kind string
@@ -150,9 +154,10 @@ type Options struct {
 	Integrations     http.Handler
 	DbxPlugin        http.Handler
 	Office           http.Handler
-	Bots             http.Handler
-	PluginHost       *pluginhost.Manager
-	HostBaseURL      string
+	Bots               http.Handler
+	PluginHost         *pluginhost.Manager
+	OfficialPluginsDir string
+	HostBaseURL        string
 	GitLab           http.Handler
 	Learning         http.Handler
 	Digest           http.Handler
@@ -204,6 +209,8 @@ type api struct {
 	office          http.Handler
 	bots            http.Handler
 	pluginHost      http.Handler
+	pluginCloser    *pluginHostCloser
+	pluginGate      *PluginGate
 	gitlab          http.Handler
 	learning        http.Handler
 	digest          http.Handler
@@ -372,6 +379,20 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			}
 			if refresher, ok := sessionHandler.(activityRefresher); ok && options.DaemonClient != nil {
 				go reconcileActivityOnStart(refresher, options.Logger)
+			}
+			if completer, ok := sessionHandler.(interface {
+				CompleteViaAgent(context.Context, llmcompat.ChatRequest) (llmcompat.ChatResult, error)
+			}); ok && options.DaemonClient != nil {
+				llmcompat.SetAgentCompleter(completer.CompleteViaAgent)
+			}
+			if lister, ok := sessionHandler.(interface {
+				ListAgentModels(context.Context, string) ([]string, error)
+			}); ok && options.DaemonClient != nil {
+				if binder, ok := options.Settings.(interface {
+					SetAgentModelsLister(func(context.Context, string) ([]string, error))
+				}); ok {
+					binder.SetAgentModelsLister(lister.ListAgentModels)
+				}
 			}
 		}
 		if recovery, ok := sessionHandler.(interface {
@@ -629,23 +650,40 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	}
 
 	pluginMgr := options.PluginHost
+	ownsPluginHost := false
 	if pluginMgr == nil && options.Store != nil {
 		pluginsDir := ""
+		legacyPluginsDir := ""
 		if dbxAuditDir != "" {
-			pluginsDir = filepath.Join(dbxAuditDir, "plugins")
+			legacyPluginsDir = filepath.Join(dbxAuditDir, "plugins")
+			pluginsDir = filepath.Join(legacyPluginsDir, "external")
 		}
 		pluginMgr = pluginhost.NewManager(pluginhost.Options{
-			Store:       options.Store,
-			Authorizer:  authenticator,
-			Resolver:    resolver,
-			PluginsDir:  pluginsDir,
-			HostBaseURL: normalizeLoopbackHostBaseURL(options.HostBaseURL, options.Config.Listen),
-			Logger:      logger,
+			Store:              options.Store,
+			Authorizer:         authenticator,
+			Resolver:           resolver,
+			PluginsDir:         pluginsDir,
+			OfficialPluginsDir: strings.TrimSpace(options.OfficialPluginsDir),
+			LegacyPluginsDir:   legacyPluginsDir,
+			HostBaseURL:        normalizeLoopbackHostBaseURL(options.HostBaseURL, options.Config.Listen),
+			Logger:             logger,
 		})
-		if options.Context != nil {
+		ownsPluginHost = true
+	}
+	pluginGate := NewPluginGate(options.Store, defaultPluginGateCacheTTL)
+	var pluginCloser *pluginHostCloser
+	if pluginMgr != nil {
+		pluginMgr.SetOnChange(func(ev pluginhost.ExtensionChangeEvent) {
+			pluginGate.Invalidate()
+			publishExtensionChange(eventHub, ev)
+		})
+		pluginCloser = newPluginHostCloser(pluginMgr, logger)
+		if ownsPluginHost && options.Context != nil {
 			go func() {
 				<-options.Context.Done()
-				pluginMgr.Close()
+				closeCtx, cancel := context.WithTimeout(context.Background(), pluginShutdownTimeout)
+				defer cancel()
+				_ = pluginCloser.Close(closeCtx)
 			}()
 		}
 	}
@@ -668,6 +706,22 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 	} else if pluginMgr != nil {
 		if bp, ok := gitlabHandler.(pluginhost.BuiltinPlugin); ok {
 			_ = pluginMgr.RegisterBuiltin(bp)
+		}
+	}
+
+	if pluginMgr != nil {
+		desktopSvc := desktopcontrol.NewService(desktopcontrol.Options{
+			ReadConfig: func(ctx context.Context) (map[string]any, error) {
+				cfgView, err := pluginMgr.GetConfig(ctx, desktopcontrol.PluginID)
+				if err != nil {
+					return nil, err
+				}
+				return cfgView.Values, nil
+			},
+			Logger: logger,
+		})
+		if regErr := pluginMgr.RegisterBuiltin(desktopSvc); regErr != nil {
+			logger.Warn("failed to register desktop-control builtin plugin", "error", regErr)
 		}
 	}
 
@@ -759,6 +813,8 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		office:          officeHandler,
 		bots:            botsHandler,
 		pluginHost:      pluginHostHandler,
+		pluginCloser:    pluginCloser,
+		pluginGate:      pluginGate,
 		gitlab:          gitlabHandler,
 		learning:        learningHandler,
 		digest:          digestHandler,
@@ -791,7 +847,77 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			return nil, fmt.Errorf("invalid static directory: %s", options.Config.StaticDir)
 		}
 	}
-	return recoverPanics(logger, accessLog(logger, cors(app.auth, gzipResponses(app)))), nil
+	return &closableHTTPHandler{
+		Handler:      recoverPanics(logger, accessLog(logger, cors(app.auth, gzipResponses(app)))),
+		pluginCloser: pluginCloser,
+	}, nil
+}
+
+type pluginHostCloser struct {
+	mgr    *pluginhost.Manager
+	logger *slog.Logger
+	once   sync.Once
+	done   chan struct{}
+	mu     sync.Mutex
+	err    error
+}
+
+func newPluginHostCloser(mgr *pluginhost.Manager, logger *slog.Logger) *pluginHostCloser {
+	return &pluginHostCloser{
+		mgr:    mgr,
+		logger: logger,
+		done:   make(chan struct{}),
+	}
+}
+
+// Close initiates plugin supervisor shutdown once and blocks until shutdown completes
+// or ctx/pluginShutdownTimeout expires, preventing exit while plugin processes are still terminating.
+func (c *pluginHostCloser) Close(ctx context.Context) error {
+	if c == nil || c.mgr == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, pluginShutdownTimeout)
+		defer cancel()
+	}
+	c.once.Do(func() {
+		go func() {
+			defer close(c.done)
+			closeCtx, cancel := context.WithTimeout(context.Background(), pluginShutdownTimeout)
+			defer cancel()
+			err := c.mgr.CloseContext(closeCtx)
+			if err != nil && c.logger != nil {
+				c.logger.Warn("plugin supervisor shutdown timed out", "error", err)
+			}
+			c.mu.Lock()
+			c.err = err
+			c.mu.Unlock()
+		}()
+	})
+	select {
+	case <-c.done:
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type closableHTTPHandler struct {
+	http.Handler
+	pluginCloser *pluginHostCloser
+}
+
+func (h *closableHTTPHandler) Close(ctx context.Context) error {
+	if h == nil || h.pluginCloser == nil {
+		return nil
+	}
+	return h.pluginCloser.Close(ctx)
 }
 
 func NewHandler(options Options) http.Handler {
@@ -844,10 +970,16 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.backups != nil && backups.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginBackups) {
+			return
+		}
 		a.backups.ServeHTTP(response, request)
 		return
 	}
 	if a.integrations != nil && integrations.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginIntegrations) {
+			return
+		}
 		a.integrations.ServeHTTP(response, request)
 		return
 	}
@@ -872,14 +1004,23 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.learning != nil && learning.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginLearningRadar) {
+			return
+		}
 		a.learning.ServeHTTP(response, request)
 		return
 	}
 	if a.digest != nil && digest.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginDigest) {
+			return
+		}
 		a.digest.ServeHTTP(response, request)
 		return
 	}
 	if a.meetings != nil && meetings.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginMeetings) {
+			return
+		}
 		a.meetings.ServeHTTP(response, request)
 		return
 	}
@@ -896,6 +1037,9 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.botGroups != nil && botgroups.Matches(request.Method, request.URL.Path) {
+		if !a.allowPluginRequest(response, request, PluginGroups) {
+			return
+		}
 		a.botGroups.ServeHTTP(response, request)
 		return
 	}
@@ -908,6 +1052,11 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.modelGateway != nil && modelgateway.Matches(request.Method, request.URL.Path) {
+		if isAnalyticsGatewayRoute(request.URL.Path) {
+			if !a.allowPluginRequest(response, request, PluginAnalyticsGateway) {
+				return
+			}
+		}
 		a.modelGateway.ServeHTTP(response, request)
 		return
 	}
@@ -920,16 +1069,36 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.settings != nil && settingsapi.Matches(request.Method, request.URL.Path) {
+		if isPluginSettingsMutation(request.Method, request.URL.Path) {
+			rec := &statusRecorder{ResponseWriter: response, status: http.StatusOK}
+			a.settings.ServeHTTP(rec, request)
+			a.pluginGate.Invalidate()
+			if rec.status >= 200 && rec.status < 300 {
+				publishExtensionChange(a.eventHub, pluginhost.ExtensionChangeEvent{
+					Action:    "settings_updated",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+			}
+			return
+		}
 		a.settings.ServeHTTP(response, request)
 		return
 	}
 	if a.connections != nil && connections.Matches(request.Method, request.URL.Path) {
+		if isAgentAccountsRoute(request.URL.Path) {
+			if !a.allowPluginRequest(response, request, PluginAgentAccounts) {
+				return
+			}
+		}
 		a.connections.ServeHTTP(response, request)
 		return
 	}
 	// Preferences
 	if a.preferences != nil && (request.URL.Path == "/api/v1/preferences" || request.URL.Path == "/api/v1/preferences/import") {
 		a.preferences.ServeHTTP(response, request)
+		if request.Method != http.MethodGet && request.Method != http.MethodHead {
+			a.pluginGate.Invalidate()
+		}
 		return
 	}
 
@@ -985,6 +1154,20 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writeJSONError(response, http.StatusNotFound, "Not Found")
+}
+
+func (a *api) allowPluginRequest(response http.ResponseWriter, request *http.Request, pluginID string) bool {
+	if a.pluginGate == nil || a.pluginGate.IsEnabled(request.Context(), pluginID) {
+		return true
+	}
+	if a.auth != nil {
+		if failure := a.auth.AuthorizeBrowser(request); failure != nil {
+			writeAuthError(response, failure)
+			return false
+		}
+	}
+	writePluginDisabledError(response, pluginID)
+	return false
 }
 
 func serveHealth(_ *api, response http.ResponseWriter, _ *http.Request) {
@@ -1059,6 +1242,11 @@ func (a *api) serveDesktopShutdown(response http.ResponseWriter, request *http.R
 	if ip == nil || !ip.IsLoopback() || !a.auth.IsBrowserBearer(request) {
 		writeJSONError(response, http.StatusForbidden, "Desktop shutdown is not allowed")
 		return
+	}
+	if a.pluginCloser != nil {
+		closeCtx, cancel := context.WithTimeout(request.Context(), pluginShutdownTimeout)
+		_ = a.pluginCloser.Close(closeCtx)
+		cancel()
 	}
 	a.desktopShutdown()
 	writeJSON(response, http.StatusOK, map[string]bool{"stopping": true})

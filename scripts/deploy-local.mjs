@@ -172,12 +172,37 @@ export function runDeploy(argv) {
     }
 
     runPowerShell(`
+      $ErrorActionPreference = 'Stop'
       $targetExe = ${psQuote(installedDesktopWin)}
-      Get-Process -Name Astrorder -ErrorAction SilentlyContinue | Where-Object {
+      $stagedExe = ${psQuote(stagedDesktopWin)}
+      $procs = @(Get-Process -Name Astrorder -ErrorAction SilentlyContinue | Where-Object {
         try { $_.Path -and ($_.Path.ToLowerInvariant() -eq $targetExe.ToLowerInvariant()) } catch { $false }
-      } | Stop-Process -Force -ErrorAction SilentlyContinue
-      Start-Sleep -Milliseconds 700
-      Move-Item -Force ${psQuote(stagedDesktopWin)} $targetExe
+      })
+      foreach ($p in $procs) {
+        try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch {}
+      }
+      for ($i = 0; $i -lt 30; $i++) {
+        $alive = @(Get-Process -Name Astrorder -ErrorAction SilentlyContinue | Where-Object {
+          try { $_.Path -and ($_.Path.ToLowerInvariant() -eq $targetExe.ToLowerInvariant()) } catch { $false }
+        })
+        if ($alive.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+      }
+      $moved = $false
+      $lastMoveErr = $null
+      for ($i = 0; $i -lt 20; $i++) {
+        try {
+          Move-Item -LiteralPath $stagedExe -Destination $targetExe -Force -ErrorAction Stop
+          $moved = $true
+          break
+        } catch {
+          $lastMoveErr = $_
+          Start-Sleep -Milliseconds 250
+        }
+      }
+      if (-not $moved) {
+        throw ("Failed to replace " + $targetExe + " with " + $stagedExe + ": " + $lastMoveErr)
+      }
       Start-Process -FilePath $targetExe -ArgumentList '--packaged' -WorkingDirectory ${psQuote(env.installDirWin)}
       Start-Sleep -Seconds 3
     `)

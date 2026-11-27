@@ -925,6 +925,7 @@ func buildCommands() *commandDefinition {
 			{name: "json", flags: []string{"--json"}, metavar: "JSON", kind: kindJSON, help: "JSON object payload"},
 			{name: "workspace", flags: []string{"--workspace"}, metavar: "WORKSPACE", kind: kindString, help: "Workspace directory override"},
 			{name: "project", flags: []string{"--project"}, metavar: "PROJECT", kind: kindString, help: "Project identifier override"},
+			{name: "output", flags: []string{"--output", "-o"}, metavar: "OUTPUT_FILE", kind: kindString, help: "Save returned image(s) to file path (auto-saved to temp dir when omitted)"},
 			{name: "param", flags: []string{"-p", "--param"}, metavar: "KEY=VALUE", kind: kindString, repeatable: true, help: "Additional key=value parameter (repeatable)"},
 		},
 		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
@@ -969,6 +970,7 @@ func buildCommands() *commandDefinition {
 			}
 			return "ext." + pluginID + "." + capID, payload, nil
 		},
+		handleResult: materializeExtensionImages,
 	}
 	extCmd := &commandDefinition{
 		name: "ext",
@@ -1428,6 +1430,8 @@ func invoke(ctx context.Context, capability string, payload map[string]any, envL
 		timeout = defaultRequestTimeout
 		if capability == "browser.run" {
 			timeout = browserRequestTimeout
+		} else if strings.HasPrefix(capability, "ext.desktop-control.") {
+			timeout = 120 * time.Second
 		}
 	}
 	requestContext, cancel := context.WithTimeout(ctx, timeout)
@@ -2214,4 +2218,124 @@ func injectCaller(payload map[string]any, caller *Caller) error {
 		"session_id":    caller.SessionID,
 	}
 	return nil
+}
+
+// materializeExtensionImages saves any base64-encoded image blocks returned by
+// extension capabilities (e.g. desktop-control screenshot/snapshot) to local files
+// and replaces `data_base64` with `saved_path` and `bytes` so Agents can inspect
+// images via file tools without flooding stdout with megabytes of base64.
+func materializeExtensionImages(raw json.RawMessage, values map[string]any, _ Config) (any, error) {
+	if !bytes.Contains(raw, []byte(`"images"`)) {
+		return raw, nil
+	}
+	var obj map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&obj); err != nil {
+		return raw, nil
+	}
+	rawImages, ok := obj["images"].([]any)
+	if !ok || len(rawImages) == 0 {
+		return raw, nil
+	}
+
+	outputPath, _ := values["output"].(string)
+	outputPath = strings.TrimSpace(outputPath)
+	pluginID, _ := values["plugin_id"].(string)
+	capID, _ := values["capability_id"].(string)
+	stamp := time.Now().UTC().Format("20060102-150405.000")
+
+	materialized := 0
+	for idx, item := range rawImages {
+		imgMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		b64Str, ok := imgMap["data_base64"].(string)
+		if !ok || strings.TrimSpace(b64Str) == "" {
+			continue
+		}
+		if cut := strings.Index(b64Str, ";base64,"); cut >= 0 {
+			b64Str = b64Str[cut+8:]
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64Str))
+		if err != nil {
+			return nil, fmt.Errorf("decode extension image[%d] base64: %w", idx, err)
+		}
+		mimeType, _ := imgMap["mime_type"].(string)
+		ext := imageExtForMIME(mimeType)
+
+		var targetPath string
+		if outputPath != "" {
+			if len(rawImages) == 1 {
+				targetPath = outputPath
+			} else {
+				baseExt := filepath.Ext(outputPath)
+				if baseExt == "" {
+					targetPath = fmt.Sprintf("%s-%d%s", outputPath, idx+1, ext)
+				} else {
+					stem := strings.TrimSuffix(outputPath, baseExt)
+					targetPath = fmt.Sprintf("%s-%d%s", stem, idx+1, baseExt)
+				}
+			}
+			if parent := filepath.Dir(targetPath); parent != "" && parent != "." {
+				if err := os.MkdirAll(parent, 0o755); err != nil {
+					return nil, fmt.Errorf("create output directory for %s: %w", targetPath, err)
+				}
+			}
+		} else {
+			imgDir := filepath.Join(os.TempDir(), "astrorder-ext-images")
+			if err := os.MkdirAll(imgDir, 0o700); err != nil {
+				return nil, fmt.Errorf("create temp image directory: %w", err)
+			}
+			name := fmt.Sprintf("%s-%s-%s-%d%s",
+				sanitizeFileToken(pluginID, "ext"),
+				sanitizeFileToken(capID, "img"),
+				stamp,
+				idx+1,
+				ext,
+			)
+			targetPath = filepath.Join(imgDir, name)
+		}
+
+		if err := os.WriteFile(targetPath, decoded, 0o600); err != nil {
+			return nil, fmt.Errorf("write extension image to %s: %w", targetPath, err)
+		}
+		delete(imgMap, "data_base64")
+		imgMap["saved_path"] = targetPath
+		imgMap["bytes"] = len(decoded)
+		materialized++
+	}
+	if materialized == 0 {
+		return raw, nil
+	}
+	return obj, nil
+}
+
+func imageExtForMIME(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	case "image/bmp":
+		return ".bmp"
+	default:
+		return ".png"
+	}
+}
+
+func sanitizeFileToken(raw, fallback string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(raw) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return fallback
+	}
+	return b.String()
 }

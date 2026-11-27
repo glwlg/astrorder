@@ -3,10 +3,13 @@ package agentcli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -462,6 +465,91 @@ func TestErrorsAndRegistrationsDoNotExposeSecrets(t *testing.T) {
 	if code != 1 || strings.Contains(combined, secret) || strings.Contains(combined, "ASTRORDER_AGENT_TOKEN") {
 		t.Fatalf("exit = %d, unsafe output = %q", code, combined)
 	}
+}
+
+func TestExtCallMaterializesReturnedImages(t *testing.T) {
+	pngBytes := []byte("\x89PNG\r\n\x1a\nfake-desktop-screenshot")
+	pngB64 := base64.StdEncoding.EncodeToString(pngBytes)
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"platform": "windows",
+			"backend":  "windows-mcp",
+			"action":   "screenshot",
+			"text":     "captured display 0",
+			"images": []map[string]any{
+				{
+					"mime_type":   "image/png",
+					"data_base64": pngB64,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	env := mapLookup(map[string]string{
+		"ASTRORDER_AGENT_TOKEN":          "token",
+		"ASTRORDER_AGENT_URL":            server.URL,
+		"ASTRORDER_CALLER_AGENT_ID":      "antigravity",
+		"ASTRORDER_CALLER_CONNECTION_ID": "wsl",
+		"ASTRORDER_CALLER_PROFILE_NAME":  "default",
+		"ASTRORDER_CALLER_RUNTIME":       "antigravity",
+		"ASTRORDER_CALLER_SESSION_ID":    "conv-1",
+	})
+
+	t.Run("explicit output path", func(t *testing.T) {
+		outFile := filepath.Join(t.TempDir(), "nested", "shot.png")
+		var stdout, stderr bytes.Buffer
+		code := Run(context.Background(), []string{"ext", "call", "desktop-control", "screenshot", "-o", outFile}, strings.NewReader(""), &stdout, &stderr, env)
+		if code != 0 || stderr.Len() != 0 {
+			t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "data_base64") || strings.Contains(stdout.String(), pngB64) {
+			t.Fatalf("expected data_base64 stripped from stdout, got %s", stdout.String())
+		}
+		var parsed struct {
+			Images []struct {
+				MimeType  string `json:"mime_type"`
+				SavedPath string `json:"saved_path"`
+				Bytes     int    `json:"bytes"`
+			} `json:"images"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
+			t.Fatalf("unmarshal stdout: %v", err)
+		}
+		if len(parsed.Images) != 1 || parsed.Images[0].SavedPath != outFile || parsed.Images[0].Bytes != len(pngBytes) {
+			t.Fatalf("unexpected images metadata: %+v", parsed.Images)
+		}
+		gotBytes, err := os.ReadFile(outFile)
+		if err != nil || !bytes.Equal(gotBytes, pngBytes) {
+			t.Fatalf("saved file mismatch: err=%v len=%d", err, len(gotBytes))
+		}
+	})
+
+	t.Run("auto temp file", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run(context.Background(), []string{"ext", "call", "desktop-control", "screenshot"}, strings.NewReader(""), &stdout, &stderr, env)
+		if code != 0 || stderr.Len() != 0 {
+			t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+		}
+		var parsed struct {
+			Images []struct {
+				SavedPath string `json:"saved_path"`
+				Bytes     int    `json:"bytes"`
+			} `json:"images"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
+			t.Fatalf("unmarshal stdout: %v", err)
+		}
+		if len(parsed.Images) != 1 || parsed.Images[0].SavedPath == "" {
+			t.Fatalf("expected auto saved_path, got %+v", parsed.Images)
+		}
+		t.Cleanup(func() { _ = os.Remove(parsed.Images[0].SavedPath) })
+		gotBytes, err := os.ReadFile(parsed.Images[0].SavedPath)
+		if err != nil || !bytes.Equal(gotBytes, pngBytes) {
+			t.Fatalf("auto saved file mismatch: err=%v", err)
+		}
+	})
 }
 
 func mapLookup(values map[string]string) EnvLookup {

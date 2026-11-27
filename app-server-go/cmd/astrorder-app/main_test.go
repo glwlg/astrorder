@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,5 +171,117 @@ func TestCachedRemoteExecutableResolverCachesPositiveAndRetriesErrors(t *testing
 	})
 	if err != nil || got3 != "/custom/agy" {
 		t.Fatalf("expected explicit override /custom/agy, got=%q err=%v", got3, err)
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestRunServerDegradedStartupWhenDaemonUnreachable(t *testing.T) {
+	// Allocate a loopback port and close it immediately so the daemon target is unreachable.
+	closedLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreachableTarget := closedLn.Addr().String()
+	_ = closedLn.Close()
+
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logBuf := &syncBuffer{}
+	readyReader, readyWriter := io.Pipe()
+	defer readyReader.Close()
+
+	cfg := config.Config{
+		Listen:           "127.0.0.1:0",
+		DatabasePath:     filepath.Join(root, "app.db"),
+		AttachmentsDir:   filepath.Join(root, "attachments"),
+		DefaultWorkspace: root,
+		BrowserSecret:    "degraded-browser-secret",
+		ConnectorSecret:  "degraded-connector-secret",
+		Daemon: config.DaemonConfig{
+			Target:         unreachableTarget,
+			Credential:     "degraded-daemon-cred",
+			RequestTimeout: 300 * time.Millisecond,
+		},
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		err := runServer(ctx, cfg, readyWriter, slog.New(slog.NewJSONHandler(logBuf, nil)))
+		_ = readyWriter.CloseWithError(err)
+		result <- err
+	}()
+
+	var ready readyMessage
+	if err := json.NewDecoder(readyReader).Decode(&ready); err != nil {
+		t.Fatalf("expected degraded startup to emit ready message instead of crashing: %v (logs: %s)", err, logBuf.String())
+	}
+	if !ready.Ready || ready.Address == "" {
+		t.Fatalf("unexpected ready payload: %+v", ready)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	checkGet := func(path string, auth bool) []byte {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, "http://"+ready.Address+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if auth {
+			req.Header.Set("Authorization", "Bearer "+cfg.BrowserSecret)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, resp.StatusCode, string(body))
+		}
+		return body
+	}
+
+	healthBody := checkGet("/health", false)
+	if !strings.Contains(string(healthBody), `"status":"ok"`) {
+		t.Fatalf("unexpected /health body: %s", string(healthBody))
+	}
+
+	targetsBody := checkGet("/api/v1/toolchain/targets", true)
+	if !strings.Contains(string(targetsBody), `"id":"local"`) {
+		t.Fatalf("expected local target in degraded toolchain API, got: %s", string(targetsBody))
+	}
+
+	_ = checkGet("/api/v1/preferences", true)
+
+	cancel()
+	select {
+	case runErr := <-result:
+		if runErr != nil {
+			t.Fatalf("degraded server did not shut down cleanly: %v", runErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("degraded server timed out during graceful shutdown")
+	}
+
+	if !strings.Contains(logBuf.String(), "starting in degraded mode with background reconnect") {
+		t.Fatalf("expected structured degraded-mode startup log, got: %s", logBuf.String())
 	}
 }

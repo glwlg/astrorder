@@ -49,23 +49,31 @@ func TestHTTPAPIPluginHostWiringAndGitLabBuiltin(t *testing.T) {
 	}
 	var listResp struct {
 		Items []struct {
-			ID          string `json:"id"`
-			Source      string `json:"source"`
-			Enabled     bool   `json:"enabled"`
-			BackendType string `json:"backend_type"`
+			ID             string `json:"id"`
+			Source         string `json:"source"`
+			Enabled        bool   `json:"enabled"`
+			DefaultEnabled bool   `json:"default_enabled"`
+			BackendType    string `json:"backend_type"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
 		t.Fatalf("decode extensions: %v", err)
 	}
 	foundGitLab := false
+	foundDesktop := false
 	for _, item := range listResp.Items {
 		if item.ID == "gitlab-ci-viewer" && item.Source == "builtin" && item.Enabled {
 			foundGitLab = true
 		}
+		if item.ID == "desktop-control" && item.Source == "builtin" && !item.Enabled && !item.DefaultEnabled {
+			foundDesktop = true
+		}
 	}
 	if !foundGitLab {
 		t.Fatalf("expected enabled builtin gitlab-ci-viewer in /api/v1/extensions, got %+v", listResp.Items)
+	}
+	if !foundDesktop {
+		t.Fatalf("expected default-disabled builtin desktop-control in /api/v1/extensions, got %+v", listResp.Items)
 	}
 
 	// 2. GET /api/v1/ext/_sdk/bridge.js serves the iframe bridge SDK.
@@ -97,14 +105,33 @@ func TestHTTPAPIPluginHostWiringAndGitLabBuiltin(t *testing.T) {
 		t.Fatalf("expected dynamic extension capabilities in catalog, got %s", catRec.Body.String())
 	}
 
-	// 5. POST /api/v1/agent/invoke with capability="ext.list" succeeds.
+	// 5. POST /api/v1/agent/invoke with capability="ext.list" succeeds and excludes disabled desktop-control.
 	invokeBody := bytes.NewBufferString(`{"capability":"ext.list","payload":{}}`)
 	invReq := httptest.NewRequest(http.MethodPost, "/api/v1/agent/invoke", invokeBody)
 	invReq.Header.Set("Authorization", "Bearer test-browser-secret")
 	invReq.Header.Set("Content-Type", "application/json")
 	invRec := httptest.NewRecorder()
 	handler.ServeHTTP(invRec, invReq)
-	if invRec.Code != http.StatusOK || !strings.Contains(invRec.Body.String(), `"gitlab-ci-viewer"`) {
+	if invRec.Code != http.StatusOK || !strings.Contains(invRec.Body.String(), `"gitlab-ci-viewer"`) || strings.Contains(invRec.Body.String(), `"desktop-control"`) {
 		t.Fatalf("POST ext.list status=%d body=%s", invRec.Code, invRec.Body.String())
+	}
+
+	// 6. Enabling desktop-control exposes its capabilities and allows invoking status.
+	enReq := httptest.NewRequest(http.MethodPost, "/api/v1/extensions/desktop-control/enable", bytes.NewBufferString(`{"enabled":true}`))
+	enReq.Header.Set("Authorization", "Bearer test-browser-secret")
+	enReq.Header.Set("Content-Type", "application/json")
+	enRec := httptest.NewRecorder()
+	handler.ServeHTTP(enRec, enReq)
+	if enRec.Code != http.StatusOK {
+		t.Fatalf("POST enable desktop-control status=%d body=%s", enRec.Code, enRec.Body.String())
+	}
+
+	dcReq := httptest.NewRequest(http.MethodPost, "/api/v1/agent/invoke", bytes.NewBufferString(`{"capability":"ext.desktop-control.status","input":{}}`))
+	dcReq.Header.Set("Authorization", "Bearer test-browser-secret")
+	dcReq.Header.Set("Content-Type", "application/json")
+	dcRec := httptest.NewRecorder()
+	handler.ServeHTTP(dcRec, dcReq)
+	if dcRec.Code != http.StatusOK || !strings.Contains(dcRec.Body.String(), `"plugin_id":"desktop-control"`) {
+		t.Fatalf("POST ext.desktop-control.status status=%d body=%s", dcRec.Code, dcRec.Body.String())
 	}
 }
