@@ -25,6 +25,12 @@ const (
 	agyQuotaReadCacheTTL = 30 * time.Second
 )
 
+// agyQuotaQueryPaused disables all outbound AGY account quota probes
+// (`agy -p '/usage'` and isolated subscription tier probes) to comply with
+// Google usage policy. Account listing, import, save, state inspection, and
+// switching remain enabled.
+var agyQuotaQueryPaused = true
+
 type agyReadCache struct {
 	mu       sync.Mutex
 	entries  map[string]cachedAgyRead
@@ -255,6 +261,10 @@ func (h *Handler) handleAgyAccounts(w http.ResponseWriter, r *http.Request, path
 	switch r.Method {
 	case http.MethodGet:
 		if accountID != "" {
+			if agyQuotaQueryPaused {
+				writeError(w, http.StatusServiceUnavailable, "agy_quota_paused", "AGY 账号额度查询已暂停（遵循 Google 使用政策）")
+				return
+			}
 			req.Action, req.AccountId = pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA, accountID
 		}
 	case http.MethodPost:
@@ -392,7 +402,12 @@ func (h *Handler) handleAgyAccounts(w http.ResponseWriter, r *http.Request, path
 				}
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"current_account_id": currentID, "quota_supported": state.QuotaSupported})
+		quotaSupported := state.QuotaSupported && !agyQuotaQueryPaused
+		writeJSON(w, http.StatusOK, map[string]any{
+			"current_account_id": currentID,
+			"quota_supported":    quotaSupported,
+			"quota_paused":       agyQuotaQueryPaused,
+		})
 	case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_APPLY_CREDENTIAL:
 		var applied struct {
 			AccountID string `json:"account_id"`

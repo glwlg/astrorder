@@ -1,5 +1,5 @@
 import { QueryObserver, useIsMutating, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { accountsApiFor, type AccountPlatform } from './agyAccountsApi'
+import { accountsApiFor, isPlatformQuotaPaused, type AccountPlatform } from './agyAccountsApi'
 import { snapshotOptions, storeQuotaSnapshot } from './agyQuotaSnapshots'
 
 export const metadataPolicy = { staleTime: Infinity, retry: false, retryOnMount: false, refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false } as const
@@ -58,14 +58,19 @@ export function useAgyAccountOverview(environment: string, platform: AccountPlat
   if (currentID === 'current') rows.unshift({ id: 'current', name: '未保存账号', current: true })
   const reads = useQueries({ queries: rows.map(row => ({ ...quotaOptions(client, environment, row.id, platform), enabled: false })) })
   const snapshots = useQueries({ queries: rows.map(row => snapshotOptions(environment, row.id, platform)) })
-  const quotas = reads.map((read, i) => ({ data: snapshots[i].data, isFetching: read.isFetching, error: read.error }))
+  const quotaPaused = isPlatformQuotaPaused(platform) || Boolean(state.data?.quota_paused)
+  const quotas = reads.map((read, i) => ({
+    data: quotaPaused ? undefined : snapshots[i].data,
+    isFetching: quotaPaused ? false : read.isFetching,
+    error: quotaPaused ? null : read.error,
+  }))
   const refresh = useAgyQuotaRefresh(environment, platform)
   const refreshing = useIsMutating({ mutationKey: refreshKey(environment, platform), exact: true }) > 0
   async function refreshLibrary() {
     await accounts.refetch()
     if (environment) await state.refetch()
   }
-  return { accounts, state, rows, quotas, currentID, refresh, refreshLibrary, refreshing }
+  return { accounts, state, rows, quotas, currentID, quotaPaused, refresh, refreshLibrary, refreshing }
 }
 
 const refreshKey = (environment: string, platform: AccountPlatform = 'antigravity') =>
@@ -96,7 +101,13 @@ export function useAgyQuotaRefresh(environment: string, platform: AccountPlatfor
         fetchForRefresh(client, platformTargetStateOptions(target, platform)),
         mode === 'all' ? fetchForRefresh(client, platformLibraryOptions(platform)) : undefined,
       ])
-      if (latest.status === 'rejected' || !latest.value.quota_supported || library.status === 'rejected') return
+      if (
+        isPlatformQuotaPaused(platform) ||
+        latest.status === 'rejected' ||
+        latest.value.quota_paused ||
+        !latest.value.quota_supported ||
+        library.status === 'rejected'
+      ) return
       const active = latest.value.current_account_id
       const ids = new Set<string>()
       library.value?.items.forEach(account => ids.add(account.id))

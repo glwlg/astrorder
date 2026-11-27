@@ -137,3 +137,16 @@ it('keeps fractional readings compact and shares the header activity status', as
   expect(screen.getByText('空闲')).toBeInTheDocument()
   expect(screen.queryByText('异常')).not.toBeInTheDocument()
 })
+
+it('skips model quota queries for direct Antigravity sessions while paused', async () => {
+  vi.spyOn(api, 'getSessionModel').mockResolvedValue({ provider: 'antigravity', model: 'gemini-4-neon-high' })
+  vi.spyOn(api, 'getConnections').mockResolvedValue({ local: {}, ssh: { items: [] } } as unknown as Awaited<ReturnType<typeof api.getConnections>>)
+  vi.spyOn(api, 'getSessionUsage').mockRejectedValue(new Error('unavailable'))
+  const quotaSpy = vi.spyOn(api, 'getModelQuota')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ branch: 'master', branches: ['master'], changed_files: 0, insertions: 0, deletions: 0 }), { status: 200 })))
+
+  renderFacts({ ...session, agent_id: 'local-antigravity' })
+
+  expect(await screen.findByText('AGY 额度查询已暂停')).toBeInTheDocument()
+  expect(quotaSpy).not.toHaveBeenCalled()
+})

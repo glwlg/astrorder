@@ -10,6 +10,7 @@ import { useUserIdle } from '../hooks/useUserIdle'
 import { useAstrorderStore } from '../state/store'
 import { AgentBrandIcon, agentKindLabel } from './AgentBrandIcon'
 import { sessionActivityStatus } from './sessionRailModel'
+import { isDirectAntigravityModelRoute } from '../features/agentAccounts/agyAccountsApi'
 import { formatTokens } from '../features/analytics/usageFormat'
 import './sessionRuntimeFacts.css'
 
@@ -191,14 +192,15 @@ export function SessionRuntimeFacts({
     refetchInterval: !userIdle && session.status === 'running' ? 3000 : false,
   })
   const modelRoute = model.data?.model ? `${model.data.provider ? `${model.data.provider}/` : ''}${model.data.model}` : ''
+  const agyQuotaPaused = isDirectAntigravityModelRoute(modelRoute, agent?.kind)
   const quota = useQuery({
     queryKey: ['astrorder', 'model-quota', modelRoute, session.agent_id],
     queryFn: () => api.getModelQuota(modelRoute, session.agent_id),
-    enabled: Boolean(modelRoute),
+    enabled: Boolean(modelRoute) && !agyQuotaPaused,
     retry: false,
     staleTime: 60000,
     refetchIntervalInBackground: false,
-    refetchInterval: !userIdle && session.status === 'running' ? 60000 : false,
+    refetchInterval: !userIdle && session.status === 'running' && !agyQuotaPaused ? 60000 : false,
   })
   const reports = quota.data?.reports || []
   const accounts = (quota.data?.accounts || []).filter((account) => !account.paused)
@@ -281,7 +283,9 @@ export function SessionRuntimeFacts({
           <span className="srf-model-text">{model.label}</span>
         </div>
 
-        {quota.isFetching && !quota.data ? (
+        {agyQuotaPaused || quota.data?.paused ? (
+          <div className="srf-quota-empty">AGY 额度查询已暂停</div>
+        ) : quota.isFetching && !quota.data ? (
           <div className="srf-quota-empty">额度读取中…</div>
         ) : reports.length || accounts.length ? (
           <div className="quota-groups">

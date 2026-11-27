@@ -77,21 +77,10 @@ describe('Mobile account switching', () => {
     })
     vi.spyOn(agyAccountsApi, 'targetState').mockImplementation(async env => ({
       current_account_id: activeByEnv[env] ?? '',
-      quota_supported: true,
+      quota_supported: false,
+      quota_paused: true,
     }))
-    const quotaSpy = vi.spyOn(agyAccountsApi, 'quota').mockResolvedValue({
-      as_of: '2026-11-22T08:30:00Z',
-      plan: 'Google AI Pro',
-      groups: [
-        {
-          name: 'Gemini Models',
-          buckets: [
-            { id: '5h', name: '5h', window: 'five_hour', remaining_fraction: 0.88 },
-            { id: 'week', name: 'Week', window: 'weekly', remaining_fraction: 0.42 },
-          ],
-        },
-      ],
-    })
+    const quotaSpy = vi.spyOn(agyAccountsApi, 'quota')
     const switchSpy = vi.spyOn(agyAccountsApi, 'switch').mockImplementation(async (env, id) => {
       activeByEnv = { ...activeByEnv, [env]: id }
       return { account_id: id, restarted: true }
@@ -127,11 +116,12 @@ describe('Mobile account switching', () => {
     expect(within(list).getByText('备用 Pro')).toBeVisible()
     expect(within(list).getByText('主工作号').closest('article')).toHaveTextContent('当前使用')
 
-    // Refresh all quotas and verify tiles render
-    fireEvent.click(within(sheet).getByRole('button', { name: '刷新全部' }))
-    await waitFor(() => expect(quotaSpy).toHaveBeenCalledWith('wsl', 'acc-1', expect.any(AbortSignal)))
-    expect((await within(list).findAllByText('88%')).length).toBeGreaterThan(0)
-    expect((await within(list).findAllByText('Pro')).length).toBeGreaterThan(0)
+    // AGY quota queries are paused; refreshing status does not query quota, while switching works cleanly
+    expect(within(sheet).getByText('AGY 额度查询已暂停')).toBeVisible()
+    expect(within(sheet).queryByRole('button', { name: '刷新设置' })).not.toBeInTheDocument()
+    expect(within(list).queryByRole('button', { name: /刷新 .* 的额度/ })).not.toBeInTheDocument()
+    fireEvent.click(within(sheet).getByRole('button', { name: '刷新状态' }))
+    expect(quotaSpy).not.toHaveBeenCalled()
 
     // Switch to backup account via confirmation dialog
     fireEvent.click(within(list).getByRole('button', { name: '切换到 备用 Pro' }))

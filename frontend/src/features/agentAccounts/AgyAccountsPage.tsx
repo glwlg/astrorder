@@ -4,7 +4,7 @@ import { ActionIcon, Alert, Button, Loader, NativeSelect, Table } from '@mantine
 import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
 import { IconDeviceFloppy, IconPlus, IconRefresh, IconSettings, IconSwitchHorizontal, IconTrash } from '@tabler/icons-react'
-import { accountPlatformMeta, type AccountPlatform } from './agyAccountsApi'
+import { AGY_QUOTA_PAUSED_MESSAGE, accountPlatformMeta, type AccountPlatform } from './agyAccountsApi'
 import { AgyAccountDialog, type AccountPrompt } from './AgyAccountDialog'
 import { AgyAccountImportDialog } from './AgyAccountImportDialog'
 import { AgyQuotaTiles } from './AgyQuotaTiles'
@@ -27,8 +27,8 @@ export function PlatformAccountsPage({ platform }: { platform: AccountPlatform }
   const targets = useQuery({ ...metadataPolicy, ...platformTargetsOptions(platform) })
   const target = selection ? targets.data?.items.find(item => item.id === selection) : targets.data?.items[0]
   const environment = target?.id ?? ''
-  const { accounts, state: targetState, currentID, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment, platform)
-  const quotaSupported = targetState.data?.quota_supported
+  const { accounts, state: targetState, currentID, quotaPaused, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment, platform)
+  const quotaSupported = quotaPaused ? false : targetState.data?.quota_supported
   const prompt = dialog?.environment === environment ? dialog.prompt : null
 
   const mutation = useAgyAccountMutation(environment, platform)
@@ -59,13 +59,14 @@ export function PlatformAccountsPage({ platform }: { platform: AccountPlatform }
               ...(targets.data?.items ?? []).map(({ id, name }) => ({ value: id, label: name }))]} disabled={mutation.isPending} />
         </div>}
         <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => { void targets.refetch(); if (target) void refresh('all'); else void accounts.refetch() }}
-          loading={refreshing} disabled={mutation.isPending || accounts.isPending}>刷新全部</Button>
+          loading={refreshing} disabled={mutation.isPending || accounts.isPending}>{quotaPaused ? '刷新状态' : '刷新全部'}</Button>
         <Button variant="default" leftSection={<IconDeviceFloppy size={16} />} onClick={() => void openAction()}
           disabled={!target || refreshing || mutation.isPending}>保存当前账号</Button>
         <Button leftSection={<IconPlus size={16} />} onClick={() => setImportOpen(true)} disabled={mutation.isPending}>导入账号</Button>
-        <Button variant="subtle" leftSection={<IconSettings size={16} />} onClick={() => setSettingsOpen(true)}>刷新设置</Button>
+        {!quotaPaused && <Button variant="subtle" leftSection={<IconSettings size={16} />} onClick={() => setSettingsOpen(true)}>刷新设置</Button>}
       </div>
     </header>
+    {quotaPaused && <Alert color="gray" title="AGY 额度查询已暂停">{AGY_QUOTA_PAUSED_MESSAGE}</Alert>}
     {targets.isError && <Alert color="red" title="无法读取 Agent">{targets.error.message} <Button variant="subtle" size="compact-sm" onClick={() => void targets.refetch()}>重试</Button></Alert>}
     {accounts.isError && <Alert color="red" title="无法读取账号">{accounts.error.message} <Button variant="subtle" size="compact-sm" onClick={() => void accounts.refetch()}>重试</Button></Alert>}
     {targetState.isError && <Alert color="red" title="无法读取目标 Agent 的账号状态">{targetState.error.message} <Button variant="subtle" size="compact-sm" onClick={() => void targetState.refetch()}>重试</Button></Alert>}
@@ -100,7 +101,7 @@ export function PlatformAccountsPage({ platform }: { platform: AccountPlatform }
             <Table.Td aria-busy={quota.isFetching}>
               {quota.error && <div className="agy-account-error" role="status"><strong>额度查询失败</strong><span>{quota.error.message}</span></div>}
               {quota.data ? <AgyQuotaTiles quota={quota.data} /> : !quota.error &&
-                <span className="agy-account-muted">{!target ? '请选择目标 Agent' : quotaSupported === false ? '此系统暂不支持隔离查询' : quota.isFetching ? '正在读取额度…' : '尚未刷新'}</span>}
+                <span className="agy-account-muted">{quotaPaused ? '额度查询已暂停' : !target ? '请选择目标 Agent' : quotaSupported === false ? '此系统暂不支持隔离查询' : quota.isFetching ? '正在读取额度…' : '尚未刷新'}</span>}
             </Table.Td>
             <Table.Td className="agy-account-timestamp">
               {quota.data ? <time dateTime={quota.data.as_of}>{agyStamp(quota.data.as_of)}</time> : '—'}

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Agent, Session } from '../../domain/types'
-import { isAccountPlatform, type AccountPlatform } from './agyAccountsApi'
+import { isAccountPlatform, isPlatformQuotaPaused, type AccountPlatform } from './agyAccountsApi'
 import { useRefreshSettings, useScheduledRefresh } from './accountRefresh'
 import { accountActionMutationKey } from './useAgyAccountMutation'
 import { accountQuotaQueryPrefix, useAgyQuotaRefresh } from './useAgyAccountOverview'
@@ -45,12 +45,14 @@ export function AgyQuotaRefreshProvider({
   const [page, setPage] = useState<PageTarget | null>(null)
   const platform = page?.platform ?? sessionPlatform
   const environment = page?.environment ?? sessionEnvironment
+  const quotaPaused = isPlatformQuotaPaused(platform)
   const [settings] = useRefreshSettings(platform)
   const refresh = useAgyQuotaRefresh(environment, platform)
   const client = useQueryClient()
   useEffect(() => syncQuotaWindows(client), [client])
-  useScheduledRefresh(environment, settings, scope => {
+  useScheduledRefresh(quotaPaused ? '' : environment, settings, scope => {
     if (
+      quotaPaused ||
       page?.paused ||
       client.isMutating({ mutationKey: accountActionMutationKey(environment, platform) }) ||
       client.isFetching({ queryKey: accountQuotaQueryPrefix(environment, platform) })

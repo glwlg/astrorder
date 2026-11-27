@@ -395,6 +395,16 @@ func (h *Handler) handleGetModelQuota(w http.ResponseWriter, r *http.Request) {
 	// subscription quota first so direct login users avoid slow or empty gateway lookups.
 	trimmedAgy := strings.TrimPrefix(model, "antigravity/")
 	if !strings.Contains(trimmedAgy, "/") && h.shouldTryAntigravityNative(r.Context(), model, agentID) {
+		if antigravityNativeQuotaPaused {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"model":     trimmedAgy,
+				"providers": []string{"antigravity"},
+				"reports":   []any{},
+				"accounts":  []any{},
+				"paused":    true,
+			})
+			return
+		}
 		if native, ok := h.serveAntigravityNativeModelQuota(r.Context(), model, agentID); ok {
 			writeJSON(w, http.StatusOK, native)
 			return

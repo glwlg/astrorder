@@ -184,7 +184,7 @@ export interface OcxModelQuotaReport {
   quota?: { fiveHourPercent?: number; fiveHourResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number; monthlyPercent?: number; monthlyResetAt?: number; customWindows?: OcxQuotaWindow[] }
 }
 export interface OcxModelQuotaAccount { id: string; email?: string; logLabel?: string; plan?: string; paused?: boolean; error?: string; last?: boolean; asOf?: string; readAt?: string; readDeferred?: boolean; quota?: { customWindows?: OcxQuotaWindow[]; shortPercent?: number; shortResetAt?: number; weeklyPercent?: number; weeklyResetAt?: number } | null }
-export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[] }
+export interface OcxModelQuotaResponse { model: string; providers: string[]; reports: OcxModelQuotaReport[]; accounts: OcxModelQuotaAccount[]; paused?: boolean }
 
 export type AgentUsageRange = '24h' | '7d' | '30d' | 'all'
 export interface AgentUsageReport {
@@ -884,9 +884,9 @@ export const api = {
     request<AiProvidersConfig>(`/services/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   setDefaultAiProvider: (payload: { provider_id: string; model: string; reasoning?: string }) =>
     jsonRequest<AiProvidersConfig>('/services/providers/default', payload, 'PUT'),
-  fetchAiProviderModels: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string }) =>
+  fetchAiProviderModels: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string; agent_id?: string }) =>
     jsonRequest<AiProviderModelsResponse>('/services/providers/models', payload),
-  testAiProvider: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string; model?: string; reasoning?: string }) =>
+  testAiProvider: (payload: { provider_id?: string; protocol?: AiProviderProtocol; base_url?: string; api_key?: string; agent_id?: string; model?: string; reasoning?: string }) =>
     jsonRequest<AiProviderTestResponse>('/services/providers/test', payload),
   curateHandoffWithSystemOne: (sessionId: string, agentId: string) =>
     jsonRequest<{ ok: boolean; summary: string; phase: string; blocker: string }>('/sessions/handoff-curate', { session_id: sessionId, agent_id: agentId }),
@@ -1187,6 +1187,14 @@ export const api = {
     request<ToolchainInstallJob>(`/toolchain/install/jobs/${encodeURIComponent(id)}`),
   cancelToolchainInstallJob: (id: string) =>
     jsonRequest<ToolchainInstallJob>(`/toolchain/install/jobs/${encodeURIComponent(id)}/cancel`, {}, 'POST'),
+  configureOnboarding: (payload: OnboardingConfigureRequest) =>
+    jsonRequest<OnboardingConfigureResult>('/toolchain/onboarding/configure', payload, 'POST'),
+  startToolchainOAuth: (payload: ToolchainOAuthStartRequest) =>
+    jsonRequest<ToolchainOAuthSession>('/toolchain/oauth/start', payload, 'POST'),
+  getToolchainOAuthStatus: (id: string) =>
+    request<ToolchainOAuthSession>(`/toolchain/oauth/status?id=${encodeURIComponent(id)}`),
+  cancelToolchainOAuth: (id: string) =>
+    jsonRequest<ToolchainOAuthSession>('/toolchain/oauth/cancel', { id }, 'POST'),
 
   // 侧边栏外链集成（数据库持久化）
   listIntegrations: () => request<{ items: IntegrationItem[] }>('/integrations'),
@@ -2182,7 +2190,7 @@ export interface MeetingRecord {
   updated_at?: string
 }
 
-export type AiProviderProtocol = 'openai' | 'gemini'
+export type AiProviderProtocol = 'openai' | 'gemini' | 'agent'
 export type AiProviderVendor = '' | 'magpie' | 'opencodex'
 
 export interface AiProvider {
@@ -2193,6 +2201,8 @@ export interface AiProvider {
   base_url: string
   api_key_set: boolean
   masked_key?: string
+  agent_id?: string
+  agent_kind?: string
   models: string[]
   enabled: boolean
   management_url?: string
@@ -2217,9 +2227,11 @@ export interface AiProviderPatch {
   name: string
   protocol: AiProviderProtocol
   vendor?: AiProviderVendor | string
-  base_url: string
+  base_url?: string
   api_key?: string | null
   clear_api_key?: boolean
+  agent_id?: string
+  agent_kind?: string
   models?: string[]
   enabled?: boolean
   management_url?: string
@@ -2229,6 +2241,63 @@ export interface AiProviderPatch {
   target_overrides?: Record<string, string>
   set_as_default?: boolean
   default_model?: string
+}
+
+export interface OnboardingConfigureRequest {
+  environment_id?: string
+  agent_kind: string
+  agent_id?: string
+  api_key?: string
+  base_url?: string
+  provider_name?: string
+  protocol?: AiProviderProtocol
+  model?: string
+  skip_key?: boolean
+  inject_capabilities?: boolean
+  sync_universal_llm?: boolean
+  workspace?: string
+}
+
+export interface OnboardingConfigureResult {
+  ok: boolean
+  environment_id: string
+  agent_id: string
+  agent_kind: string
+  workspace: string
+  credentials_written: boolean
+  universal_llm_mode?: 'api_key' | 'agent' | ''
+  cli_ready: boolean
+  injected_skills: string[]
+  warnings?: string[]
+  requires_daemon_restart: boolean
+}
+
+export type ToolchainOAuthStatus = 'starting' | 'waiting_user' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface ToolchainOAuthStartRequest {
+  environment_id?: string
+  agent_kind: string
+  mode?: 'browser' | 'device'
+  open_browser?: boolean
+}
+
+export interface ToolchainOAuthSession {
+  id: string
+  environment_id: string
+  agent_kind: string
+  mode: 'browser' | 'device' | string
+  status: ToolchainOAuthStatus
+  detail?: string
+  auth_url?: string
+  device_code?: string
+  browser_opened?: boolean
+  output?: string
+  error?: string
+  created_at?: string
+  updated_at?: string
+  completed_at?: string
+  auth_configured?: boolean
+  agent_status?: ToolchainItemStatus
 }
 
 export interface AiProviderModelsResponse {

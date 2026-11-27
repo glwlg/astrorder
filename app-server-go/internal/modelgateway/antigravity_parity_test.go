@@ -106,7 +106,76 @@ func setupModelGatewayWithRuntime(t *testing.T, rt *stubRuntimeQueryServer) (*Ha
 	return raw.(*Handler), st, cleanup
 }
 
+func TestAntigravityNativeModelQuotaPausedByDefault(t *testing.T) {
+	var seenQuotaQueries int
+	rt := &stubRuntimeQueryServer{
+		queryNative: func(ctx context.Context, req *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error) {
+			switch req.Query.(type) {
+			case *sessiondv1.NativeQueryRequest_AntigravityQuotaRead:
+				seenQuotaQueries++
+				t.Fatalf("AntigravityQuotaRead should not be called while paused")
+				return nil, nil
+			case *sessiondv1.NativeQueryRequest_AntigravitySessionUsage:
+				raw, _ := json.Marshal(map[string]any{
+					"context_available": true,
+					"provider":          "antigravity",
+					"model":             "gemini-4-neon",
+					"last_input_tokens": int64(10000),
+					"context_window":    int64(1048576),
+					"input_tokens":      int64(10000),
+					"output_tokens":     int64(500),
+					"total_tokens":      int64(10500),
+				})
+				return &sessiondv1.NativeQueryResponse{
+					Target: req.Target,
+					Result: &sessiondv1.NativeJson{Schema: "antigravity.session.usage", Utf8Json: raw},
+				}, nil
+			default:
+				t.Fatalf("unexpected query: %T", req.Query)
+				return nil, nil
+			}
+		},
+	}
+
+	h, st, cleanup := setupModelGatewayWithRuntime(t, rt)
+	defer cleanup()
+
+	ctx := context.Background()
+	if _, err := st.UpsertAgent(ctx, map[string]any{
+		"id":            "local-antigravity",
+		"kind":          "antigravity",
+		"name":          "Antigravity · 本机",
+		"connection_id": "local",
+		"status":        "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	h.handleGetModelQuota(w, httptest.NewRequest(http.MethodGet, "/api/v1/analytics/model-quota?model=antigravity%2Fgemini-4-neon&agent_id=local-antigravity", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 paused payload, got %d %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["paused"] != true || len(resp["accounts"].([]any)) != 0 || seenQuotaQueries != 0 {
+		t.Fatalf("expected paused=true with 0 accounts and 0 daemon calls, got resp=%+v calls=%d", resp, seenQuotaQueries)
+	}
+
+	// Local SQLite session context/token usage remains enabled.
+	wUsage := httptest.NewRecorder()
+	h.handleGetSessionUsage(wUsage, httptest.NewRequest(http.MethodGet, "/api/v1/sessions/sess-1/usage?agent_id=local-antigravity", nil))
+	if wUsage.Code != http.StatusOK {
+		t.Fatalf("expected session usage to remain available: %d %s", wUsage.Code, wUsage.Body.String())
+	}
+}
+
 func TestMagpieDoublePrefixUnwrapAndAntigravityNativeFallback(t *testing.T) {
+	prevPaused := antigravityNativeQuotaPaused
+	antigravityNativeQuotaPaused = false
+	t.Cleanup(func() { antigravityNativeQuotaPaused = prevPaused })
 	var seenQuotaQueries int
 	var seenSSHTarget bool
 	rt := &stubRuntimeQueryServer{
@@ -261,6 +330,9 @@ func TestMagpieDoublePrefixUnwrapAndAntigravityNativeFallback(t *testing.T) {
 }
 
 func TestAntigravityNativeQuotaGroupsMapping(t *testing.T) {
+	prevPaused := antigravityNativeQuotaPaused
+	antigravityNativeQuotaPaused = false
+	t.Cleanup(func() { antigravityNativeQuotaPaused = prevPaused })
 	rt := &stubRuntimeQueryServer{
 		queryNative: func(ctx context.Context, req *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error) {
 			if _, ok := req.Query.(*sessiondv1.NativeQueryRequest_AntigravityQuotaRead); !ok {

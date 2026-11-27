@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"astrorder.dev/app-server/internal/connections"
 	"astrorder.dev/contracts/agycredential"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
@@ -103,7 +104,53 @@ func TestAgyImportOnceAndApplyToTwoTargets(t *testing.T) {
 	}
 }
 
+func TestAgyQuotaQueryPausedByDefault(t *testing.T) {
+	const base = "/api/v1/agy-accounts"
+	var stateHits atomic.Int32
+	var quotaHits atomic.Int32
+	fake := &fakeDaemonService{agyAccount: func(req *pb.AgyAccountRequest) (*pb.AgyAccountResponse, error) {
+		switch req.Action {
+		case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_STATE:
+			stateHits.Add(1)
+			raw, _ := json.Marshal(map[string]any{"identity": "", "quota_supported": true})
+			return &pb.AgyAccountResponse{Result: &pb.NativeJson{Schema: "astrorder.agy-account-vault-result.v1", Utf8Json: raw}}, nil
+		case pb.AgyAccountAction_AGY_ACCOUNT_ACTION_READ_QUOTA:
+			quotaHits.Add(1)
+			return nil, status.Error(codes.Internal, "should never call upstream READ_QUOTA while paused")
+		default:
+			return nil, status.Error(codes.Unimplemented, "unexpected")
+		}
+	}}
+	h, st := setupRestoreFixture(t, fake, &recordingResolver{results: map[string]string{"antigravity": "/usr/bin/agy"}})
+	if _, err := st.UpsertAgent(t.Context(), map[string]any{"id": "agy-local", "kind": "antigravity", "name": "AGY", "status": "ready", "connection_id": "local"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wState := httptest.NewRecorder()
+	h.ServeHTTP(wState, httptest.NewRequest(http.MethodGet, base+"?environment_id=local", nil))
+	if wState.Code != http.StatusOK {
+		t.Fatalf("READ_STATE failed: %d %s", wState.Code, wState.Body.String())
+	}
+	var stateBody map[string]any
+	if err := json.Unmarshal(wState.Body.Bytes(), &stateBody); err != nil {
+		t.Fatal(err)
+	}
+	if stateBody["quota_supported"] != false || stateBody["quota_paused"] != true {
+		t.Fatalf("expected quota_supported=false and quota_paused=true, got %s", wState.Body.String())
+	}
+
+	wQuota := httptest.NewRecorder()
+	h.ServeHTTP(wQuota, httptest.NewRequest(http.MethodGet, base+"?environment_id=local&account_id=current", nil))
+	if wQuota.Code != http.StatusServiceUnavailable || !strings.Contains(wQuota.Body.String(), "agy_quota_paused") {
+		t.Fatalf("expected HTTP 503 agy_quota_paused, got %d %s", wQuota.Code, wQuota.Body.String())
+	}
+	if quotaHits.Load() != 0 || stateHits.Load() != 1 {
+		t.Fatalf("expected 0 upstream READ_QUOTA calls and 1 READ_STATE call, got quota=%d state=%d", quotaHits.Load(), stateHits.Load())
+	}
+}
+
 func TestAgyReadStateCacheAndConcurrentQuotaSingleflight(t *testing.T) {
+	t.Cleanup(connections.SetAgyQuotaQueryPausedForTest(false))
 	const base = "/api/v1/agy-accounts"
 	var stateHits atomic.Int32
 	var quotaHits atomic.Int32

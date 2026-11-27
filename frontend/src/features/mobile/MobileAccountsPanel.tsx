@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { IconDeviceFloppy, IconPlus, IconRefresh, IconSettings, IconSwitchHorizontal, IconTrash } from '@tabler/icons-react'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
-import { accountPlatformMeta, supportedAccountPlatforms, type AccountPlatform } from '../agentAccounts/agyAccountsApi'
+import { AGY_QUOTA_PAUSED_MESSAGE, accountPlatformMeta, supportedAccountPlatforms, type AccountPlatform } from '../agentAccounts/agyAccountsApi'
 import { AgyAccountDialog, type AccountPrompt } from '../agentAccounts/AgyAccountDialog'
 import { AgyAccountImportDialog } from '../agentAccounts/AgyAccountImportDialog'
 import { AgyQuotaTiles } from '../agentAccounts/AgyQuotaTiles'
@@ -50,8 +50,8 @@ export function MobileAccountsPanel({
     ?? targetList[0]
   const environment = target?.id ?? ''
 
-  const { accounts, state: targetState, currentID, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment, platform)
-  const quotaSupported = targetState.data?.quota_supported
+  const { accounts, state: targetState, currentID, quotaPaused, rows, quotas, refreshing, refresh, refreshLibrary } = useAgyAccountOverview(environment, platform)
+  const quotaSupported = quotaPaused ? false : targetState.data?.quota_supported
   const prompt = dialog?.environment === environment && dialog?.platform === platform ? dialog.prompt : null
 
   useEffect(() => {
@@ -132,7 +132,7 @@ export function MobileAccountsPanel({
           <button
             type="button"
             className="m-accounts-refresh-btn"
-            aria-label="刷新全部"
+            aria-label={quotaPaused ? '刷新状态' : '刷新全部'}
             disabled={mutation.isPending || accounts.isPending || refreshing}
             onClick={() => {
               void targets.refetch()
@@ -163,18 +163,25 @@ export function MobileAccountsPanel({
             <IconPlus size={14} />
             <span>导入账号</span>
           </button>
-          <button
-            type="button"
-            className="m-accounts-chip"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <IconSettings size={14} />
-            <span>刷新设置</span>
-          </button>
+          {!quotaPaused && (
+            <button
+              type="button"
+              className="m-accounts-chip"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <IconSettings size={14} />
+              <span>刷新设置</span>
+            </button>
+          )}
         </div>
       </div>
 
       <div className="m-accounts-list">
+        {quotaPaused && (
+          <Alert color="gray" title="AGY 额度查询已暂停">
+            {AGY_QUOTA_PAUSED_MESSAGE}
+          </Alert>
+        )}
         {targets.isError && (
           <Alert color="red" title="无法读取 Agent">
             {targets.error.message}{' '}
@@ -269,13 +276,15 @@ export function MobileAccountsPanel({
                       <AgyQuotaTiles quota={quota.data} />
                     ) : !quota.error && (
                       <span className="m-account-muted">
-                        {!target
-                          ? '请选择目标 Agent'
-                          : quotaSupported === false
-                            ? '此系统暂不支持隔离查询'
-                            : quota.isFetching
-                              ? '正在读取额度…'
-                              : '尚未刷新，点击下方刷新获取最新额度'}
+                        {quotaPaused
+                          ? '额度查询已暂停'
+                          : !target
+                            ? '请选择目标 Agent'
+                            : quotaSupported === false
+                              ? '此系统暂不支持隔离查询'
+                              : quota.isFetching
+                                ? '正在读取额度…'
+                                : '尚未刷新，点击下方刷新获取最新额度'}
                       </span>
                     )}
                   </div>

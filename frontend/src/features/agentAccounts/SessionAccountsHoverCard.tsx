@@ -61,14 +61,15 @@ function PlatformPreview({ platform, environment, machine, busy, error, onSwitch
   platform: AccountPlatform; environment: string; machine: string; busy: boolean; error?: string; onSwitch: (account: AgyAccount, unsaved: boolean) => void
 }) {
   const meta = accountPlatformMeta(platform)
-  const { accounts, state, rows, quotas, refresh, refreshing } = useAgyAccountOverview(environment, platform)
+  const { accounts, state, rows, quotas, quotaPaused, refresh, refreshing } = useAgyAccountOverview(environment, platform)
   return <>
     <header className="session-account-heading">
       <AgentBrandIcon kind={platform} size={22} />
-      <strong>{meta.label} 额度</strong><small title={machine}>{machine}</small>
-      <Button variant="subtle" size="compact-sm" loading={refreshing} disabled={busy} onClick={() => void refresh('all')}>刷新额度</Button>
+      <strong>{quotaPaused ? `${meta.label} 账号` : `${meta.label} 额度`}</strong><small title={machine}>{machine}</small>
+      {!quotaPaused && <Button variant="subtle" size="compact-sm" loading={refreshing} disabled={busy} onClick={() => void refresh('all')}>刷新额度</Button>}
     </header>
     <div className="session-account-scroll">
+      {quotaPaused && <p className="agy-account-muted">AGY 额度查询已暂停，仍可快速切换账号。</p>}
       {accounts.isPending && <p role="status">正在读取账号…</p>}
       {accounts.isError && <p role="alert">{accounts.error.message}</p>}
       {state.isError && <p role="alert">{state.error.message}</p>}
@@ -87,10 +88,10 @@ function PlatformPreview({ platform, environment, machine, busy, error, onSwitch
               <Button size="compact-sm" variant="light" aria-label={`切换到 ${account.name}`} disabled={!state.isSuccess || busy || refreshing}
                 onClick={() => onSwitch(account, state.data?.current_account_id === 'current')}>切换</Button>}
           </div>
-          {quota.data && <AgyQuotaSummary quota={quota.data} />}
-          {quota.isFetching && <small role="status">正在读取最新额度…</small>}
-          {quota.error && <small role="status">刷新失败：{quota.error.message}</small>}
-          {state.data?.quota_supported === false ? <small>此目标不支持刷新额度</small> :
+          {!quotaPaused && quota.data && <AgyQuotaSummary quota={quota.data} />}
+          {!quotaPaused && quota.isFetching && <small role="status">正在读取最新额度…</small>}
+          {!quotaPaused && quota.error && <small role="status">刷新失败：{quota.error.message}</small>}
+          {quotaPaused ? null : state.data?.quota_supported === false ? <small>此目标不支持刷新额度</small> :
             !quota.data && !quota.isFetching && !quota.error && <small>尚未刷新</small>}
         </li>
       })}</ul>

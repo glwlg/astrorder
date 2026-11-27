@@ -3,6 +3,25 @@ import { request } from '../../api/client'
 export type AccountPlatform = 'antigravity' | 'codex' | 'grok'
 export const supportedAccountPlatforms: readonly AccountPlatform[] = ['antigravity', 'codex', 'grok']
 
+// Paused to comply with Google usage policy; account saving, import, and switching stay enabled.
+export const AGY_QUOTA_PAUSED = true
+export const AGY_QUOTA_PAUSED_MESSAGE = 'AGY 账号额度查询已暂停（遵循 Google 使用政策），账号导入、保存与切换不受影响。'
+
+export function isPlatformQuotaPaused(platform: AccountPlatform): boolean {
+  return AGY_QUOTA_PAUSED && platform === 'antigravity'
+}
+
+export function isDirectAntigravityModelRoute(modelRoute: string, agentKind?: string): boolean {
+  if (!AGY_QUOTA_PAUSED || !modelRoute) return false
+  const trimmed = modelRoute.trim()
+  if (trimmed.startsWith('antigravity/')) {
+    const rest = trimmed.slice('antigravity/'.length)
+    return rest.length > 0 && !rest.includes('/')
+  }
+  const baseKind = agentKind?.replace(/-ssh$/, '')
+  return baseKind === 'antigravity' && !trimmed.includes('/')
+}
+
 export function isAccountPlatform(kind?: string | null): kind is AccountPlatform {
   return kind === 'antigravity' || kind === 'codex' || kind === 'grok'
 }
@@ -29,7 +48,7 @@ const platformMetaMap: Record<AccountPlatform, AccountPlatformMeta> = {
     credentialLabel: 'AGY Token JSON',
     fileLabel: 'AGY Token 文件（最大 1 MB）',
     emptyHint: '暂无已保存账号，可导入 AGY Token JSON 或保存当前账号。',
-    targetEmptyHint: '接入 AGY Agent 后即可应用账号和查询额度。',
+    targetEmptyHint: '接入 AGY Agent 后即可保存和切换账号。',
     notLoggedInHint: '目标 Agent 尚未登录 AGY',
     canDelete: false,
   },
@@ -80,7 +99,7 @@ export type PlatformAccountsApi = {
   importPath: string
   targets: () => Promise<{ items: AgyTarget[] }>
   accounts: (signal?: AbortSignal) => Promise<{ items: SavedAgyAccount[] }>
-  targetState: (environment: string, signal?: AbortSignal) => Promise<{ current_account_id: string; quota_supported: boolean }>
+  targetState: (environment: string, signal?: AbortSignal) => Promise<{ current_account_id: string; quota_supported: boolean; quota_paused?: boolean }>
   quota: (environment: string, account: string, signal?: AbortSignal) => Promise<AgyQuota>
   importCredential: (name: string, credential: string) => Promise<{ account_id: string }>
   save: (environment: string, name: string) => Promise<{ account_id: string }>
@@ -110,7 +129,7 @@ function createPlatformAccountsApi(basePath: string, withDelete: boolean): Platf
     targets: () => request<{ items: AgyTarget[] }>(`${basePath}/targets`),
     accounts: (signal?: AbortSignal) => request<{ items: SavedAgyAccount[] }>(basePath, { signal }),
     targetState: (environment: string, signal?: AbortSignal) =>
-      request<{ current_account_id: string; quota_supported: boolean }>(scopedPath(basePath, environment), { signal }),
+      request<{ current_account_id: string; quota_supported: boolean; quota_paused?: boolean }>(scopedPath(basePath, environment), { signal }),
     quota: (environment: string, account: string, signal?: AbortSignal) =>
       request<AgyQuota>(scopedPath(basePath, environment, account), { signal }),
     importCredential: (name: string, credential: string) =>

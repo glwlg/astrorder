@@ -396,7 +396,15 @@ func buildAntigravityGroupAccount(agentID, baseLabel, plan, asOf string, g antig
 	return account
 }
 
+// antigravityNativeQuotaPaused disables outbound Antigravity native quota
+// queries (`AntigravityQuotaRead` / `agy -p '/usage'`) to comply with Google
+// usage policy. Local SQLite session token/context metrics remain enabled.
+var antigravityNativeQuotaPaused = true
+
 func (h *Handler) serveAntigravityNativeModelQuota(ctx context.Context, model, agentID string) (map[string]any, bool) {
+	if antigravityNativeQuotaPaused {
+		return nil, false
+	}
 	if h.client == nil || h.client.Runtime == nil {
 		return nil, false
 	}

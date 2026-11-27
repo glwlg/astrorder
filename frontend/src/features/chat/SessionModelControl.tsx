@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type OcxModelQuotaResponse } from '../../api/client'
 import type { Session } from '../../domain/types'
 import { useSessionModel } from '../../hooks/useSessionModel'
+import { isDirectAntigravityModelRoute } from '../agentAccounts/agyAccountsApi'
 import { useIsOfficeExperience } from '../office/appProfile'
 import {
   availableEffortsForModel,
@@ -80,15 +81,27 @@ export function summarizeQuota(quota?: OcxModelQuotaResponse | null): { status: 
   return null
 }
 
-export function ModelQuotaBadge({ modelRoute, agentId, size = 'sm' }: { modelRoute: string; agentId?: string; size?: 'sm' | 'dot' }) {
+export function ModelQuotaBadge({
+  modelRoute,
+  agentId,
+  agentKind,
+  size = 'sm',
+}: {
+  modelRoute: string
+  agentId?: string
+  agentKind?: string
+  size?: 'sm' | 'dot'
+}) {
+  const paused = isDirectAntigravityModelRoute(modelRoute, agentKind)
   const query = useQuery({
     queryKey: ['astrorder', 'model-quota', modelRoute, agentId || ''],
     queryFn: () => api.getModelQuota(modelRoute, agentId).catch(() => null),
-    enabled: Boolean(modelRoute),
+    enabled: Boolean(modelRoute) && !paused,
     retry: false,
     staleTime: 60000,
     refetchOnWindowFocus: false,
   })
+  if (paused || query.data?.paused) return null
   const summary = summarizeQuota(query.data)
   if (!summary) return null
   if (size === 'dot') {
@@ -272,7 +285,7 @@ export function SessionModelControl({
           }}
         > 
           <span className="codex-model-pill-text">{displayModelName}</span>
-          {!isOfficeMode && showPillQuota && <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} size="dot" />}
+          {!isOfficeMode && showPillQuota && <ModelQuotaBadge modelRoute={currentModelRoute} agentId={session.agent_id} agentKind={isAntigravity ? 'antigravity' : undefined} size="dot" />}
           {showPillEffort && <span className="codex-model-pill-effort">{effortLabel}</span>}
           <IconChevronDown size={14} className="codex-model-pill-arrow" />
         </button>
@@ -460,7 +473,7 @@ export function SessionModelControl({
                       disabled={changing || (model.data?.read_only || model.data?.model_read_only)}
                     >
                       <span className="codex-model-menu-item-text" title={item.label}>{item.label}</span>
-                      {!isOfficeMode && <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`} agentId={session.agent_id} />}
+                      {!isOfficeMode && <ModelQuotaBadge modelRoute={`${item.provider ? `${item.provider}/` : ''}${item.defaultVariant.model}`} agentId={session.agent_id} agentKind={isAntigravity ? 'antigravity' : undefined} />}
                       {isSelected && <IconCheck size={16} className="codex-model-check-icon" />}
                     </UnstyledButton>
                   )
