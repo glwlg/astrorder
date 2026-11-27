@@ -28,50 +28,86 @@ func (r *Registry) disconnectRuntime(ctx context.Context, agentType, connectionI
 		return nil, RejectBeforeDispatch(fmt.Sprintf("unsupported runtime type: %s", agentType))
 	}
 
-	r.mu.RLock()
-	adapter, exists := r.adapters[agentType]
-	r.mu.RUnlock()
-	if !exists {
+	// Lock runtime first to prevent new requests from being scheduled or starting
+	r.mu.Lock()
+	activeSlot, exists := r.slots[agentType]
+	var retiredSlots []*adapterSlot
+	for s := range r.retired {
+		if s.kind == agentType {
+			retiredSlots = append(retiredSlots, s)
+		}
+	}
+	if !exists && len(retiredSlots) == 0 {
+		r.mu.Unlock()
 		return nil, RejectBeforeDispatch(fmt.Sprintf("runtime %q is not registered", agentType))
 	}
-
-	if _, ok := adapter.(ConnectionDisconnector); ok {
+	var primary Adapter
+	if activeSlot != nil {
+		primary = activeSlot.adapter
+	} else {
+		primary = retiredSlots[0].adapter
+	}
+	if _, ok := primary.(ConnectionDisconnector); ok {
 		if connectionID == "" || len(connectionID) > 128 {
+			r.mu.Unlock()
 			return nil, RejectBeforeDispatch("connection_id is invalid")
 		}
 	} else if connectionID != "" {
+		r.mu.Unlock()
 		return nil, RejectBeforeDispatch(fmt.Sprintf("runtime %q does not accept connection_id", agentType))
 	}
-
-	// Lock runtime first to prevent new requests from being scheduled or starting
-	r.mu.Lock()
 	if r.draining || r.operations[agentType] > 0 || r.reloading[agentType] {
 		r.mu.Unlock()
 		return nil, RejectBeforeDispatch(ErrRuntimeBusy.Error())
 	}
 	r.reloading[agentType] = true
 	r.inflight++
+	targets := make([]*adapterSlot, 0, 1+len(retiredSlots))
+	if activeSlot != nil {
+		activeSlot.inflight++
+		targets = append(targets, activeSlot)
+	}
+	for _, s := range retiredSlots {
+		s.inflight++
+		targets = append(targets, s)
+	}
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		delete(r.reloading, agentType)
 		r.inflight--
+		var toClose []*adapterSlot
+		for _, s := range targets {
+			s.inflight--
+			if drained := r.takeDrainableRetiredLocked(s); drained != nil {
+				toClose = append(toClose, drained)
+			}
+		}
 		r.mu.Unlock()
+		for _, s := range toClose {
+			_ = closeSlot(s)
+		}
 	}()
 
 	// Enumerate only after maintenance admission is closed. Otherwise a new
 	// session can bind after this snapshot and escape the active-state check.
+	slotSessions := make(map[*adapterSlot][]string, len(targets))
 	var targetSessions []string
-	if multi, ok := adapter.(ConnectionDisconnector); ok {
-		targetSessions = multi.SessionsForConnection(connectionID)
-	} else {
-		r.mu.RLock()
-		for sid, owner := range r.owners {
-			if owner == agentType {
-				targetSessions = append(targetSessions, sid)
+	for _, s := range targets {
+		var sids []string
+		if multi, ok := s.adapter.(ConnectionDisconnector); ok {
+			sids = multi.SessionsForConnection(connectionID)
+		} else {
+			r.mu.RLock()
+			for sid, owner := range r.owners {
+				if owner == agentType && r.slotForSessionLocked(sid, owner) == s {
+					sids = append(sids, sid)
+				}
 			}
+			r.mu.RUnlock()
 		}
-		r.mu.RUnlock()
+		slotSessions[s] = sids
+		targetSessions = append(targetSessions, sids...)
 	}
 
 	// Active check: reject if any target session is running or waiting_approval or non-idle
@@ -87,47 +123,54 @@ func (r *Registry) disconnectRuntime(ctx context.Context, agentType, connectionI
 		return nil, RejectBeforeDispatch(fmt.Sprintf("%s has %d non-idle, running, or unconfirmed session(s); wait until all target sessions are idle before disconnecting", agentType, activeCount))
 	}
 	if before != nil {
-		if err := before(ctx, adapter); err != nil {
+		if err := before(ctx, primary); err != nil {
 			return nil, err
 		}
 	}
 
 	var released []string
-	var err error
-	if force {
-		if multi, ok := adapter.(forcedConnectionDisconnector); ok {
-			released, err = multi.ForceDisconnectConnection(ctx, connectionID)
-		} else if single, ok := adapter.(ForcedRuntimeDisconnector); ok {
-			released, err = single.ForceShutdown(ctx)
+	for _, s := range targets {
+		adapter := s.adapter
+		var part []string
+		var err error
+		if force {
+			if multi, ok := adapter.(forcedConnectionDisconnector); ok {
+				part, err = multi.ForceDisconnectConnection(ctx, connectionID)
+			} else if single, ok := adapter.(ForcedRuntimeDisconnector); ok {
+				part, err = single.ForceShutdown(ctx)
+			} else {
+				return nil, RejectBeforeDispatch("runtime does not support forced restart")
+			}
+		} else if multi, ok := adapter.(ConnectionDisconnector); ok {
+			part, err = multi.DisconnectConnection(ctx, connectionID)
+		} else if single, ok := adapter.(RuntimeDisconnector); ok {
+			part, err = single.Shutdown(ctx)
+		} else if closer, ok := adapter.(interface{ Close() error }); ok {
+			err = closer.Close()
+			part = slotSessions[s]
 		} else {
-			return nil, RejectBeforeDispatch("runtime does not support forced restart")
+			part = slotSessions[s]
 		}
-	} else if multi, ok := adapter.(ConnectionDisconnector); ok {
-		released, err = multi.DisconnectConnection(ctx, connectionID)
-	} else if single, ok := adapter.(RuntimeDisconnector); ok {
-		released, err = single.Shutdown(ctx)
-	} else if closer, ok := adapter.(interface{ Close() error }); ok {
-		err = closer.Close()
-		released = targetSessions
-	} else {
-		released = targetSessions
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		released = append(released, part...)
 	}
 
 	// Unbind released sessions from Registry
 	r.mu.Lock()
 	for _, sid := range released {
 		delete(r.owners, sid)
+		delete(r.ownerSlots, sid)
 		delete(r.identities, sid)
 		delete(r.states, sid)
 		delete(r.generations, sid)
 	}
 	r.mu.Unlock()
 
+	var err error
 	if after != nil {
-		err = after(ctx, adapter)
+		err = after(ctx, primary)
 	}
 	return released, err
 }

@@ -70,39 +70,32 @@ func (h *handler) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	userPrompt := buildDigestUserPrompt(req, selected, title)
 	assembledPrompt := fmt.Sprintf("【角色与格式要求】\n%s\n\n%s", systemPrompt, userPrompt)
 
-	var llmCfg map[string]string
+	var llmCfg aiprovider.ResolvedModel
 	if strings.TrimSpace(req.ProviderID) != "" {
 		if resolved, ok := aiprovider.Resolve(ctx, h.store, req.ProviderID, req.Model); ok {
-			llmCfg = map[string]string{
-				"protocol":  resolved.Protocol,
-				"base_url":  resolved.BaseURL,
-				"api_key":   resolved.APIKey,
-				"model":     resolved.Model,
-				"reasoning": resolved.Reasoning,
-			}
+			llmCfg = resolved
 		}
 	}
-	if llmCfg == nil {
+	if !llmCfg.IsConfigured() && strings.TrimSpace(req.ProviderID) == "" {
 		llmCfg = loadLLMConfig(ctx, h.store)
 		if m := strings.TrimSpace(req.Model); m != "" {
-			llmCfg["model"] = m
+			llmCfg.Model = m
 		}
 	}
-	apiKey := strings.TrimSpace(llmCfg["api_key"])
-	llmConfigured := apiKey != ""
+	llmConfigured := llmCfg.IsConfigured()
 	wantMode := strings.ToLower(strings.TrimSpace(req.Mode))
 
 	if wantMode == "prompt_only" || !llmConfigured {
 		draft := buildOfflineMarkdownDraft(title, tpl.Name, req.From, req.To, selected, req.ManualNotes)
 		msg := "已拼装完整素材提示词，可直接复制或交给会话助手生成。"
 		if !llmConfigured && wantMode != "prompt_only" {
-			msg = "未配置 AI 供应商 API Key，已生成离线素材草稿与完整提示词，可前往「设置 → AI 供应商」配置，或一键发给对话润色成稿。"
+			msg = "未配置通用 AI 模型（可在「设置 → AI 供应商」直接选择已接入 Agent 或填写 API Key），已生成离线素材草稿与完整提示词，也可一键发给对话润色成稿。"
 		}
 		return &GenerateResponse{
 			OK:              true,
 			Mode:            "prompt_only",
 			LLMConfigured:   llmConfigured,
-			Model:           llmCfg["model"],
+			Model:           llmCfg.Model,
 			TemplateID:      tpl.ID,
 			TemplateName:    tpl.Name,
 			Title:           title,
@@ -115,18 +108,10 @@ func (h *handler) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmcompat.ChatRequest{
-		Protocol:  llmCfg["protocol"],
-		BaseURL:   llmCfg["base_url"],
-		APIKey:    apiKey,
-		Model:     llmCfg["model"],
-		Reasoning: llmCfg["reasoning"],
-		MaxTokens: 4096,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmCfg.ToChatRequest(4096, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("调用 AI 供应商模型失败：%w", err)
 	}

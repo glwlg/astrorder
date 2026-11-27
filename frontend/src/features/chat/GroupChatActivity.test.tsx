@@ -53,12 +53,12 @@ describe("group chat activity", () => {
     expect(screen.getByRole("status")).toHaveTextContent("开发 正在处理中");
   });
 
-  it("shows System One deciding alongside members who are still processing", () => {
+  it("shows decision model deciding alongside members who are still processing", () => {
     const { rerender } = render(<GroupChatActivity {...props} coordination={{ status: "deciding" }} />);
-    expect(screen.getByRole("status")).toHaveTextContent("System One 正在思考下一棒");
+    expect(screen.getByRole("status")).toHaveTextContent("决策模型 正在思考下一棒");
     expect(screen.getByRole("status")).toHaveTextContent("开发 正在处理中");
     rerender(<GroupChatActivity {...props} coordination={{ status: "running" }} />);
-    expect(screen.getByRole("status")).not.toHaveTextContent("System One");
+    expect(screen.getByRole("status")).not.toHaveTextContent("决策模型");
   });
 
   it.each(["complete", "stopped", "error", "waiting", "idle"] as const)("clears processing hints after %s even with stale speaker fields", (status) => {

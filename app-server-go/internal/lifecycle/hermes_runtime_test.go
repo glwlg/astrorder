@@ -1,8 +1,10 @@
 package lifecycle
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -108,5 +110,84 @@ func TestHermesRuntimeMissingGatewayIsExplicit(t *testing.T) {
 	_, _, err := resolveHermesRuntime(launcher, func(string, []string) ([]byte, error) { return nil, errors.New("gateway absent") })
 	if err == nil || !strings.Contains(err.Error(), "Hermes") {
 		t.Fatal("missing Hermes gateway silently accepted", err)
+	}
+}
+
+func TestProbeHermesRuntimeMarksBrokenInstallationUnavailableWithStructuredWarning(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "hermes")
+	if err := os.WriteFile(launcher, []byte("broken fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	st := ProbeHermesRuntime(launcher, func(string, []string) ([]byte, error) {
+		return nil, errors.New("damaged hermes venv")
+	}, logger)
+
+	if st.Available {
+		t.Fatalf("expected broken Hermes to be marked unavailable: %+v", st)
+	}
+	if st.Launcher != launcher || !strings.Contains(st.Reason, "Hermes") {
+		t.Fatalf("unexpected Hermes status: %+v", st)
+	}
+	last := LastHermesRuntimeStatus()
+	if last == nil || last.Available || last.Launcher != launcher {
+		t.Fatalf("expected LastHermesRuntimeStatus to record unavailable state, got %+v", last)
+	}
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, `"level":"WARN"`) || !strings.Contains(logOutput, `"component":"lifecycle.hermes_runtime"`) || !strings.Contains(logOutput, `"status":"unavailable"`) {
+		t.Fatalf("expected structured warning log, got: %s", logOutput)
+	}
+}
+
+func TestEnsureDaemonConfigContinuesWhenHermesBroken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture")
+	}
+	binDir := t.TempDir()
+	brokenHermes := filepath.Join(binDir, "hermes")
+	if err := os.WriteFile(brokenHermes, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeCodex := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\necho codex 1.0.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	stateDir := t.TempDir()
+	rootDir := t.TempDir()
+	cfgPath, err := EnsureDaemonConfig(stateDir, rootDir)
+	if err != nil {
+		t.Fatalf("broken Hermes must not block EnsureDaemonConfig: %v", err)
+	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg daemonConfigJSON
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	foundCodex := false
+	foundPTY := false
+	for _, rt := range cfg.Runtimes {
+		switch rt.Type {
+		case "hermes":
+			t.Fatalf("broken hermes should not be registered in session-daemon.json: %+v", rt)
+		case "codex":
+			foundCodex = true
+		case "pty":
+			foundPTY = true
+		}
+	}
+	if !foundCodex || !foundPTY {
+		t.Fatalf("expected codex and pty to continue registering normally, got %+v", cfg.Runtimes)
+	}
+	last := LastHermesRuntimeStatus()
+	if last == nil || last.Available {
+		t.Fatalf("expected Hermes marked unavailable after EnsureDaemonConfig, got %+v", last)
 	}
 }

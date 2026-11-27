@@ -178,24 +178,11 @@ export function ProjectDatabaseModal({
     }
   }, [opened, selectedConnId, database])
 
-  const handleAddTarget = () => {
-    if (!selectedConn) {
-      notifications.show({ color: 'yellow', message: '请先选择一个 DBX 连接' })
-      return
-    }
+  const draftTarget = useMemo<ProjectDatabaseTarget | null>(() => {
+    if (!selectedConn) return null
     const dbTrimmed = database.trim()
     const schemaTrimmed = schema.trim()
-    const duplicate = targets.some(
-      (t) =>
-        t.connection_id === selectedConn.id &&
-        t.database.trim().toLowerCase() === dbTrimmed.toLowerCase() &&
-        (t.schema || '').trim().toLowerCase() === schemaTrimmed.toLowerCase(),
-    )
-    if (duplicate) {
-      notifications.show({ color: 'yellow', message: '该数据库目标已在当前项目列表中' })
-      return
-    }
-    const next: ProjectDatabaseTarget = {
+    return {
       id: `${selectedConn.id}::${dbTrimmed}::${schemaTrimmed}`,
       connection_id: selectedConn.id,
       connection_name: selectedConn.name,
@@ -206,8 +193,42 @@ export function ProjectDatabaseModal({
       is_prod: effectiveIsProd,
       is_default: targets.length === 0,
     }
-    setTargets((prev) => [...prev, next])
+  }, [aliasLabel, database, effectiveIsProd, schema, selectedConn, targets.length])
+
+  const isDraftDuplicate = useMemo(() => {
+    if (!draftTarget) return false
+    return targets.some(
+      (t) =>
+        t.connection_id === draftTarget.connection_id &&
+        t.database.trim().toLowerCase() === draftTarget.database.trim().toLowerCase() &&
+        (t.schema || '').trim().toLowerCase() === (draftTarget.schema || '').trim().toLowerCase(),
+    )
+  }, [draftTarget, targets])
+
+  const hasPendingDraft = Boolean(draftTarget && !isDraftDuplicate)
+
+  const resetDraft = () => {
+    setSelectedConnId('')
+    setDatabases([])
+    setDbLoadError('')
+    setDatabase('')
+    setSchemas([])
+    setSchema('')
     setAliasLabel('')
+    setManualProd(false)
+  }
+
+  const handleAddTarget = () => {
+    if (!draftTarget) {
+      notifications.show({ color: 'yellow', message: '请先选择一个 DBX 连接' })
+      return
+    }
+    if (isDraftDuplicate) {
+      notifications.show({ color: 'yellow', message: '该数据库目标已在当前项目列表中' })
+      return
+    }
+    setTargets((prev) => [...prev, { ...draftTarget, is_default: prev.length === 0 }])
+    resetDraft()
   }
 
   const handleSetDefault = (id: string) => {
@@ -237,13 +258,21 @@ export function ProjectDatabaseModal({
 
   const handleSave = async () => {
     if (saving) return
+    const nextTargets =
+      draftTarget && !isDraftDuplicate
+        ? [...targets, { ...draftTarget, is_default: targets.length === 0 }]
+        : targets
+    if (nextTargets !== targets) {
+      setTargets(nextTargets)
+      resetDraft()
+    }
     setSaving(true)
     try {
       const saved = await saveBinding({
         project_key: projectKey,
         workspace_key: workspaceKey,
         project_label: projectLabel,
-        targets,
+        targets: nextTargets,
       })
       notifications.show({
         color: 'teal',
@@ -514,13 +543,20 @@ export function ProjectDatabaseModal({
           </Group>
         </Stack>
 
-        <Group justify="flex-end" mt="xs">
-          <Button variant="subtle" color="gray" disabled={saving} onClick={onClose}>
-            取消
-          </Button>
-          <Button color="indigo" loading={saving} onClick={() => void handleSave()}>
-            保存关联
-          </Button>
+        <Group justify="space-between" align="center" mt="xs" wrap="wrap">
+          <Text size="xs" c="dimmed">
+            {hasPendingDraft && draftTarget
+              ? `直接点击「保存关联」将自动加入「${draftTarget.label || draftTarget.database || draftTarget.connection_name}」`
+              : ''}
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button variant="subtle" color="gray" disabled={saving} onClick={onClose}>
+              取消
+            </Button>
+            <Button color="indigo" loading={saving} onClick={() => void handleSave()}>
+              保存关联
+            </Button>
+          </Group>
         </Group>
       </Stack>
     </Modal>

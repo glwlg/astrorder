@@ -356,7 +356,7 @@ describe('BotGroupChatPage', () => {
     expect(screen.queryByText(/等待中|接力流转中/)).not.toBeInTheDocument()
   })
 
-  it('shows System One deferred deliveries consistently in the header and member list', async () => {
+  it('shows decision model deferred deliveries consistently in the header and member list', async () => {
     const waiting: BotGroup = {
       ...group, active_hop: 0, active_speaker_agent_id: null,
       member_states: { 'local-codex': { status: 'waiting' } },
@@ -367,7 +367,7 @@ describe('BotGroupChatPage', () => {
     render(<MantineProvider><BotGroupChatPage group={waiting} agents={agents} /></MantineProvider>)
     expect((await screen.findAllByText('暂缓发送')).length).toBe(2)
     expect(within(screen.getByRole('button', { name: '前端开发禁言' })).getByText('暂缓发送')).toBeInTheDocument()
-    expect(screen.getByRole('status', { name: '群聊发送状态' })).toHaveTextContent('System One 暂缓发送，待发消息已保留')
+    expect(screen.getByRole('status', { name: '群聊发送状态' })).toHaveTextContent('决策模型暂缓发送，待发消息已保留')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 

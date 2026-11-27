@@ -679,7 +679,7 @@ export function BotGroupChatPage({
         )}
         {!loadFailed && coordination?.status === "waiting" && (
           <Text mt="sm" size="sm" c="dimmed" role="status" aria-label="群聊发送状态">
-            System One 暂缓发送，待发消息已保留；有新回复或消息后将重新判断。
+            决策模型暂缓发送，待发消息已保留；有新回复或消息后将重新判断。
           </Text>
         )}
       </GroupChatHeader>

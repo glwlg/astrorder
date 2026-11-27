@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -18,13 +19,18 @@ const (
 	ProtocolOpenAI = "openai"
 	// ProtocolGemini covers Google Gemini native REST API and Gemini-compatible relays.
 	ProtocolGemini = "gemini"
+	// ProtocolAgent routes completions through a connected Astrorder Agent runtime
+	// (Codex / Antigravity / Hermes / Grok) without requiring a standalone API key.
+	ProtocolAgent = "agent"
 )
 
-// NormalizeProtocol coerces any protocol value into the supported set ("openai" | "gemini").
+// NormalizeProtocol coerces any protocol value into the supported set ("openai" | "gemini" | "agent").
 func NormalizeProtocol(protocol string) string {
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
 	case ProtocolGemini:
 		return ProtocolGemini
+	case ProtocolAgent:
+		return ProtocolAgent
 	default:
 		return ProtocolOpenAI
 	}
@@ -325,6 +331,7 @@ type ChatRequest struct {
 	Protocol  string
 	BaseURL   string
 	APIKey    string
+	AgentID   string
 	Model     string
 	Reasoning string
 	MaxTokens int
@@ -339,13 +346,42 @@ type ChatResult struct {
 	Raw     []byte
 }
 
-// CompleteChat dispatches a chat completion over either OpenAI-compatible
-// (/chat/completions) or native Gemini (:generateContent) protocol.
+// AgentCompleter executes a non-streaming completion through a connected Astrorder Agent.
+type AgentCompleter func(ctx context.Context, req ChatRequest) (ChatResult, error)
+
+var (
+	agentCompleterMu sync.RWMutex
+	agentCompleterFn AgentCompleter
+)
+
+// SetAgentCompleter registers the runtime callback used when Protocol == ProtocolAgent.
+func SetAgentCompleter(fn AgentCompleter) {
+	agentCompleterMu.Lock()
+	agentCompleterFn = fn
+	agentCompleterMu.Unlock()
+}
+
+func currentAgentCompleter() AgentCompleter {
+	agentCompleterMu.RLock()
+	fn := agentCompleterFn
+	agentCompleterMu.RUnlock()
+	return fn
+}
+
+// CompleteChat dispatches a chat completion over OpenAI-compatible (/chat/completions),
+// native Gemini (:generateContent), or a connected Astrorder Agent (ProtocolAgent).
 func CompleteChat(ctx context.Context, client *http.Client, req ChatRequest) (ChatResult, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	proto := NormalizeProtocol(req.Protocol)
+	if proto == ProtocolAgent {
+		fn := currentAgentCompleter()
+		if fn == nil {
+			return ChatResult{}, fmt.Errorf("未连接可用的 Agent 补全服务，请确认后台服务已就绪")
+		}
+		return fn(ctx, req)
+	}
 	if proto == ProtocolGemini {
 		return completeGeminiChat(ctx, client, req)
 	}

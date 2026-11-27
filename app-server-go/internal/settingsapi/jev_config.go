@@ -75,7 +75,7 @@ func (h *handler) jevView(ctx context.Context) (map[string]any, error) {
 func (h *handler) getJev(w http.ResponseWriter, r *http.Request) {
 	view, err := h.jevView(r.Context())
 	if err != nil {
-		fail(w, 500, "读取 System One 配置失败")
+		fail(w, 500, "读取决策模型配置失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
@@ -89,7 +89,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := browser.GetJevConfig(r.Context(), h.Store)
 	if err != nil {
-		fail(w, 500, "读取 System One 配置失败")
+		fail(w, 500, "读取决策模型配置失败")
 		return
 	}
 	config, key, err := patch.apply(config)
@@ -105,7 +105,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {
-		fail(w, 500, "保存 System One 配置失败")
+		fail(w, 500, "保存决策模型配置失败")
 		return
 	}
 	err = h.Store.WithTx(r.Context(), func(tx *sql.Tx) error {
@@ -128,7 +128,7 @@ func (h *handler) setJev(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		fail(w, 500, "保存 System One 配置失败")
+		fail(w, 500, "保存决策模型配置失败")
 		return
 	}
 	h.getJev(w, r)
@@ -156,12 +156,12 @@ func (h *handler) jevModels(w http.ResponseWriter, r *http.Request) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)
 	if err != nil {
-		fail(w, 502, "读取 System One 模型失败，请检查网关连接")
+		fail(w, 502, "读取决策模型列表失败，请检查网关连接")
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		fail(w, 502, "网关拒绝读取 System One 模型，请检查网关密钥")
+		fail(w, 502, "网关拒绝读取决策模型列表，请检查网关密钥")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (10<<20)+1))

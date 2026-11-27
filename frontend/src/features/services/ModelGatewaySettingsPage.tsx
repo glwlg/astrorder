@@ -27,8 +27,8 @@ export function ModelGatewaySettingsPage() {
         <Title order={2}>AI 供应商</Title>
         <Text c="dimmed" size="sm">
           {showAdvancedCards
-            ? '统一管理多个 AI 供应商（支持兼容 OpenAI、兼容 Gemini 及 Magpie / OpenCodeX 网关）与扩展引擎服务'
-            : '统一管理多个 AI 供应商与模型目录，供复盘周报、文档精修与会议纪要共同复用'}
+            ? '统一管理 Agent 免 Key 直连、多个 AI 供应商（兼容 OpenAI、兼容 Gemini 及 Magpie / OpenCodeX 网关）与决策模型等扩展引擎'
+            : '可直接对接已接入的 AI 助手引擎（免 API Key）或添加多个 AI 供应商，供复盘周报、文档精修、自动标题与会议纪要共同复用'}
         </Text>
       </div>
 
@@ -53,7 +53,7 @@ export function ModelGatewaySettingsPage() {
         <div className="st-advanced-footer-bar">
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--st-muted)' }}>
             <IconInfoCircle size={14} aria-hidden="true" />
-            <span>Agent 模型下发同步、知识记忆与浏览器引擎属于高级配置</span>
+            <span>Agent 模型下发同步、知识记忆、决策模型与浏览器引擎属于高级配置</span>
           </span>
           <button
             type="button"

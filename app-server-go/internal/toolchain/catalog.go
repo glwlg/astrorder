@@ -256,6 +256,14 @@ func RecipesFor(toolID, targetOS string) []InstallRecipe {
 		if isWin {
 			return []InstallRecipe{
 				{
+					ID:      RecipeIDUVPortable,
+					Label:   "免 winget 便携版 uv（推荐 · 自动下载至星序托管目录）",
+					Mode:    InstallModeBackground,
+					Shell:   "builtin",
+					Command: "builtin:portable-uv",
+					Note:    "无需管理员权限与 winget，优先使用国内镜像下载并自动回退官方源，内置 uv 与 uvx，解压后立即生效",
+				},
+				{
 					ID:      "uv-ps-official",
 					Label:   "官方 PowerShell 脚本安装",
 					Mode:    InstallModeBackground,
@@ -281,11 +289,27 @@ func RecipesFor(toolID, targetOS string) []InstallRecipe {
 				Command: `curl -LsSf https://astral.sh/uv/install.sh | sh`,
 				Note:    "安装至 ~/.local/bin，自动包含 uv 与 uvx",
 			},
+			{
+				ID:      RecipeIDUVPortable,
+				Label:   "便携版 uv（自动下载至星序托管目录，国内镜像加速）",
+				Mode:    InstallModeBackground,
+				Shell:   "builtin",
+				Command: "builtin:portable-uv",
+				Note:    "仅限本机环境使用，优先国内镜像并自动回退官方源，解压后立即生效",
+			},
 		}
 
 	case "node":
 		if isWin {
 			return []InstallRecipe{
+				{
+					ID:      RecipeIDNodePortable,
+					Label:   "免 winget 便携版 Node.js LTS（推荐 · 自动下载至星序托管目录）",
+					Mode:    InstallModeBackground,
+					Shell:   "builtin",
+					Command: "builtin:portable-node",
+					Note:    "无需管理员权限与 winget，优先使用国内镜像（npmmirror/TUNA）下载并自动回退官方源，解压后立即可用无需重启",
+				},
 				{
 					ID:      "node-winget",
 					Label:   "winget 安装 Node.js LTS",
@@ -305,6 +329,14 @@ func RecipesFor(toolID, targetOS string) []InstallRecipe {
 					Shell:   "sh",
 					Command: `brew install node`,
 				},
+				{
+					ID:      RecipeIDNodePortable,
+					Label:   "便携版 Node.js LTS（自动下载至星序托管目录，国内镜像加速）",
+					Mode:    InstallModeBackground,
+					Shell:   "builtin",
+					Command: "builtin:portable-node",
+					Note:    "仅限本机环境使用，免 Homebrew，优先国内镜像并自动回退官方源",
+				},
 			}
 		}
 		return []InstallRecipe{
@@ -315,6 +347,14 @@ func RecipesFor(toolID, targetOS string) []InstallRecipe {
 				Shell:   "sh",
 				Command: `curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell && export PATH="$HOME/.local/share/fnm:$PATH" && eval "$(fnm env)" && fnm install --lts && fnm default lts-latest`,
 				Note:    "安装到用户目录无需 root 权限，同时自动就绪 node / npm / npx",
+			},
+			{
+				ID:      RecipeIDNodePortable,
+				Label:   "便携版 Node.js LTS（自动下载至星序托管目录，国内镜像加速）",
+				Mode:    InstallModeBackground,
+				Shell:   "builtin",
+				Command: "builtin:portable-node",
+				Note:    "仅限本机环境使用，优先国内镜像并自动回退官方源",
 			},
 			{
 				ID:           "node-system-pkg",

@@ -50,11 +50,18 @@ type Options struct {
 	CodexDesktop        func(context.Context) (map[string]any, error)
 	AgentInstalledProbe func(kind string) bool
 	OnPluginsChanged    func()
+	ListAgentModels     func(ctx context.Context, agentID string) ([]string, error)
 }
 
 type handler struct {
 	Options
 	operations restartOperations
+}
+
+// SetAgentModelsLister registers the callback used by /api/v1/services/providers/models
+// when protocol == "agent" so settings can fetch native models directly from an Agent.
+func (h *handler) SetAgentModelsLister(fn func(ctx context.Context, agentID string) ([]string, error)) {
+	h.ListAgentModels = fn
 }
 
 var paths = map[string][]string{

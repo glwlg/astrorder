@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -31,17 +33,35 @@ func main() {
 	if connectorSecret := os.Getenv("ASTRORDER_SESSION_DAEMON_CONNECTOR_SECRET"); connectorSecret != "" {
 		daemon.SetConnectorSecret(connectorSecret)
 	}
-	if path := os.Getenv("ASTRORDER_SESSION_DAEMON_CONFIG"); path != "" {
-		config, err := configuration.Load(path)
-		if err != nil {
-			log.Print(err)
-			return
-		}
-		if err = config.Register(daemon); err != nil {
-			log.Print(err)
-			return
+	configPath := os.Getenv("ASTRORDER_SESSION_DAEMON_CONFIG")
+	stateDir := ""
+	if configPath != "" {
+		stateDir = filepath.Dir(configPath)
+	} else if path != "" {
+		dbDir := filepath.Dir(path)
+		if filepath.Base(dbDir) == "data" {
+			stateDir = filepath.Dir(dbDir)
+		} else {
+			stateDir = dbDir
 		}
 	}
+	configManager := configuration.NewManager(daemon, configuration.ManagerOptions{
+		ConfigPath: configPath,
+		StateDir:   stateDir,
+	})
+	if configPath != "" {
+		if _, err = configManager.ReloadInitial(); err != nil {
+			log.Print(err)
+			return
+		}
+		watchCtx, watchCancel := context.WithCancel(context.Background())
+		daemon.AddCloser(func() error {
+			watchCancel()
+			return nil
+		})
+		go configManager.WatchConfigFile(watchCtx, 2*time.Second)
+	}
+	daemon.SetRuntimeConfigReloader(configManager.Reload)
 
 	grpcTarget := os.Getenv("ASTRORDER_SESSION_DAEMON_GRPC_TARGET")
 	grpcCredential := os.Getenv("ASTRORDER_SESSION_DAEMON_GRPC_CREDENTIAL")

@@ -75,7 +75,12 @@ func (r *Registry) ReadSession(ctx context.Context, request Request, expected Se
 		r.mu.Unlock()
 		return Result{}, "", ErrSessionReadUnsupported
 	}
-	commander, ok := r.adapters[kind].(Commander)
+	slot := r.slotForSessionLocked(request.SessionID, kind)
+	var commander Commander
+	var ok bool
+	if slot != nil {
+		commander, ok = slot.adapter.(Commander)
+	}
 	if !ok {
 		r.mu.Unlock()
 		return Result{}, "", ErrSessionReadUnsupported
@@ -84,8 +89,9 @@ func (r *Registry) ReadSession(ctx context.Context, request Request, expected Se
 		r.mu.Unlock()
 		return Result{}, "", err
 	}
+	slot.inflight++
 	r.mu.Unlock()
-	defer r.release(kind)
+	defer r.releaseSlot(kind, slot)
 	request.AgentType = kind
 	result, err := commander.Command(ctx, request)
 	if err != nil {

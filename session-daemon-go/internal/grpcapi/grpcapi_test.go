@@ -123,8 +123,8 @@ func TestAuthenticationCapabilitiesAndRegisteredSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantServices := []string{"astrorder.sessiond.v1.ConnectorIngress", "astrorder.sessiond.v1.DaemonControl", "astrorder.sessiond.v1.EventStream", "astrorder.sessiond.v1.ModelConfig", "astrorder.sessiond.v1.OperationQuery", "astrorder.sessiond.v1.RuntimeQuery", "astrorder.sessiond.v1.SessionControl", "astrorder.sessiond.v1.TerminalStream"}
-	if capabilities.ProtocolMajor != 1 || capabilities.ProtocolMinor != 2 || capabilities.DaemonId == "" || fmt.Sprint(capabilities.Services) != fmt.Sprint(wantServices) {
+	wantServices := []string{"astrorder.sessiond.v1.ConnectorIngress", "astrorder.sessiond.v1.DaemonControl", "astrorder.sessiond.v1.EventStream", "astrorder.sessiond.v1.ModelConfig", "astrorder.sessiond.v1.OperationQuery", "astrorder.sessiond.v1.RuntimeQuery", "astrorder.sessiond.v1.RuntimeReload", "astrorder.sessiond.v1.SessionControl", "astrorder.sessiond.v1.TerminalStream"}
+	if capabilities.ProtocolMajor != 1 || capabilities.ProtocolMinor != 3 || capabilities.DaemonId == "" || fmt.Sprint(capabilities.Services) != fmt.Sprint(wantServices) {
 		t.Fatalf("capabilities = %+v", capabilities)
 	}
 	if capabilities.MaxBusinessBytes != sessiondv1.ContractLimit_CONTRACT_LIMIT_MAX_COMPAT_BUSINESS_BYTES || capabilities.MaxWireBytes != sessiondv1.ContractLimit_CONTRACT_LIMIT_MAX_GRPC_WIRE_BYTES || capabilities.EventStreamVersion != sessiondv1.EventStreamVersion_EVENT_STREAM_VERSION_V1 || !capabilities.OperationLookup {

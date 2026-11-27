@@ -171,8 +171,8 @@ func (h *handler) getPublicSettings(ctx context.Context) (MeetingSettings, error
 
 func (h *handler) decoratePublicSettings(ctx context.Context, raw MeetingSettings) MeetingSettings {
 	globalCfg := aiprovider.ResolveDefault(ctx, h.store)
-	globalKey := strings.TrimSpace(globalCfg.APIKey)
 	globalModel := strings.TrimSpace(globalCfg.Model)
+	globalReady := globalCfg.IsConfigured() && (globalCfg.Protocol == "agent" || globalModel != "")
 	customKey := strings.TrimSpace(raw.APIKey)
 
 	pub := raw
@@ -182,7 +182,7 @@ func (h *handler) decoratePublicSettings(ctx context.Context, raw MeetingSetting
 	pub.APIKeyPreview = maskSecret(customKey)
 	pub.GlobalModel = globalModel
 	pub.GlobalProviderName = globalCfg.ProviderName
-	pub.GlobalConfigured = globalKey != "" && globalModel != ""
+	pub.GlobalConfigured = globalReady
 
 	switch pub.ModelSource {
 	case "provider":
@@ -190,7 +190,7 @@ func (h *handler) decoratePublicSettings(ctx context.Context, raw MeetingSetting
 			pub.ProviderName = resolved.ProviderName
 			pub.EffectiveProviderName = resolved.ProviderName
 			pub.EffectiveModel = resolved.Model
-			pub.EffectiveConfigured = strings.TrimSpace(resolved.APIKey) != "" && strings.TrimSpace(resolved.Model) != ""
+			pub.EffectiveConfigured = resolved.IsConfigured() && (resolved.Protocol == "agent" || strings.TrimSpace(resolved.Model) != "")
 		} else {
 			pub.EffectiveModel = pub.Model
 			pub.EffectiveConfigured = false
@@ -202,7 +202,7 @@ func (h *handler) decoratePublicSettings(ctx context.Context, raw MeetingSetting
 	default:
 		pub.EffectiveModel = globalModel
 		pub.EffectiveProviderName = globalCfg.ProviderName
-		pub.EffectiveConfigured = globalKey != "" && globalModel != ""
+		pub.EffectiveConfigured = globalReady
 	}
 	return pub
 }

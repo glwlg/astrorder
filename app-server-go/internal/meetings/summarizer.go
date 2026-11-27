@@ -74,15 +74,15 @@ func (h *handler) TestSettingsConnectivity(ctx context.Context, incoming *Meetin
 		cfg, _ = h.resolveSummaryLLMConfig(ctx)
 	}
 
-	if strings.TrimSpace(cfg.APIKey) == "" {
+	if !cfg.IsConfigured() {
 		return SettingsTestResponse{
 			OK:        false,
 			Model:     cfg.Model,
 			LatencyMs: time.Since(started).Milliseconds(),
-			Error:     "未配置 API Key",
+			Error:     "未配置 API Key 或已接入 Agent",
 		}
 	}
-	if strings.TrimSpace(cfg.Model) == "" {
+	if llmcompat.NormalizeProtocol(cfg.Protocol) != llmcompat.ProtocolAgent && strings.TrimSpace(cfg.Model) == "" {
 		return SettingsTestResponse{
 			OK:        false,
 			LatencyMs: time.Since(started).Milliseconds(),
@@ -90,18 +90,14 @@ func (h *handler) TestSettingsConnectivity(ctx context.Context, incoming *Meetin
 		}
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	timeout := 25 * time.Second
+	if llmcompat.NormalizeProtocol(cfg.Protocol) == llmcompat.ProtocolAgent {
+		timeout = 60 * time.Second
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmcompat.ChatRequest{
-		Protocol:  cfg.Protocol,
-		BaseURL:   cfg.BaseURL,
-		APIKey:    cfg.APIKey,
-		Model:     cfg.Model,
-		Reasoning: cfg.Reasoning,
-		MaxTokens: 16,
-		Messages:  []llmcompat.ChatMessage{{Role: "user", Content: "Reply with OK."}},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, cfg.ToChatRequest(16, []llmcompat.ChatMessage{{Role: "user", Content: "Reply with OK."}}))
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
 		return SettingsTestResponse{OK: false, Model: cfg.Model, LatencyMs: latency, Error: err.Error()}
@@ -232,8 +228,7 @@ func (h *handler) Summarize(ctx context.Context, req SummarizeRequest) (*Summari
 	userPrompt := userBuf.String()
 	assembled := fmt.Sprintf("请根据以下会议转写整理结构化中文会议纪要（核心摘要、议题脉络、决议、风险与行动项）：\n\n%s", userPrompt)
 
-	apiKey := strings.TrimSpace(llmCfg.APIKey)
-	llmConfigured := apiKey != "" && strings.TrimSpace(llmCfg.Model) != ""
+	llmConfigured := llmCfg.IsConfigured() && (llmcompat.NormalizeProtocol(llmCfg.Protocol) == llmcompat.ProtocolAgent || strings.TrimSpace(llmCfg.Model) != "")
 	wantMode := strings.ToLower(strings.TrimSpace(req.Mode))
 
 	if wantMode == "prompt_only" || !llmConfigured {
@@ -242,7 +237,7 @@ func (h *handler) Summarize(ctx context.Context, req SummarizeRequest) (*Summari
 			sourceText = newChunk
 		}
 		draft := buildOfflineMeetingDraft(title, meetingDate, participants, sourceText, extra)
-		msg := "已生成本地结构化草稿，可在右上角选择已配置的 AI 供应商模型启用 AI 实时总结。"
+		msg := "已生成本地结构化草稿，可在右上角选择已配置的 AI 供应商或已接入 Agent 模型启用 AI 实时总结。"
 		return &SummarizeResponse{
 			OK:              true,
 			Mode:            "prompt_only",
@@ -270,18 +265,10 @@ func (h *handler) Summarize(ctx context.Context, req SummarizeRequest) (*Summari
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmcompat.ChatRequest{
-		Protocol:  llmCfg.Protocol,
-		BaseURL:   llmCfg.BaseURL,
-		APIKey:    apiKey,
-		Model:     llmCfg.Model,
-		Reasoning: llmCfg.Reasoning,
-		MaxTokens: maxTokens,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmCfg.ToChatRequest(maxTokens, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("调用总结模型失败：%w", err)
 	}

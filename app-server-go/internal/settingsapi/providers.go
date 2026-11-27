@@ -126,6 +126,7 @@ func (h *handler) handleFetchProviderModels(w http.ResponseWriter, r *http.Reque
 		Protocol   string `json:"protocol"`
 		BaseURL    string `json:"base_url"`
 		APIKey     string `json:"api_key"`
+		AgentID    string `json:"agent_id"`
 	}
 	if err := decode(r, &payload); err != nil {
 		fail(w, http.StatusUnprocessableEntity, "Invalid request")
@@ -135,6 +136,7 @@ func (h *handler) handleFetchProviderModels(w http.ResponseWriter, r *http.Reque
 	proto := strings.TrimSpace(payload.Protocol)
 	baseURL := strings.TrimRight(strings.TrimSpace(payload.BaseURL), "/")
 	apiKey := strings.TrimSpace(payload.APIKey)
+	agentID := strings.TrimSpace(payload.AgentID)
 
 	if pid := strings.TrimSpace(payload.ProviderID); pid != "" {
 		if saved, ok := aiprovider.FindProvider(r.Context(), h.Store, pid); ok {
@@ -147,9 +149,37 @@ func (h *handler) handleFetchProviderModels(w http.ResponseWriter, r *http.Reque
 			if apiKey == "" {
 				apiKey = saved.APIKey
 			}
+			if agentID == "" {
+				agentID = saved.AgentID
+			}
 		}
 	}
 	proto = llmcompat.NormalizeProtocol(proto)
+
+	if proto == llmcompat.ProtocolAgent {
+		if agentID == "" {
+			fail(w, http.StatusUnprocessableEntity, "请先选择要对接的 Agent")
+			return
+		}
+		if h.ListAgentModels == nil {
+			fail(w, http.StatusServiceUnavailable, "Agent 模型列表服务暂不可用")
+			return
+		}
+		models, err := h.ListAgentModels(r.Context(), agentID)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "读取 Agent 可用模型失败："+err.Error())
+			return
+		}
+		if pid := strings.TrimSpace(payload.ProviderID); pid != "" && len(models) > 0 {
+			_, _ = aiprovider.UpdateProviderModels(r.Context(), h.Store, pid, models)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"models": models,
+			"count":  len(models),
+		})
+		return
+	}
 
 	if parsed, err := url.Parse(baseURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		fail(w, http.StatusUnprocessableEntity, "接口地址 (Base URL) 必须是完整的 http 或 https 地址")
@@ -181,6 +211,7 @@ func (h *handler) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		Protocol   string `json:"protocol"`
 		BaseURL    string `json:"base_url"`
 		APIKey     string `json:"api_key"`
+		AgentID    string `json:"agent_id"`
 		Model      string `json:"model"`
 		Reasoning  string `json:"reasoning"`
 	}
@@ -192,6 +223,7 @@ func (h *handler) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	proto := strings.TrimSpace(payload.Protocol)
 	baseURL := strings.TrimRight(strings.TrimSpace(payload.BaseURL), "/")
 	apiKey := strings.TrimSpace(payload.APIKey)
+	agentID := strings.TrimSpace(payload.AgentID)
 	model := strings.TrimSpace(payload.Model)
 
 	if pid := strings.TrimSpace(payload.ProviderID); pid != "" {
@@ -205,6 +237,9 @@ func (h *handler) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 			if apiKey == "" {
 				apiKey = saved.APIKey
 			}
+			if agentID == "" {
+				agentID = saved.AgentID
+			}
 			if model == "" && len(saved.Models) > 0 {
 				model = saved.Models[0]
 			}
@@ -212,23 +247,31 @@ func (h *handler) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	proto = llmcompat.NormalizeProtocol(proto)
 
-	if parsed, err := url.Parse(baseURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		fail(w, http.StatusUnprocessableEntity, "接口地址 (Base URL) 必须是完整的 http 或 https 地址")
-		return
-	}
-	if apiKey == "" {
-		fail(w, http.StatusBadRequest, "请先填写 API Key")
-		return
-	}
-	if model == "" {
-		fail(w, http.StatusUnprocessableEntity, "请先选择或填写用于测试的模型名称")
-		return
+	if proto == llmcompat.ProtocolAgent {
+		if agentID == "" {
+			fail(w, http.StatusUnprocessableEntity, "请先选择要对接的 Agent")
+			return
+		}
+	} else {
+		if parsed, err := url.Parse(baseURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			fail(w, http.StatusUnprocessableEntity, "接口地址 (Base URL) 必须是完整的 http 或 https 地址")
+			return
+		}
+		if apiKey == "" {
+			fail(w, http.StatusBadRequest, "请先填写 API Key")
+			return
+		}
+		if model == "" {
+			fail(w, http.StatusUnprocessableEntity, "请先选择或填写用于测试的模型名称")
+			return
+		}
 	}
 
 	res, err := llmcompat.CompleteChat(r.Context(), h.HTTPClient, llmcompat.ChatRequest{
 		Protocol:  proto,
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
+		AgentID:   agentID,
 		Model:     model,
 		Reasoning: payload.Reasoning,
 		MaxTokens: 1024,
@@ -236,11 +279,11 @@ func (h *handler) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	})
 	latency := time.Since(started).Milliseconds()
 	if err != nil {
-		fail(w, http.StatusBadRequest, "供应商连接测试失败："+err.Error())
+		fail(w, http.StatusBadRequest, "连接测试失败："+err.Error())
 		return
 	}
 	if res.Status >= 400 || strings.TrimSpace(res.Content) == "" {
-		msg := "供应商连接测试失败：HTTP " + strconv.Itoa(res.Status)
+		msg := "连接测试失败：HTTP " + strconv.Itoa(res.Status)
 		if detail := llmcompat.ExtractErrorMessage(res.Raw); detail != "" {
 			msg += "：" + detail
 		}

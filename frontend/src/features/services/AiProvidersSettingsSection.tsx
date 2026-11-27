@@ -16,6 +16,7 @@ import {
   IconCpu,
   IconEdit,
   IconLoader2,
+  IconPlugConnected,
   IconPlus,
   IconRefresh,
   IconServer,
@@ -30,10 +31,12 @@ import {
   type AiProviderVendor,
   type AiProvidersConfig,
 } from '../../api/client'
+import { useAstrorderStore } from '../../state/store'
 import {
   AI_PROVIDERS_SYNC_KEY,
   broadcastAiProvidersSync,
 } from '../meetings/meetingSessionStore'
+import { openOnboardingWizard } from '../office/OnboardingWizard'
 import { useSettingsMode } from '../settings/settingsMode'
 
 interface ProviderPreset {
@@ -188,6 +191,7 @@ function displayHost(rawUrl: string): string {
 }
 
 function protocolBadgeLabel(protocol: string): string {
+  if (protocol === 'agent') return '免 Key · Agent 直连'
   return protocol === 'gemini' ? 'Gemini 兼容' : 'OpenAI 兼容'
 }
 
@@ -200,6 +204,7 @@ function vendorBadgeLabel(vendor?: string): string {
 export function AiProvidersSettingsSection() {
   const { mode: settingsMode, managedByWorkbench } = useSettingsMode()
   const isAdvancedSettings = !managedByWorkbench || settingsMode === 'advanced'
+  const agentsMap = useAstrorderStore((s) => s.agents)
   const [config, setConfig] = useState<AiProvidersConfig>({
     providers: [],
     default_provider_id: '',
@@ -210,11 +215,20 @@ export function AiProvidersSettingsSection() {
   const [loading, setLoading] = useState(true)
 
   // Default universal model bar state
+  const [universalSource, setUniversalSource] = useState<'api' | 'agent'>('api')
   const [defaultProviderId, setDefaultProviderId] = useState('')
   const [defaultModel, setDefaultModel] = useState('')
   const [defaultReasoning, setDefaultReasoning] = useState('low')
   const [savingDefault, setSavingDefault] = useState(false)
   const [testingDefault, setTestingDefault] = useState(false)
+
+  // Agent-backed (keyless) universal model bar state
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [agentModels, setAgentModels] = useState<string[]>([])
+  const [agentModel, setAgentModel] = useState('')
+  const [fetchingAgentModels, setFetchingAgentModels] = useState(false)
+  const [savingAgentDefault, setSavingAgentDefault] = useState(false)
+  const [testingAgentDefault, setTestingAgentDefault] = useState(false)
 
   // Provider editor state (inline create / edit)
   const [editorMode, setEditorMode] = useState<'closed' | 'create' | 'edit'>('closed')
@@ -231,11 +245,43 @@ export function AiProvidersSettingsSection() {
   const [togglingRowId, setTogglingRowId] = useState<string | null>(null)
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null)
 
+  const availableAgents = useMemo(() => {
+    const all = Object.values(agentsMap)
+    const active = all.filter((a) => a.status === 'ready')
+    const pool = active.length > 0 ? active : all
+    return [...pool].sort((a, b) => {
+      const aLocal = !a.connection_id || a.connection_id === 'local' ? 0 : 1
+      const bLocal = !b.connection_id || b.connection_id === 'local' ? 0 : 1
+      if (aLocal !== bLocal) return aLocal - bLocal
+      const aReady = a.status === 'ready' ? 0 : 1
+      const bReady = b.status === 'ready' ? 0 : 1
+      if (aReady !== bReady) return aReady - bReady
+      return a.name.localeCompare(b.name)
+    })
+  }, [agentsMap])
+
   const applyConfig = useCallback((next: AiProvidersConfig) => {
     setConfig(next)
     setDefaultProviderId(next.default_provider_id || '')
     setDefaultModel(next.default_model || '')
     setDefaultReasoning(next.default_reasoning || 'low')
+    const defProv = next.providers.find((p) => p.id === next.default_provider_id)
+    if (defProv?.protocol === 'agent') {
+      setUniversalSource('agent')
+      if (defProv.agent_id) {
+        setSelectedAgentId(defProv.agent_id)
+      }
+      setAgentModel(next.default_model || defProv.models?.[0] || '')
+      if (defProv.models?.length) {
+        setAgentModels(defProv.models)
+      }
+    } else if (next.providers.filter((p) => p.enabled && p.protocol !== 'agent').length === 0) {
+      // No HTTP provider yet — default to keyless Agent mode if an Agent is connected
+      const hasAnyAgent = Object.keys(useAstrorderStore.getState().agents).length > 0
+      setUniversalSource(hasAnyAgent ? 'agent' : 'api')
+    } else {
+      setUniversalSource('api')
+    }
   }, [])
 
   const load = useCallback(async () => {
@@ -278,18 +324,129 @@ export function AiProvidersSettingsSection() {
     [config.providers],
   )
 
+  const enabledHttpProviders = useMemo(
+    () => config.providers.filter((p) => p.enabled && p.protocol !== 'agent'),
+    [config.providers],
+  )
+
   const selectedDefaultProvider = useMemo(
     () =>
       config.providers.find((p) => p.id === defaultProviderId) ||
+      enabledHttpProviders[0] ||
       enabledProviders[0] ||
       null,
-    [config.providers, defaultProviderId, enabledProviders],
+    [config.providers, defaultProviderId, enabledHttpProviders, enabledProviders],
   )
 
   const defaultModelOptions = useMemo(() => {
     const models = selectedDefaultProvider?.models || []
     return Array.from(new Set(models.filter(Boolean)))
   }, [selectedDefaultProvider])
+
+  const effectiveSelectedAgent = useMemo(
+    () => availableAgents.find((a) => a.id === selectedAgentId) || availableAgents[0] || null,
+    [availableAgents, selectedAgentId],
+  )
+
+  const fetchModelsForAgent = useCallback(async (agentId: string, silent = false) => {
+    if (!agentId) return
+    setFetchingAgentModels(true)
+    try {
+      const res = await api.fetchAiProviderModels({ protocol: 'agent', agent_id: agentId })
+      const list = Array.isArray(res.models) ? res.models : []
+      setAgentModels(list)
+      setAgentModel((prev) => (prev && list.includes(prev) ? prev : prev || list[0] || ''))
+      if (!silent) {
+        notifications.show({
+          color: 'teal',
+          message: list.length > 0 ? `已读取 ${list.length} 个 Agent 可用模型` : '当前 Agent 未返回额外模型列表，可直接使用其默认模型',
+        })
+      }
+    } catch (error: unknown) {
+      if (!silent) {
+        notifications.show({
+          color: 'red',
+          title: '读取 Agent 模型失败',
+          message: error instanceof Error ? error.message : '无法读取该 Agent 的模型列表',
+        })
+      }
+    } finally {
+      setFetchingAgentModels(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (universalSource !== 'agent') return
+    if (!effectiveSelectedAgent) return
+    if (!selectedAgentId) {
+      setSelectedAgentId(effectiveSelectedAgent.id)
+    }
+    const savedAgentProv = config.providers.find(
+      (p) => p.protocol === 'agent' && p.agent_id === effectiveSelectedAgent.id,
+    )
+    if (savedAgentProv?.models?.length) {
+      setAgentModels(savedAgentProv.models)
+    }
+    void fetchModelsForAgent(effectiveSelectedAgent.id, true)
+  }, [universalSource, effectiveSelectedAgent?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSaveAgentDefault = async () => {
+    if (!effectiveSelectedAgent) return
+    setSavingAgentDefault(true)
+    try {
+      const chosenModel = agentModel.trim()
+      const mergedModels = Array.from(new Set([...agentModels, ...(chosenModel ? [chosenModel] : [])]))
+      const res = await api.saveAiProvider({
+        name: `${effectiveSelectedAgent.name}（免 Key 直连）`,
+        protocol: 'agent',
+        agent_id: effectiveSelectedAgent.id,
+        agent_kind: effectiveSelectedAgent.kind,
+        models: mergedModels,
+        enabled: true,
+        set_as_default: true,
+        default_model: chosenModel || mergedModels[0] || '',
+      })
+      applyConfig(res.config)
+      broadcastAiProvidersSync()
+      notifications.show({
+        color: 'teal',
+        message: `已将通用模型直连至「${effectiveSelectedAgent.name}」（免 API Key）`,
+        icon: <IconCheck size={16} />,
+      })
+    } catch (error: unknown) {
+      notifications.show({
+        color: 'red',
+        message: error instanceof Error ? error.message : '保存免 Key 直连设置失败',
+      })
+    } finally {
+      setSavingAgentDefault(false)
+    }
+  }
+
+  const handleTestAgentDefault = async () => {
+    if (!effectiveSelectedAgent) return
+    setTestingAgentDefault(true)
+    try {
+      const res = await api.testAiProvider({
+        protocol: 'agent',
+        agent_id: effectiveSelectedAgent.id,
+        model: agentModel.trim() || undefined,
+      })
+      notifications.show({
+        color: 'teal',
+        title: 'Agent 免 Key 直连正常',
+        message: `${effectiveSelectedAgent.name}${res.model ? ` · ${res.model}` : ''}${res.latency_ms ? `（${res.latency_ms}ms）` : ''}`,
+      })
+    } catch (error: unknown) {
+      notifications.show({
+        color: 'red',
+        title: 'Agent 直连测试失败',
+        message: error instanceof Error ? error.message : '调用所选 Agent 失败',
+      })
+    } finally {
+      setTestingAgentDefault(false)
+    }
+  }
 
   const openCreateEditor = () => {
     setEditor(emptyEditor())
@@ -420,6 +577,8 @@ export function AiProvidersSettingsSection() {
         protocol: provider.protocol,
         vendor: provider.vendor || '',
         base_url: provider.base_url,
+        agent_id: provider.agent_id,
+        agent_kind: provider.agent_kind,
         management_url: provider.management_url || '',
         models: provider.models,
         enabled,
@@ -646,105 +805,205 @@ export function AiProvidersSettingsSection() {
             <span className={`st-status-dot${config.effective_configured ? ' is-ok' : ''}`} />
             <span>
               {config.effective_configured
-                ? `${config.effective_provider_name || '已配置'} · ${config.effective_model}`
+                ? `${config.effective_provider_name || '已配置'}${config.effective_model ? ` · ${config.effective_model}` : ''}`
                 : '待配置'}
             </span>
           </span>
         </div>
 
-        {enabledProviders.length === 0 ? (
-          <div className="st-inline-notice" style={{ marginBottom: 0 }}>
-            <span>{loading ? '正在读取 AI 供应商配置…' : '尚未配置可用的 AI 供应商，请先在下方添加。'}</span>
-            {!loading && editorMode === 'closed' && (
-              <button type="button" className="st-text-link" onClick={openCreateEditor}>
-                <IconPlus size={14} />
-                <span>立即添加</span>
-              </button>
-            )}
-          </div>
-        ) : (
-          <Stack gap="sm">
-            <Group align="flex-end" wrap="nowrap">
-              <Select
-                label="默认供应商"
-                aria-label="默认 AI 供应商"
-                style={{ flex: 1.25, minWidth: 0 }}
-                value={defaultProviderId || null}
-                data={defaultProviderSelectData}
-                allowDeselect={false}
-                onChange={(val) => {
-                  const nextId = val || ''
-                  setDefaultProviderId(nextId)
-                  const nextProv = config.providers.find((p) => p.id === nextId)
-                  if (nextProv && nextProv.models.length > 0 && !nextProv.models.includes(defaultModel)) {
-                    setDefaultModel(nextProv.models[0])
+        <Stack gap="sm">
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            aria-label="通用模型接入方式"
+            value={universalSource}
+            onChange={(val) => setUniversalSource(val === 'agent' ? 'agent' : 'api')}
+            data={[
+              { value: 'agent', label: '直连已接入 Agent（免 API Key）' },
+              { value: 'api', label: '使用 API 供应商' },
+            ]}
+          />
+
+          {universalSource === 'agent' ? (
+            availableAgents.length === 0 ? (
+              <div className="st-inline-notice" style={{ marginBottom: 0 }}>
+                <span>暂未检测到已接入的 AI 助手引擎，可先通过初始化向导安装或连接本机 Agent。</span>
+                <button
+                  type="button"
+                  className="st-text-link"
+                  onClick={() => openOnboardingWizard()}
+                >
+                  <IconPlugConnected size={14} />
+                  <span>打开初始化向导</span>
+                </button>
+              </div>
+            ) : (
+              <Stack gap="sm">
+                <div className="st-section-subtitle" style={{ marginTop: 0 }}>
+                  没有独立 API Key 时，直接复用已登录的 Agent 引擎及所选模型，驱动会议纪要、周报复盘、文档精修与自动标题。
+                </div>
+                <Group align="flex-end" wrap="nowrap">
+                  <Select
+                    label="对接 Agent 引擎"
+                    aria-label="免 Key 直连 Agent"
+                    style={{ flex: 1.25, minWidth: 0 }}
+                    value={effectiveSelectedAgent?.id || null}
+                    allowDeselect={false}
+                    data={availableAgents.map((a) => ({
+                      value: a.id,
+                      label: `${a.name} · ${!a.connection_id || a.connection_id === 'local' ? '本机' : a.connection_id}`,
+                    }))}
+                    onChange={(val) => {
+                      if (!val) return
+                      setSelectedAgentId(val)
+                      setAgentModel('')
+                      setAgentModels([])
+                      void fetchModelsForAgent(val, true)
+                    }}
+                  />
+                  <Autocomplete
+                    label="选择模型"
+                    aria-label="Agent 直连默认模型"
+                    style={{ flex: 1.15, minWidth: 0 }}
+                    placeholder={agentModels.length > 0 ? '选择模型（留空使用引擎默认）' : '留空使用该 Agent 当前默认模型'}
+                    value={agentModel}
+                    data={agentModels}
+                    onChange={setAgentModel}
+                    rightSection={
+                      effectiveSelectedAgent ? (
+                        <button
+                          type="button"
+                          className="st-inline-icon-btn"
+                          title="读取该 Agent 的可用模型列表"
+                          aria-label="刷新 Agent 模型列表"
+                          disabled={fetchingAgentModels}
+                          onClick={() => void fetchModelsForAgent(effectiveSelectedAgent.id)}
+                        >
+                          {fetchingAgentModels ? (
+                            <IconLoader2 size={13} className="astrorder-spin" />
+                          ) : (
+                            <IconRefresh size={13} />
+                          )}
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                </Group>
+                <Group justify="flex-end" mt={2}>
+                  <Button
+                    variant="default"
+                    size="xs"
+                    disabled={!effectiveSelectedAgent}
+                    loading={testingAgentDefault}
+                    onClick={() => void handleTestAgentDefault()}
+                  >
+                    测试连接
+                  </Button>
+                  <Button
+                    size="xs"
+                    disabled={!effectiveSelectedAgent}
+                    loading={savingAgentDefault}
+                    onClick={() => void handleSaveAgentDefault()}
+                  >
+                    保存为默认通用模型
+                  </Button>
+                </Group>
+              </Stack>
+            )
+          ) : enabledProviders.length === 0 ? (
+            <div className="st-inline-notice" style={{ marginBottom: 0 }}>
+              <span>{loading ? '正在读取 AI 供应商配置…' : '尚未配置可用的 AI 供应商，可在下方添加，或切换至「直连已接入 Agent（免 API Key）」。'}</span>
+              {!loading && editorMode === 'closed' && (
+                <button type="button" className="st-text-link" onClick={openCreateEditor}>
+                  <IconPlus size={14} />
+                  <span>立即添加</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <Stack gap="sm">
+              <Group align="flex-end" wrap="nowrap">
+                <Select
+                  label="默认供应商"
+                  aria-label="默认 AI 供应商"
+                  style={{ flex: 1.25, minWidth: 0 }}
+                  value={defaultProviderId || null}
+                  data={defaultProviderSelectData}
+                  allowDeselect={false}
+                  onChange={(val) => {
+                    const nextId = val || ''
+                    setDefaultProviderId(nextId)
+                    const nextProv = config.providers.find((p) => p.id === nextId)
+                    if (nextProv && nextProv.models.length > 0 && !nextProv.models.includes(defaultModel)) {
+                      setDefaultModel(nextProv.models[0])
+                    }
+                  }}
+                />
+                <Autocomplete
+                  label="默认模型"
+                  aria-label="默认模型名称"
+                  style={{ flex: 1.15, minWidth: 0 }}
+                  placeholder={defaultModelOptions.length > 0 ? '选择或输入模型 ID' : '输入模型 ID 或先拉取模型'}
+                  value={defaultModel}
+                  data={defaultModelOptions}
+                  onChange={setDefaultModel}
+                  rightSection={
+                    selectedDefaultProvider ? (
+                      <button
+                        type="button"
+                        className="st-inline-icon-btn"
+                        title="从当前供应商拉取最新模型列表"
+                        aria-label="刷新默认供应商模型列表"
+                        disabled={fetchingRowId === selectedDefaultProvider.id}
+                        onClick={() => void handleFetchModelsForRow(selectedDefaultProvider)}
+                      >
+                        {fetchingRowId === selectedDefaultProvider.id ? (
+                          <IconLoader2 size={13} className="astrorder-spin" />
+                        ) : (
+                          <IconRefresh size={13} />
+                        )}
+                      </button>
+                    ) : undefined
                   }
-                }}
-              />
-              <Autocomplete
-                label="默认模型"
-                aria-label="默认模型名称"
-                style={{ flex: 1.15, minWidth: 0 }}
-                placeholder={defaultModelOptions.length > 0 ? '选择或输入模型 ID' : '输入模型 ID 或先拉取模型'}
-                value={defaultModel}
-                data={defaultModelOptions}
-                onChange={setDefaultModel}
-                rightSection={
-                  selectedDefaultProvider ? (
-                    <button
-                      type="button"
-                      className="st-inline-icon-btn"
-                      title="从当前供应商拉取最新模型列表"
-                      aria-label="刷新默认供应商模型列表"
-                      disabled={fetchingRowId === selectedDefaultProvider.id}
-                      onClick={() => void handleFetchModelsForRow(selectedDefaultProvider)}
-                    >
-                      {fetchingRowId === selectedDefaultProvider.id ? (
-                        <IconLoader2 size={13} className="astrorder-spin" />
-                      ) : (
-                        <IconRefresh size={13} />
-                      )}
-                    </button>
-                  ) : undefined
-                }
-              />
-              <Select
-                label="思考程度"
-                aria-label="默认模型思考程度"
-                w={104}
-                style={{ flexShrink: 0 }}
-                value={defaultReasoning}
-                allowDeselect={false}
-                onChange={(val) => setDefaultReasoning(val || 'low')}
-                data={[
-                  { value: 'none', label: '关闭' },
-                  { value: 'low', label: '低' },
-                  { value: 'medium', label: '中' },
-                  { value: 'high', label: '高' },
-                ]}
-              />
-            </Group>
-            <Group justify="flex-end" mt={2}>
-              <Button
-                variant="default"
-                size="xs"
-                disabled={!canSaveDefault}
-                loading={testingDefault}
-                onClick={() => void handleTestDefault()}
-              >
-                测试连接
-              </Button>
-              <Button
-                size="xs"
-                disabled={!canSaveDefault}
-                loading={savingDefault}
-                onClick={() => void handleSaveDefault()}
-              >
-                保存默认设置
-              </Button>
-            </Group>
-          </Stack>
-        )}
+                />
+                <Select
+                  label="思考程度"
+                  aria-label="默认模型思考程度"
+                  w={104}
+                  style={{ flexShrink: 0 }}
+                  value={defaultReasoning}
+                  allowDeselect={false}
+                  onChange={(val) => setDefaultReasoning(val || 'low')}
+                  data={[
+                    { value: 'none', label: '关闭' },
+                    { value: 'low', label: '低' },
+                    { value: 'medium', label: '中' },
+                    { value: 'high', label: '高' },
+                  ]}
+                />
+              </Group>
+              <Group justify="flex-end" mt={2}>
+                <Button
+                  variant="default"
+                  size="xs"
+                  disabled={!canSaveDefault}
+                  loading={testingDefault}
+                  onClick={() => void handleTestDefault()}
+                >
+                  测试连接
+                </Button>
+                <Button
+                  size="xs"
+                  disabled={!canSaveDefault}
+                  loading={savingDefault}
+                  onClick={() => void handleSaveDefault()}
+                >
+                  保存默认设置
+                </Button>
+              </Group>
+            </Stack>
+          )}
+        </Stack>
       </section>
 
       {/* Section 2: Configured AI Providers Directory */}
@@ -1100,7 +1359,7 @@ export function AiProvidersSettingsSection() {
                   <div className="st-provider-row-main">
                     <div className="st-provider-row-title-line">
                       <span
-                        className={`st-status-dot${provider.enabled && provider.api_key_set ? ' is-ok' : ''}`}
+                        className={`st-status-dot${provider.enabled && (provider.protocol === 'agent' ? Boolean(provider.agent_id) : provider.api_key_set) ? ' is-ok' : ''}`}
                         aria-hidden="true"
                       />
                       <span className="st-provider-row-name">{provider.name}</span>
@@ -1111,12 +1370,18 @@ export function AiProvidersSettingsSection() {
                       {isDefault && <span className="st-provider-tag is-default">默认</span>}
                     </div>
                     <div className="st-provider-row-meta">
-                      <span>{displayHost(provider.base_url)}</span>
+                      <span>
+                        {provider.protocol === 'agent'
+                          ? `直连 Agent：${provider.agent_id || provider.agent_kind || '本地引擎'}`
+                          : displayHost(provider.base_url)}
+                      </span>
                       <span>·</span>
                       <span>
                         {provider.models.length > 0
                           ? `${provider.models.length} 个模型`
-                          : '尚未拉取模型'}
+                          : provider.protocol === 'agent'
+                            ? '使用引擎默认模型'
+                            : '尚未拉取模型'}
                       </span>
                       {provider.masked_key && (
                         <>
@@ -1147,14 +1412,16 @@ export function AiProvidersSettingsSection() {
                       )}
                       <span>拉取模型</span>
                     </button>
-                    <button
-                      type="button"
-                      className="st-row-action-btn"
-                      onClick={() => openEditEditor(provider)}
-                    >
-                      <IconEdit size={13} />
-                      <span>编辑</span>
-                    </button>
+                    {provider.protocol !== 'agent' && (
+                      <button
+                        type="button"
+                        className="st-row-action-btn"
+                        onClick={() => openEditEditor(provider)}
+                      >
+                        <IconEdit size={13} />
+                        <span>编辑</span>
+                      </button>
+                    )}
                     <Switch
                       size="xs"
                       aria-label={`启用供应商 ${provider.name}`}

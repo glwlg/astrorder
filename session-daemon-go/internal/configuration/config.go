@@ -8,17 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"astrorder.dev/session-daemon/internal/modelconfig"
 	"astrorder.dev/session-daemon/internal/protocol"
-	core "astrorder.dev/session-daemon/internal/runtime"
-	"astrorder.dev/session-daemon/internal/runtime/antigravity"
-	"astrorder.dev/session-daemon/internal/runtime/codex"
-	"astrorder.dev/session-daemon/internal/runtime/grok"
-	"astrorder.dev/session-daemon/internal/runtime/hermes"
-	"astrorder.dev/session-daemon/internal/runtime/pty"
-	"astrorder.dev/session-daemon/internal/runtime/remote"
 )
 
 type Runtime struct {
@@ -85,149 +76,96 @@ func canonicalDirectory(path string) (string, error) {
 	}
 	return resolved, nil
 }
-func (c Config) Register(d *protocol.Daemon) error {
-	var modelHome string
-	var helperAssets string
+
+type validatedConfig struct {
+	journal      *JournalConfig
+	runtimes     []Runtime
+	modelHome    string
+	helperAssets string
+}
+
+func validateRuntime(r Runtime) (Runtime, error) {
+	if r.Type != "codex" && r.Type != "grok" && r.Type != "antigravity" && r.Type != "pty" && r.Type != "hermes" {
+		return Runtime{}, fmt.Errorf("runtime is not implemented: %s", r.Type)
+	}
+	if len(r.Allowed) == 0 {
+		return Runtime{}, fmt.Errorf("runtime requires allowed workspace roots")
+	}
+	roots := make([]string, 0, len(r.Allowed))
+	for _, root := range r.Allowed {
+		resolved, err := canonicalDirectory(root)
+		if err != nil {
+			return Runtime{}, err
+		}
+		roots = append(roots, resolved)
+	}
+	r.Allowed = roots
+	if r.Type != "pty" {
+		if r.Executable == "" || strings.ContainsRune(r.Executable, 0) {
+			return Runtime{}, fmt.Errorf("runtime executable is invalid")
+		}
+		cwd, err := canonicalDirectory(r.Workspace)
+		if err != nil {
+			return Runtime{}, err
+		}
+		inside := false
+		for _, root := range roots {
+			rel, err := filepath.Rel(root, cwd)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel) {
+				inside = true
+			}
+		}
+		if !inside {
+			return Runtime{}, fmt.Errorf("default workspace is outside allowlist")
+		}
+		r.Workspace = cwd
+	}
+	for _, arg := range r.Arguments {
+		if strings.ContainsRune(arg, 0) {
+			return Runtime{}, fmt.Errorf("runtime argument is invalid")
+		}
+	}
+	r.Arguments = append([]string(nil), r.Arguments...)
+	return r, nil
+}
+
+func validateConfig(c Config) (validatedConfig, error) {
+	var out validatedConfig
+	if c.Journal != nil {
+		j := *c.Journal
+		out.journal = &j
+	}
 	if c.ModelConfig != nil {
 		var err error
-		modelHome, err = canonicalDirectory(c.ModelConfig.Home)
+		out.modelHome, err = canonicalDirectory(c.ModelConfig.Home)
 		if err != nil {
-			return fmt.Errorf("model configuration home: %w", err)
+			return validatedConfig{}, fmt.Errorf("model configuration home: %w", err)
 		}
 		if c.ModelConfig.HelperAssetsDir != "" {
-			helperAssets, err = canonicalDirectory(c.ModelConfig.HelperAssetsDir)
+			out.helperAssets, err = canonicalDirectory(c.ModelConfig.HelperAssetsDir)
 			if err != nil {
-				return fmt.Errorf("model helper assets: %w", err)
+				return validatedConfig{}, fmt.Errorf("model helper assets: %w", err)
 			}
 		}
 	}
-	validated := make([]Runtime, 0, len(c.Runtimes))
+	out.runtimes = make([]Runtime, 0, len(c.Runtimes))
 	seen := map[string]bool{}
 	for _, r := range c.Runtimes {
 		if seen[r.Type] {
-			return fmt.Errorf("duplicate runtime configuration: %s", r.Type)
+			return validatedConfig{}, fmt.Errorf("duplicate runtime configuration: %s", r.Type)
 		}
 		seen[r.Type] = true
-		if r.Type != "codex" && r.Type != "grok" && r.Type != "antigravity" && r.Type != "pty" && r.Type != "hermes" {
-			return fmt.Errorf("runtime is not implemented: %s", r.Type)
+		vr, err := validateRuntime(r)
+		if err != nil {
+			return validatedConfig{}, err
 		}
-		if len(r.Allowed) == 0 {
-			return fmt.Errorf("runtime requires allowed workspace roots")
-		}
-		roots := make([]string, 0, len(r.Allowed))
-		for _, root := range r.Allowed {
-			resolved, err := canonicalDirectory(root)
-			if err != nil {
-				return err
-			}
-			roots = append(roots, resolved)
-		}
-		r.Allowed = roots
-		if r.Type != "pty" {
-			if r.Executable == "" || strings.ContainsRune(r.Executable, 0) {
-				return fmt.Errorf("runtime executable is invalid")
-			}
-			cwd, err := canonicalDirectory(r.Workspace)
-			if err != nil {
-				return err
-			}
-			inside := false
-			for _, root := range roots {
-				rel, err := filepath.Rel(root, cwd)
-				if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel) {
-					inside = true
-				}
-			}
-			if !inside {
-				return fmt.Errorf("default workspace is outside allowlist")
-			}
-			r.Workspace = cwd
-		}
-		for _, arg := range r.Arguments {
-			if strings.ContainsRune(arg, 0) {
-				return fmt.Errorf("runtime argument is invalid")
-			}
-		}
-		validated = append(validated, r)
+		out.runtimes = append(out.runtimes, vr)
 	}
-	if c.Journal != nil {
-		if err := d.ConfigureRetention(c.Journal.TotalBytes, c.Journal.SessionBytes, c.Journal.MaxAgeSeconds); err != nil {
-			return err
-		}
-	}
-	codexBatchEmit := func(entries []codex.EmitEntry) error {
-		items := make([]protocol.EventInput, len(entries))
-		for i, entry := range entries {
-			items[i] = protocol.EventInput{
-				SessionID: entry.SessionID,
-				Event:     entry.Event,
-				Status:    entry.Status,
-				Payload:   entry.Payload,
-			}
-		}
-		return d.EmitBatch(items)
-	}
-	adapters := map[string]core.Adapter{}
-	for _, r := range validated {
-		var adapter core.Adapter
-		switch r.Type {
-		case "codex":
-			cfg := codex.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID}
-			codexAdapter := codex.NewAdapter(cfg, d.Emit)
-			codexAdapter.SetBatchEmitter(codexBatchEmit)
-			adapter = codexAdapter
-			obsCtx, obsCancel := context.WithCancel(context.Background())
-			go codex.StartDesktopObserverWithOwner(obsCtx, cfg, d.Emit, d.HasSession, codexAdapter.OwnsSession, 500*time.Millisecond)
-			d.AddCloser(func() error {
-				obsCancel()
-				return nil
-			})
-		case "antigravity":
-			instance := antigravity.New(antigravity.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
-			adapter = instance
-			observeCtx, observeCancel := context.WithCancel(context.Background())
-			go instance.Observe(observeCtx)
-			d.AddCloser(func() error { observeCancel(); return nil })
-		case "grok":
-			adapter = grok.New(grok.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
-		case "hermes":
-			adapter = hermes.NewIsolated(hermes.Config{Executable: r.Executable, Arguments: r.Arguments, Workspace: r.Workspace, Allowed: r.Allowed, AgentID: r.AgentID, Emit: d.Emit})
-			hermesCtx, hermesCancel := context.WithCancel(context.Background())
-			go hermes.StartActivityObserver(hermesCtx, r.AgentID, d.Emit, d.HasSession, 500*time.Millisecond)
-			d.AddCloser(func() error {
-				hermesCancel()
-				return nil
-			})
-		case "pty":
-			instance, err := pty.New(pty.Config{Allowed: r.Allowed, Shell: r.Shell, Emit: d.Emit})
-			if err != nil {
-				return err
-			}
-			adapter = instance
-		}
-		adapters[r.Type] = adapter
-	}
-	for kind, adapter := range adapters {
-		d.RegisterRuntime(kind, adapter)
-	}
+	return out, nil
+}
 
-	// Always provide multiplexed SSH child registries for remote agents
-	codexSSH := core.NewMultiplexRegistry(remote.NewRemoteCodexFactoryWithBatch(d.Emit, codexBatchEmit, d.HasSession))
-	d.RegisterRuntime("codex-ssh", codexSSH)
-
-	grokSSH := core.NewMultiplexRegistry(remote.NewRemoteGrokFactory(d.Emit))
-	d.RegisterRuntime("grok-ssh", grokSSH)
-
-	antigravitySSH := core.NewMultiplexRegistry(remote.NewRemoteAntigravityFactory(d.Emit, helperAssets))
-	d.RegisterRuntime("antigravity-ssh", antigravitySSH)
-
-	sshHermes := core.NewMultiplexRegistry(remote.NewRemoteHermesFactory(d.Emit))
-	d.RegisterRuntime("ssh", sshHermes)
-
-	if modelHome != "" {
-		if err := d.ConfigureModelConfig(modelconfig.Config{AllowedRoots: []string{modelHome}, Credentials: modelconfig.NativeCredentialStore(), HelperAssetsDir: helperAssets}); err != nil {
-			return err
-		}
-	}
-	return nil
+func (c Config) Register(d *protocol.Daemon) error {
+	manager := NewManager(d, ManagerOptions{})
+	_, err := manager.Apply(context.Background(), c)
+	return err
 }

@@ -88,4 +88,63 @@ describe('ProjectDatabaseModal', () => {
       is_default: true,
     })
   })
+
+  it('automatically includes the filled draft target when clicking 保存关联 directly without clicking 添加到项目', async () => {
+    vi.spyOn(api, 'getProjectDatabaseBindings').mockResolvedValue({ bindings: [] })
+    vi.spyOn(api, 'listDbxConnections').mockResolvedValue({
+      connections: [
+        {
+          id: 'conn-prod',
+          name: 'ops@10.20.64.38',
+          db_type: 'postgres',
+          database: 'ops_metadata',
+          schema: 'public',
+          is_prod: true,
+        },
+      ],
+    })
+    vi.spyOn(api, 'listDbxDatabases').mockResolvedValue({ databases: ['ops_metadata'] })
+    vi.spyOn(api, 'listDbxSchemas').mockResolvedValue({ schemas: ['public'] })
+
+    let savedPayload: ProjectDatabaseBinding | null = null
+    vi.spyOn(api, 'saveProjectDatabaseBinding').mockImplementation(async (binding) => {
+      savedPayload = binding
+      return { binding, bindings: [binding] }
+    })
+
+    const onClose = vi.fn()
+    render(
+      <MantineProvider>
+        <ProjectDatabaseModal
+          opened
+          onClose={onClose}
+          projectKey="project:local\u0000opsdashboard"
+          projectLabel="opsdashboard"
+        />
+      </MantineProvider>,
+    )
+
+    fireEvent.click(await screen.findByPlaceholderText('选择已在 DBX 中配置的连接'))
+    fireEvent.click(await screen.findByText('ops@10.20.64.38 [PROD] (postgres)'))
+    fireEvent.change(screen.getByLabelText('显示别名（可选）'), { target: { value: '线上数据库' } })
+
+    expect(await screen.findByText(/直接点击「保存关联」将自动加入「线上数据库」/)).toBeInTheDocument()
+
+    // Click 保存关联 directly without clicking 添加到项目 first
+    fireEvent.click(screen.getByRole('button', { name: '保存关联' }))
+
+    await waitFor(() => {
+      expect(savedPayload).not.toBeNull()
+      expect(onClose).toHaveBeenCalled()
+    })
+    expect(savedPayload!.targets).toHaveLength(1)
+    expect(savedPayload!.targets[0]).toMatchObject({
+      connection_id: 'conn-prod',
+      database: 'ops_metadata',
+      schema: 'public',
+      label: '线上数据库',
+      is_prod: true,
+      is_default: true,
+    })
+  })
 })

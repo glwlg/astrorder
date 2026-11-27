@@ -669,20 +669,13 @@ func (h *Handler) synthesizeSources(ctx context.Context, req SourcesSynthesizeRe
 	llmCfg := loadHelperLLMConfig(ctx, h.options.Store)
 	if strings.TrimSpace(req.ProviderID) != "" {
 		if resolved, ok := aiprovider.Resolve(ctx, h.options.Store, req.ProviderID, req.Model); ok {
-			llmCfg = map[string]string{
-				"protocol":  resolved.Protocol,
-				"base_url":  resolved.BaseURL,
-				"api_key":   resolved.APIKey,
-				"model":     resolved.Model,
-				"reasoning": resolved.Reasoning,
-			}
+			llmCfg = resolved
 		}
 	} else if strings.TrimSpace(req.Model) != "" {
-		llmCfg["model"] = strings.TrimSpace(req.Model)
+		llmCfg.Model = strings.TrimSpace(req.Model)
 	}
 
-	apiKey := strings.TrimSpace(llmCfg["api_key"])
-	llmConfigured := apiKey != ""
+	llmConfigured := llmCfg.IsConfigured()
 	if strings.EqualFold(strings.TrimSpace(req.Mode), "prompt_only") || !llmConfigured {
 		draft := fmt.Sprintf("# %s\n\n", title)
 		if instr := strings.TrimSpace(req.Instruction); instr != "" {
@@ -698,30 +691,22 @@ func (h *Handler) synthesizeSources(ctx context.Context, req SourcesSynthesizeRe
 			OK:              true,
 			Mode:            "prompt_only",
 			LLMConfigured:   llmConfigured,
-			Model:           llmCfg["model"],
+			Model:           llmCfg.Model,
 			Title:           title,
 			Markdown:        strings.TrimSpace(draft),
 			AssembledPrompt: assembledPrompt,
 			Sources:         extracted.Sources,
-			Message:         "未配置 AI 供应商 API Key，已组装多文档提示词，可直接发送到对话生成或前往「设置 → AI 供应商」配置。",
+			Message:         "未配置通用 AI 模型（可在「设置 → AI 供应商」直接选择已接入 Agent 或填写 API Key），已组装多文档提示词，可直接发送到对话生成。",
 		}, nil
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmcompat.ChatRequest{
-		Protocol:  llmCfg["protocol"],
-		BaseURL:   llmCfg["base_url"],
-		APIKey:    apiKey,
-		Model:     llmCfg["model"],
-		Reasoning: llmCfg["reasoning"],
-		MaxTokens: 4096,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmCfg.ToChatRequest(4096, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("调用 AI 供应商生成失败：%w", err)
 	}

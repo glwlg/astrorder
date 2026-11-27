@@ -22,8 +22,9 @@ type Daemon struct {
 	modelWake         chan struct{}
 	modelStop         context.CancelFunc
 	modelDone         chan struct{}
-	modelReloadError  string
-	shutdownOnce      sync.Once
+	modelReloadError    string
+	runtimeConfigReload RuntimeConfigReloadFunc
+	shutdownOnce        sync.Once
 	shutdownRequested chan struct{}
 	closeOnce         sync.Once
 	closeErr          error

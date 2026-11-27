@@ -22,10 +22,10 @@ async function chooseGateway() {
   await waitFor(() => expect(screen.getByLabelText('通过 LLM 网关')).not.toBeDisabled())
   fireEvent.click(screen.getByLabelText('通过 LLM 网关'))
   await waitFor(() => expect(api.getSystemOneModels).toHaveBeenCalled())
-  const select = screen.getByRole('combobox', { name: 'System One 模型' })
+  const select = screen.getByRole('combobox', { name: '决策模型' })
   await waitFor(() => expect(select).not.toBeDisabled())
   await userEvent.click(select)
-  fireEvent.click(await screen.findByText('typesafe/System One-preview'))
+  fireEvent.click(await screen.findByText('typesafe/决策模型-preview'))
 }
 
 it('keeps official configuration and saves a gateway mode with only the selected model', async () => {
@@ -33,7 +33,7 @@ it('keeps official configuration and saves a gateway mode with only the selected
   await screen.findByText('official…key')
   expect(api.getSystemOneModels).not.toHaveBeenCalled()
   await chooseGateway()
-  expect(screen.queryByLabelText('System One 官方 API Key')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('决策模型 API Key')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
   await waitFor(() => expect(api.updateSystemOneConfig).toHaveBeenCalledWith({ mode: 'gateway', model: 'typesafe/jev-preview' }))
 })
@@ -44,8 +44,8 @@ it('tests the unsaved mode and switches back without replacing the official key'
   fireEvent.click(screen.getByRole('button', { name: '测试连通性' }))
   await waitFor(() => expect(api.testSystemOneConnection).toHaveBeenCalledWith({ mode: 'gateway', model: 'typesafe/jev-preview' }))
   expect(api.updateSystemOneConfig).not.toHaveBeenCalled()
-  await waitFor(() => expect(screen.getByLabelText('System One 官方')).not.toBeDisabled())
-  fireEvent.click(screen.getByLabelText('System One 官方'))
+  await waitFor(() => expect(screen.getByLabelText('独立决策模型 Key')).not.toBeDisabled())
+  fireEvent.click(screen.getByLabelText('独立决策模型 Key'))
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
   await waitFor(() => expect(api.updateSystemOneConfig).toHaveBeenCalledWith({ mode: 'official' }))
 })
@@ -53,10 +53,10 @@ it('tests the unsaved mode and switches back without replacing the official key'
 it('restores a saved gateway model and clears the official key only on explicit request', async () => {
   vi.mocked(api.getSystemOneConfig).mockResolvedValue({ ...official, mode: 'gateway', model: 'typesafe/jev-preview' })
   mount()
-  await waitFor(() => expect(screen.getByRole('combobox', { name: 'System One 模型' })).toHaveValue('typesafe/System One-preview'))
-  expect(screen.queryByRole('button', { name: '清除官方 Key' })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByLabelText('System One 官方'))
-  fireEvent.click(screen.getByRole('button', { name: '清除官方 Key' }))
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '决策模型' })).toHaveValue('typesafe/决策模型-preview'))
+  expect(screen.queryByRole('button', { name: '清除独立 Key' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByLabelText('独立决策模型 Key'))
+  fireEvent.click(screen.getByRole('button', { name: '清除独立 Key' }))
   await waitFor(() => expect(api.updateSystemOneConfig).toHaveBeenCalledWith({ mode: 'official', api_key: null }))
 })
 

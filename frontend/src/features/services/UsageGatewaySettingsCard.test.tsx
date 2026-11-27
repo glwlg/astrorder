@@ -137,3 +137,29 @@ it('renders removed models and the config diff accordion when present', async ()
   expect(screen.getByText(/查看底层配置文件 Diff 详情/)).toBeInTheDocument()
   expect(screen.getByText('活跃会话稍后重载')).toBeInTheDocument()
 })
+
+it('humanizes raw MANAGED_FILE sync constants in recent sync history', async () => {
+  vi.mocked(api.getModelSyncJobs).mockResolvedValue({
+    items: [
+      {
+        id: 'job-1',
+        status: 'success',
+        targets: [
+          {
+            target_id: 'local',
+            status: 'success',
+            changed: [
+              'MANAGED_FILE_CODEX_CONFIG',
+              'MANAGED_FILE_CODEX_MAGPIE_CATALOG',
+              'MANAGED_FILE_GROK_CONFIG',
+            ],
+          },
+        ],
+      },
+    ],
+  } as never)
+
+  mount()
+  expect(await screen.findByText('已更新：Codex 配置 · Codex 模型目录 · Grok 配置')).toBeInTheDocument()
+  expect(screen.queryByText(/MANAGED_FILE_/)).not.toBeInTheDocument()
+})

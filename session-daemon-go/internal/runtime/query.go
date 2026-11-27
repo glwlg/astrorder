@@ -18,8 +18,13 @@ func (r *Registry) Query(ctx context.Context, request Request) (map[string]any, 
 		return nil, fmt.Errorf("runtime method is required")
 	}
 	r.mu.Lock()
-	adapter, ok := r.adapters[request.AgentType].(Querier)
-	if !ok {
+	slot := r.slots[request.AgentType]
+	var adapter Querier
+	isQuerier := false
+	if slot != nil {
+		adapter, isQuerier = slot.adapter.(Querier)
+	}
+	if !isQuerier {
 		r.mu.Unlock()
 		return nil, fmt.Errorf("agent type does not support runtime requests")
 	}
@@ -27,8 +32,9 @@ func (r *Registry) Query(ctx context.Context, request Request) (map[string]any, 
 		r.mu.Unlock()
 		return nil, err
 	}
+	slot.inflight++
 	r.mu.Unlock()
-	defer r.release(request.AgentType)
+	defer r.releaseSlot(request.AgentType, slot)
 	result, err := adapter.Query(ctx, request)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@
 package process
 
 import (
+	"os"
 	"regexp"
 	"strings"
 
@@ -35,6 +36,39 @@ func systemEnvironment() []string {
 		key.Close()
 	}
 	return result
+}
+
+// systemPath reads the latest Windows User and Machine Path values from the
+// registry and expands %VAR% references against the current environment.
+func systemPath() string {
+	readPath := func(root registry.Key, subkey string) string {
+		key, err := registry.OpenKey(root, subkey, registry.QUERY_VALUE)
+		if err != nil {
+			return ""
+		}
+		defer key.Close()
+		val, _, err := key.GetStringValue("Path")
+		if err != nil {
+			return ""
+		}
+		return val
+	}
+	userPath := readPath(registry.CURRENT_USER, `Environment`)
+	machinePath := readPath(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`)
+	combined := MergePath(userPath, machinePath)
+	if combined == "" {
+		return ""
+	}
+	env := append(os.Environ(), systemEnvironment()...)
+	env = append(env, "PATH="+combined)
+	expanded := expandEnvironment(env)
+	for i := len(expanded) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(expanded[i], "=")
+		if ok && strings.EqualFold(k, "PATH") {
+			return MergePath(v)
+		}
+	}
+	return combined
 }
 
 func expandEnvironment(env []string) []string {

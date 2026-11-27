@@ -132,6 +132,7 @@ func NewServer(config Config, daemon *protocol.Daemon, supplied ...Option) (*grp
 	sessiondv1.RegisterEventStreamServer(server, service)
 	RegisterOperationQuery(server, daemon)
 	RegisterRuntimeQuery(server, daemon)
+	RegisterRuntimeReload(server, daemon)
 	RegisterSessionControl(server, daemon)
 	RegisterModelConfig(server, daemon)
 	registerTerminalStream(server, daemon, settings)

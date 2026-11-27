@@ -38,6 +38,8 @@ type LiveSessionBinding struct {
 func (r *Registry) LiveSessionBindings() map[string]LiveSessionBinding {
 	r.mu.RLock()
 	owners := make(map[string]string, len(r.owners))
+	ownerSlots := make(map[string]*adapterSlot, len(r.owners))
+	uniqueSlots := make(map[*adapterSlot]bool, len(r.slots))
 	identities := make(map[string]SessionReadIdentity, len(r.identities))
 	baselines := make(map[string]SessionReadIdentity, len(r.identities))
 	generations := make(map[string]uint64, len(r.owners))
@@ -47,6 +49,10 @@ func (r *Registry) LiveSessionBindings() map[string]LiveSessionBinding {
 			continue
 		}
 		owners[id] = kind
+		if slot := r.slotForSessionLocked(id, kind); slot != nil {
+			ownerSlots[id] = slot
+			uniqueSlots[slot] = true
+		}
 		// Capture the identity twice under the begin lock: the raw struct
 		// keeps the live field pointers as the binding generation token,
 		// and the clone is the exact value baseline the closing re-check
@@ -56,10 +62,6 @@ func (r *Registry) LiveSessionBindings() map[string]LiveSessionBinding {
 		identities[id] = cloneIdentity(baseline)
 		generations[id] = r.generations[id]
 		states[id] = r.states[id]
-	}
-	adapters := make(map[string]Adapter, len(r.adapters))
-	for kind, adapter := range r.adapters {
-		adapters[kind] = adapter
 	}
 	r.mu.RUnlock()
 
@@ -71,14 +73,14 @@ func (r *Registry) LiveSessionBindings() map[string]LiveSessionBinding {
 	// Merge the newest adapter state without holding the registry lock. The
 	// same ownership re-check as Sessions(): a session released during the
 	// adapter read must not reappear here.
-	for kind, adapter := range adapters {
-		snapshotter, ok := adapter.(Snapshotter)
+	for slot := range uniqueSlots {
+		snapshotter, ok := slot.adapter.(Snapshotter)
 		if !ok {
 			continue
 		}
 		for id, state := range snapshotter.Snapshot() {
 			binding, owned := bindings[id]
-			if !owned || binding.Kind != kind {
+			if !owned || ownerSlots[id] != slot {
 				continue
 			}
 			if state.SessionID != id || !validStatus(state.Status) {

@@ -105,7 +105,7 @@ export function GroupChatActivity({ members, memberStates, coordination, activeS
   return (
     <div className="group-chat-activity" data-motion-paused={paused || undefined}>
       <div role="status" aria-label="群聊处理进度" aria-atomic="true" className="group-chat-activity-rows">
-        {deciding && <ActivityRow name="System One" title="正在思考下一棒" detail="接力棒交给谁，正在安排中…" icon={<IconBulb size={18} />} />}
+        {deciding && <ActivityRow name="决策模型" title="正在思考下一棒" detail="接力棒交给谁，正在安排中…" icon={<IconBulb size={18} />} />}
         {running.map(({ member, state, approval }) => {
           const id = member.id || member.agent_id;
           return <MemberActivity key={id} member={member} state={state} agent={agents[member.agent_id]}

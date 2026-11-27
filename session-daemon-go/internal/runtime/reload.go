@@ -53,7 +53,11 @@ func (r *Registry) ReloadConfig(ctx context.Context, kind string) error {
 		return err
 	}
 	r.mu.Lock()
-	adapter := r.adapters[kind]
+	slot := r.slots[kind]
+	var adapter Adapter
+	if slot != nil {
+		adapter = slot.adapter
+	}
 	reloader, ok := adapter.(ConfigReloader)
 	if !ok {
 		r.mu.Unlock()
@@ -65,13 +69,24 @@ func (r *Registry) ReloadConfig(ctx context.Context, kind string) error {
 	}
 	r.reloading[kind] = true
 	r.inflight++
+	slot.inflight++
 	r.mu.Unlock()
-	defer func() { r.mu.Lock(); delete(r.reloading, kind); r.inflight--; r.mu.Unlock() }()
+	defer func() {
+		r.mu.Lock()
+		delete(r.reloading, kind)
+		r.inflight--
+		slot.inflight--
+		toClose := r.takeDrainableRetiredLocked(slot)
+		r.mu.Unlock()
+		if toClose != nil {
+			_ = closeSlot(toClose)
+		}
+	}()
 	// The lease prevents new native work between snapshot and reload.
 	r.mu.RLock()
 	owned := map[string]Result{}
 	for id, owner := range r.owners {
-		if owner == kind {
+		if owner == kind && r.slotForSessionLocked(id, owner) == slot {
 			owned[id] = r.states[id]
 		}
 	}

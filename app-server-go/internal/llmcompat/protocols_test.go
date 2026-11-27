@@ -118,3 +118,29 @@ func TestCompleteChatGeminiNative(t *testing.T) {
 		t.Fatalf("expected systemInstruction in Gemini request body: %#v", gotBody)
 	}
 }
+
+func TestCompleteChatAgentProtocol(t *testing.T) {
+	var gotReq ChatRequest
+	SetAgentCompleter(func(ctx context.Context, req ChatRequest) (ChatResult, error) {
+		gotReq = req
+		return ChatResult{
+			Status:  200,
+			Model:   req.Model,
+			Content: "OK from Agent",
+		}, nil
+	})
+	t.Cleanup(func() { SetAgentCompleter(nil) })
+
+	res, err := CompleteChat(context.Background(), nil, ChatRequest{
+		Protocol: ProtocolAgent,
+		AgentID:  "codex-local",
+		Model:    "gpt-5.4",
+		Messages: []ChatMessage{{Role: "user", Content: "Reply OK"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteChat agent failed: %v", err)
+	}
+	if res.Status != 200 || res.Content != "OK from Agent" || gotReq.AgentID != "codex-local" || gotReq.Model != "gpt-5.4" {
+		t.Fatalf("unexpected agent completion result=%+v req=%+v", res, gotReq)
+	}
+}

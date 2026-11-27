@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,21 +91,20 @@ func EnsureDaemonConfig(stateDir, rootDir string) (string, error) {
 		}
 	}
 
-	// Discover hermes
+	// Discover hermes (fault-tolerant: damaged/incomplete Hermes must never block provision or other engines)
 	if hermesPath, err := exec.LookPath("hermes"); err == nil && hermesPath != "" {
 		if abs, err := filepath.Abs(hermesPath); err == nil {
-			executable, arguments, resolveErr := resolveHermesRuntime(abs, probeNativeRuntime)
-			if resolveErr != nil {
-				return "", resolveErr
+			hermesStatus := ProbeHermesRuntime(abs, probeNativeRuntime, slog.Default())
+			if hermesStatus.Available {
+				runtimes = append(runtimes, daemonRuntimeJSON{
+					Type:       "hermes",
+					Executable: hermesStatus.Executable,
+					Arguments:  hermesStatus.Arguments,
+					Workspace:  rootDir,
+					Allowed:    allowed,
+					AgentID:    "local-hermes-default",
+				})
 			}
-			runtimes = append(runtimes, daemonRuntimeJSON{
-				Type:       "hermes",
-				Executable: executable,
-				Arguments:  arguments,
-				Workspace:  rootDir,
-				Allowed:    allowed,
-				AgentID:    "local-hermes-default",
-			})
 		}
 	}
 
@@ -225,10 +225,10 @@ func UpsertLocalRuntime(stateDir, rootDir, kind, executable string) (bool, error
 	resolvedExec := absExec
 	args := []string{}
 	if kind == "hermes" {
-		hermesExec, hermesArgs, resolveErr := resolveHermesRuntime(absExec, probeNativeRuntime)
-		if resolveErr == nil && hermesExec != "" {
-			resolvedExec = hermesExec
-			args = hermesArgs
+		hermesStatus := ProbeHermesRuntime(absExec, probeNativeRuntime, slog.Default())
+		if hermesStatus.Available && hermesStatus.Executable != "" {
+			resolvedExec = hermesStatus.Executable
+			args = hermesStatus.Arguments
 		}
 	}
 

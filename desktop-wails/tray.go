@@ -10,6 +10,12 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
+const (
+	trayAppServiceLabel    = "主服务"
+	trayDaemonServiceLabel = "小内核"
+	trayDaemonUpdateLabel  = "更新小内核"
+)
+
 type kernelMenuState struct {
 	Label      string
 	Detail     string
@@ -18,32 +24,84 @@ type kernelMenuState struct {
 	CanRestart bool
 }
 
+func normalizedServiceState(state map[string]any) string {
+	if state == nil || state["ok"] == false {
+		return "unknown"
+	}
+	value, _ := state["state"].(string)
+	switch value {
+	case "running", "stopped", "starting", "stopping", "conflict", "error", "unknown":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
 func describeKernel(name string, state map[string]any) kernelMenuState {
-	result := kernelMenuState{Label: name + " · 状态未知", Detail: "无法读取服务状态"}
+	result := kernelMenuState{Label: name + " · 状态未知", Detail: "正在等待服务响应，可稍后刷新"}
 	if state == nil {
 		return result
 	}
-	value, _ := state["state"].(string)
-	label := map[string]string{"running": "运行中", "stopped": "已停止", "starting": "启动中", "stopping": "停止中", "conflict": "状态冲突", "error": "异常", "unknown": "状态未知"}[value]
+	value := normalizedServiceState(state)
+	label := map[string]string{
+		"running":  "运行中",
+		"stopped":  "已停止",
+		"starting": "启动中",
+		"stopping": "停止中",
+		"conflict": "状态冲突",
+		"error":    "异常",
+		"unknown":  "状态未知",
+	}[value]
 	if label == "" {
 		label = "状态未知"
 	}
-	if state["ok"] == false {
-		label = "状态未知"
-		value = "unknown"
-	}
 	result.Label = name + " · " + label
-	result.Detail = "状态：" + label
-	if value == "running" {
+	switch value {
+	case "running":
 		result.CanStop = true
 		result.CanRestart = true
+		result.Detail = "当前正常工作中"
 		if port, ok := state["port"]; ok {
-			result.Detail += fmt.Sprintf(" · 端口 %v", port)
+			result.Detail = fmt.Sprintf("当前正常工作中（本地端口 %v）", port)
 		}
-	} else if value == "stopped" {
+	case "stopped":
 		result.CanStart = true
+		result.Detail = "当前未运行，可随时重新启动"
+	case "starting":
+		result.Detail = "正在启动，请稍候…"
+	case "stopping":
+		result.Detail = "正在安全停止…"
+	case "conflict":
+		result.Detail = "检测到端口或旧实例占用，建议打开设置检查"
+	case "error":
+		result.Detail = "服务暂时未就绪，可尝试重启或打开设置排查"
+	default:
+		result.Detail = "暂未获取到服务状态，可点击刷新重试"
 	}
 	return result
+}
+
+func describeTrayTooltip(appState, daemonState map[string]any) string {
+	appVal := normalizedServiceState(appState)
+	daemonVal := normalizedServiceState(daemonState)
+	switch {
+	case appVal == "running" && daemonVal == "running":
+		return "星序 · 运行正常"
+	case appVal == "starting" || daemonVal == "starting":
+		return "星序 · 正在启动服务…"
+	case appVal == "stopping" || daemonVal == "stopping":
+		return "星序 · 正在停止服务…"
+	case appVal == "running" && daemonVal != "running":
+		return "星序 · 界面已就绪（后台引擎连接中）"
+	case appVal == "stopped" && daemonVal == "running":
+		return "星序 · 后台任务持续运行中"
+	case appVal == "stopped" && daemonVal == "stopped":
+		return "星序 · 服务已暂停"
+	case appVal == "conflict" || daemonVal == "conflict" || appVal == "error" || daemonVal == "error":
+		return "星序 · 服务需要检查，点击打开查看"
+	default:
+		return "星序 · 正在同步服务状态"
+	}
 }
 
 // A single polling worker reads CLI authority off the UI thread. All menu
@@ -52,10 +110,10 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 	menu := s.app.NewMenu()
 	menu.Add("打开星序").OnClick(func(*application.Context) { show() })
 	menu.Add("设置").OnClick(func(*application.Context) { _ = s.OpenSettings("") })
-	menu.Add("复制访问令牌").OnClick(func(*application.Context) {
+	menu.Add("复制网页登录口令").OnClick(func(*application.Context) {
 		go func() {
 			if _, err := s.CopyAccessToken(); err != nil {
-				s.showError("复制访问令牌失败", err)
+				s.showError("复制登录口令未成功", err)
 			}
 		}()
 	})
@@ -70,7 +128,7 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 	var working atomic.Bool
 	type controls struct{ parent, detail, start, restart, stop *application.MenuItem }
 	items := map[string]controls{}
-	names := map[string]string{"app": "大内核", "daemon": "小内核"}
+	names := map[string]string{"app": trayAppServiceLabel, "daemon": trayDaemonServiceLabel}
 	run := func(target, action string) {
 		if !working.CompareAndSwap(false, true) {
 			return
@@ -79,9 +137,9 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 			defer working.Store(false)
 			result, err := s.Run(target, action)
 			if err != nil {
-				s.showError(names[target]+"操作失败", err)
+				s.showError(names[target]+"操作未完成", err)
 			} else if result["ok"] != true && result["state"] != "cancelled" {
-				s.showError(names[target]+"操作失败", fmt.Errorf("服务操作未得到成功确认"))
+				s.showError(names[target]+"操作未完成", fmt.Errorf("操作尚未生效，请稍后刷新状态或重试"))
 			} else if action == "update" && result["ok"] == true {
 				message, _ := result["message"].(string)
 				s.app.Dialog.Info().SetTitle("小内核更新").SetMessage(message).AttachToWindow(s.window).Show()
@@ -91,22 +149,22 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 	}
 	for _, target := range []string{"app", "daemon"} {
 		name := names[target]
-		submenu := menu.AddSubmenu(name + " · 查询中")
-		parent := menu.FindByLabel(name + " · 查询中")
-		detail := submenu.Add("正在查询服务状态…").SetEnabled(false)
+		submenu := menu.AddSubmenu(name + " · 检查中")
+		parent := menu.FindByLabel(name + " · 检查中")
+		detail := submenu.Add("正在检查状态…").SetEnabled(false)
 		submenu.AddSeparator()
 		start := submenu.Add("启动" + name).SetEnabled(false).OnClick(func(*application.Context) { run(target, "start") })
 		restart := submenu.Add("重启" + name).SetEnabled(false).OnClick(func(*application.Context) { run(target, "restart") })
 		stop := submenu.Add("停止" + name).SetEnabled(false).OnClick(func(*application.Context) { run(target, "stop") })
 		if target == "daemon" {
 			submenu.AddSeparator()
-			submenu.Add("更新小内核").OnClick(func(*application.Context) { run(target, "update") })
+			submenu.Add(trayDaemonUpdateLabel).OnClick(func(*application.Context) { run(target, "update") })
 		}
 		items[target] = controls{parent, detail, start, restart, stop}
 	}
-	menu.Add("刷新内核状态").OnClick(func(*application.Context) { requestRefresh() })
+	menu.Add("刷新服务状态").OnClick(func(*application.Context) { requestRefresh() })
 	menu.AddSeparator()
-	menu.Add("退出客户端（小内核继续运行）").OnClick(func(*application.Context) { go s.exitClient() })
+	menu.Add("退出桌面窗口（后台任务继续运行）").OnClick(func(*application.Context) { go s.exitClient() })
 	tray.SetMenu(menu)
 	tray.OnClick(show)
 	tray.OnDoubleClick(show)
@@ -129,10 +187,17 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 					return
 				}
 				states := map[string]kernelMenuState{}
+				var appRaw, daemonRaw map[string]any
 				for _, target := range []string{"app", "daemon"} {
 					value, _ := status[target].(map[string]any)
+					if target == "app" {
+						appRaw = value
+					} else {
+						daemonRaw = value
+					}
 					states[target] = describeKernel(names[target], value)
 				}
+				tooltip := describeTrayTooltip(appRaw, daemonRaw)
 				application.InvokeAsync(func() {
 					for _, target := range []string{"app", "daemon"} {
 						c, state := items[target], states[target]
@@ -142,7 +207,7 @@ func (s *ShellService) installTray(tray *application.SystemTray, show func()) {
 						c.stop.SetEnabled(state.CanStop)
 						c.restart.SetEnabled(state.CanRestart)
 					}
-					tray.SetTooltip("星序 · " + states["app"].Label + " · " + states["daemon"].Label)
+					tray.SetTooltip(tooltip)
 				})
 				select {
 				case <-ctx.Done():

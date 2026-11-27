@@ -275,13 +275,6 @@ func (h *handler) deleteCustomTemplate(ctx context.Context, id string) error {
 	return h.store.SetPreference(ctx, prefDigestTemplates, next, true)
 }
 
-func loadLLMConfig(ctx context.Context, st *store.Store) map[string]string {
-	resolved := aiprovider.ResolveDefault(ctx, st)
-	return map[string]string{
-		"protocol":  resolved.Protocol,
-		"base_url":  resolved.BaseURL,
-		"api_key":   resolved.APIKey,
-		"model":     resolved.Model,
-		"reasoning": resolved.Reasoning,
-	}
+func loadLLMConfig(ctx context.Context, st *store.Store) aiprovider.ResolvedModel {
+	return aiprovider.ResolveDefault(ctx, st)
 }

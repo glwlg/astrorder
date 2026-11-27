@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +58,51 @@ func TestTrayIconsHaveExactSmallSizesAndTransparency(t *testing.T) {
 				t.Fatalf("missing tray DPI frame %d", size)
 			}
 		}
+	}
+}
+
+func TestTrayTooltipUsesFriendlyNonJargonCopy(t *testing.T) {
+	running := map[string]any{"state": "running", "ok": true, "port": 30102}
+	stopped := map[string]any{"state": "stopped", "ok": true}
+	starting := map[string]any{"state": "starting", "ok": true}
+	conflict := map[string]any{"state": "conflict", "ok": true}
+
+	if got := describeTrayTooltip(running, running); got != "星序 · 运行正常" {
+		t.Fatalf("normal tooltip should be friendly without jargon, got %q", got)
+	}
+	if got := describeTrayTooltip(running, stopped); !strings.Contains(got, "界面已就绪") {
+		t.Fatalf("degraded tooltip unexpected: %q", got)
+	}
+	if got := describeTrayTooltip(starting, running); !strings.Contains(got, "正在启动") {
+		t.Fatalf("starting tooltip unexpected: %q", got)
+	}
+	if got := describeTrayTooltip(stopped, running); !strings.Contains(got, "后台任务持续运行") {
+		t.Fatalf("background daemon tooltip unexpected: %q", got)
+	}
+	if got := describeTrayTooltip(conflict, running); strings.Contains(got, "大内核") || strings.Contains(got, "状态冲突") {
+		t.Fatalf("conflict tooltip should avoid scary jargon, got %q", got)
+	}
+}
+
+func TestTrayPreservesSmallKernelUpdateMenuContract(t *testing.T) {
+	if trayDaemonServiceLabel != "小内核" {
+		t.Fatalf("AGENTS.md requires preserving 小内核 submenu label, got %q", trayDaemonServiceLabel)
+	}
+	if trayDaemonUpdateLabel != "更新小内核" {
+		t.Fatalf("AGENTS.md requires preserving 更新小内核 menu action, got %q", trayDaemonUpdateLabel)
+	}
+	if trayAppServiceLabel != "主服务" {
+		t.Fatalf("expected user-friendly 主服务 label for app service, got %q", trayAppServiceLabel)
+	}
+}
+
+func TestDescribeKernelFriendlyDetails(t *testing.T) {
+	gotRunning := describeKernel("主服务", map[string]any{"state": "running", "ok": true, "port": 30102})
+	if !strings.Contains(gotRunning.Detail, "正常工作中") || !strings.Contains(gotRunning.Detail, "30102") {
+		t.Fatalf("unexpected running detail: %q", gotRunning.Detail)
+	}
+	gotConflict := describeKernel("主服务", map[string]any{"state": "conflict", "ok": true})
+	if !strings.Contains(gotConflict.Detail, "打开设置") {
+		t.Fatalf("expected actionable conflict detail, got %q", gotConflict.Detail)
 	}
 }

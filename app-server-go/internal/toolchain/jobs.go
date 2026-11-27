@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -188,7 +187,7 @@ func (s *Service) StartInstallJob(ctx context.Context, req InstallRequest) (map[
 	go func() {
 		defer s.jobWG.Done()
 		defer cancel()
-		s.runInstallJob(jobCtx, job, env, target, targetOS, steps, req, extraEnv)
+		s.runInstallJob(jobCtx, job, env, target, targetOS, steps, req, effectiveNet, extraEnv)
 	}()
 
 	return job.Snapshot(), nil
@@ -202,9 +201,11 @@ func (s *Service) runInstallJob(
 	targetOS string,
 	steps []ToolSpec,
 	req InstallRequest,
+	effectiveNet NetworkProfile,
 	extraEnv map[string]string,
 ) {
 	success, failed := 0, 0
+	shouldReloadDaemon := false
 	for i, spec := range steps {
 		if ctx.Err() != nil {
 			break
@@ -223,12 +224,35 @@ func (s *Service) runInstallJob(
 			fmt.Fprintf(job, "[ERROR] %s: %s\n", spec.Name, err.Error())
 			continue
 		}
+
+		if isPortableBuiltinRecipe(recipe) {
+			if !env.IsLocal() {
+				failed++
+				fmt.Fprintf(job, "[ERROR] %s: 便携运行时方案仅支持本机环境\n", spec.Name)
+				continue
+			}
+			fmt.Fprintf(job, "[EXEC] 内置便携运行时下载并自解压 (%s)\n", recipe.ID)
+			installedExe, portableErr := s.InstallPortableRuntime(ctx, spec.ID, effectiveNet, job)
+			if ctx.Err() != nil {
+				break
+			}
+			if portableErr != nil {
+				failed++
+				fmt.Fprintf(job, "[ERROR] %s: %s\n", spec.Name, portableErr.Error())
+				continue
+			}
+			success++
+			shouldReloadDaemon = true
+			fmt.Fprintf(job, "[DONE] %s 便携运行时安装完成：%s\n", spec.Name, installedExe)
+			continue
+		}
+
 		fmt.Fprintf(job, "[EXEC] %s\n", recipe.Command)
 		if len(extraEnv) > 0 {
 			fmt.Fprintf(job, "[ENV] 已应用自定义网络/镜像环境变量\n")
 		}
 
-		code, runErr := executeRecipe(ctx, env, targetOS, recipe, extraEnv, job)
+		code, runErr := s.executeRecipe(ctx, env, targetOS, recipe, extraEnv, job)
 		if ctx.Err() != nil {
 			break
 		}
@@ -248,10 +272,25 @@ func (s *Service) runInstallJob(
 		// If a local agent was just installed and discovered, ensure session-daemon.json includes it.
 		if target.Kind == "local" && spec.Kind == ItemKindAgent && s.stateDir != "" {
 			if found, ok := s.locateBinary(ctx, env, spec); ok {
-				if changed, upsertErr := lifecycle.UpsertLocalRuntime(s.stateDir, s.defaultWorkspace, spec.ID, found); upsertErr == nil && changed {
-					fmt.Fprintf(job, "[INFO] 已将 %s (%s) 同步写入小内核配置 session-daemon.json\n", spec.Name, found)
+				if changed, upsertErr := lifecycle.UpsertLocalRuntime(s.stateDir, s.defaultWorkspace, spec.ID, found); upsertErr == nil {
+					if changed {
+						fmt.Fprintf(job, "[INFO] 已将 %s (%s) 同步写入小内核配置 session-daemon.json\n", spec.Name, found)
+					}
+					shouldReloadDaemon = true
 				}
 			}
+		}
+	}
+
+	// Trigger non-fatal hot reload of the local Session Daemon after installing runtimes/agents.
+	if ctx.Err() == nil && target.Kind == "local" && shouldReloadDaemon && (s.getDaemonClient() != nil || s.daemonReloader != nil) {
+		reloadCtx, cancelReload := context.WithTimeout(context.Background(), 8*time.Second)
+		reloadRes := s.tryReloadDaemonConfig(reloadCtx)
+		cancelReload()
+		if reloadRes.Reloaded {
+			fmt.Fprintf(job, "[INFO] %s\n", reloadRes.Detail)
+		} else if reloadRes.Detail != "" {
+			fmt.Fprintf(job, "[WARN] %s\n", reloadRes.Detail)
 		}
 	}
 
@@ -323,6 +362,8 @@ func buildInstallEnv(proxyURL, mirror string) (map[string]string, error) {
 		case "cn", "china":
 			out["NPM_CONFIG_REGISTRY"] = "https://registry.npmmirror.com"
 			out["UV_DEFAULT_INDEX"] = "https://pypi.tuna.tsinghua.edu.cn/simple"
+		case "official", "global", "direct":
+			// Use official upstream registries/mirrors without overriding.
 		default:
 			parsed, err := url.Parse(m)
 			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -335,7 +376,7 @@ func buildInstallEnv(proxyURL, mirror string) (map[string]string, error) {
 	return out, nil
 }
 
-func executeRecipe(ctx context.Context, env envtarget.Env, targetOS string, recipe InstallRecipe, extraEnv map[string]string, output io.Writer) (int, error) {
+func (s *Service) executeRecipe(ctx context.Context, env envtarget.Env, targetOS string, recipe InstallRecipe, extraEnv map[string]string, output io.Writer) (int, error) {
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
@@ -346,10 +387,8 @@ func executeRecipe(ctx context.Context, env envtarget.Env, targetOS string, reci
 		} else {
 			cmd = exec.CommandContext(runCtx, "/bin/sh", "-lc", recipe.Command)
 		}
-		cmd.Env = os.Environ()
-		for k, v := range extraEnv {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
+		configureHiddenCmd(cmd)
+		cmd.Env = s.localChildEnv(extraEnv)
 		cmd.Stdout = output
 		cmd.Stderr = output
 		cmd.WaitDelay = 3 * time.Second

@@ -1,9 +1,11 @@
 package toolchain
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -24,25 +26,38 @@ import (
 var semverRE = regexp.MustCompile(`v?[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[A-Za-z0-9._+-]*)`)
 
 type Options struct {
-	Resolver         *envtarget.Resolver
-	Store            *store.Store
-	DaemonClient     *daemonclient.Client
-	StateDir         string
-	DefaultWorkspace string
+	Resolver           *envtarget.Resolver
+	Store              *store.Store
+	DaemonClient       *daemonclient.Client
+	DaemonReloader     DaemonReloader
+	StateDir           string
+	DataDir            string
+	DefaultWorkspace   string
+	OnboardingInjector OnboardingCapabilitiesInjector
+	HTTPClient         *http.Client
+	BrowserOpener      func(string) error
 }
 
 type Service struct {
-	resolver         *envtarget.Resolver
-	store            *store.Store
-	daemon           *daemonclient.Client
-	stateDir         string
-	defaultWorkspace string
+	resolver           *envtarget.Resolver
+	store              *store.Store
+	daemonMu           sync.RWMutex
+	daemon             *daemonclient.Client
+	daemonReloader     DaemonReloader
+	stateDir           string
+	dataDir            string
+	defaultWorkspace   string
+	onboardingInjector OnboardingCapabilitiesInjector
+	httpClient         *http.Client
+	browserOpener      func(string) error
 
-	jobMu      sync.Mutex
-	jobs       map[string]*InstallJob
-	jobContext context.Context
-	jobCancel  context.CancelFunc
-	jobWG      sync.WaitGroup
+	jobMu         sync.Mutex
+	jobs          map[string]*InstallJob
+	oauthMu       sync.Mutex
+	oauthSessions map[string]*oauthSession
+	jobContext    context.Context
+	jobCancel     context.CancelFunc
+	jobWG         sync.WaitGroup
 }
 
 func NewService(opts Options) *Service {
@@ -52,14 +67,20 @@ func NewService(opts Options) *Service {
 		resolver = &envtarget.Resolver{Store: opts.Store}
 	}
 	return &Service{
-		resolver:         resolver,
-		store:            opts.Store,
-		daemon:           opts.DaemonClient,
-		stateDir:         opts.StateDir,
-		defaultWorkspace: opts.DefaultWorkspace,
-		jobs:             map[string]*InstallJob{},
-		jobContext:       ctx,
-		jobCancel:        cancel,
+		resolver:           resolver,
+		store:              opts.Store,
+		daemon:             opts.DaemonClient,
+		daemonReloader:     opts.DaemonReloader,
+		stateDir:           opts.StateDir,
+		dataDir:            opts.DataDir,
+		defaultWorkspace:   opts.DefaultWorkspace,
+		onboardingInjector: opts.OnboardingInjector,
+		httpClient:         opts.HTTPClient,
+		browserOpener:      opts.BrowserOpener,
+		jobs:               map[string]*InstallJob{},
+		oauthSessions:      map[string]*oauthSession{},
+		jobContext:         ctx,
+		jobCancel:          cancel,
 	}
 }
 
@@ -126,6 +147,7 @@ type ValidateResult struct {
 
 type SaveExecutableResult struct {
 	Saved                 bool       `json:"saved"`
+	DaemonReloaded        bool       `json:"daemon_reloaded,omitempty"`
 	RequiresDaemonRestart bool       `json:"requires_daemon_restart"`
 	Message               string     `json:"message"`
 	Item                  ToolStatus `json:"item"`
@@ -169,6 +191,11 @@ func (s *Service) Inspect(ctx context.Context, envID string) (EnvironmentReport,
 		}
 	}
 
+	localPath := ""
+	if env.IsLocal() {
+		localPath = s.refreshedLocalPath()
+	}
+
 	specs := Catalog()
 	items := make([]ToolStatus, len(specs))
 	var wg sync.WaitGroup
@@ -176,7 +203,7 @@ func (s *Service) Inspect(ctx context.Context, envID string) (EnvironmentReport,
 		wg.Add(1)
 		go func(idx int, sp ToolSpec) {
 			defer wg.Done()
-			items[idx] = s.inspectOne(ctx, env, target, targetOS, sp, sshConn, daemonRegistered, envPaths, pathsErr == nil, authFiles)
+			items[idx] = s.inspectOne(ctx, env, target, targetOS, sp, sshConn, daemonRegistered, envPaths, pathsErr == nil, authFiles, localPath)
 		}(i, spec)
 	}
 	wg.Wait()
@@ -209,6 +236,55 @@ func (s *Service) Inspect(ctx context.Context, envID string) (EnvironmentReport,
 	}, nil
 }
 
+// inspectSingleTool refreshes status for one specific tool/agent without running
+// --version probes across every unrelated tool in the catalog.
+func (s *Service) inspectSingleTool(ctx context.Context, env envtarget.Env, spec ToolSpec) ToolStatus {
+	target := env.Target()
+	targetOS, _ := s.detectPlatform(ctx, env)
+	daemonRegistered := s.readDaemonRegistered(ctx, target.Kind == "local")
+
+	var sshConn map[string]any
+	if target.Kind == "ssh" && s.store != nil && target.ConnectionID != "" {
+		sshConn, _ = s.store.GetSSHConnection(ctx, target.ConnectionID)
+	}
+
+	envPaths, pathsErr := env.Paths(ctx)
+	authFiles := map[string][]byte{}
+	if pathsErr == nil && spec.Kind == ItemKindAgent {
+		if engine, ok := LookupAgentEngine(spec.ID); ok {
+			if base := agentHomeForEngine(envPaths, engine.HomeField); base != "" {
+				var wanted []string
+				for _, rel := range engine.AuthFiles {
+					wanted = append(wanted, path.Clean(base+"/"+rel))
+				}
+				if len(wanted) > 0 {
+					if loaded, err := env.ReadMany(ctx, wanted); err == nil {
+						authFiles = loaded
+					}
+				}
+			}
+		}
+	}
+
+	localPath := ""
+	if env.IsLocal() {
+		localPath = s.refreshedLocalPath()
+	}
+	status := s.inspectOne(ctx, env, target, targetOS, spec, sshConn, daemonRegistered, envPaths, pathsErr == nil, authFiles, localPath)
+	if len(status.Dependencies) > 0 {
+		var missing []string
+		for _, depID := range status.Dependencies {
+			if depSpec, ok := LookupSpec(depID); ok {
+				if _, found := s.locateBinary(ctx, env, depSpec); !found {
+					missing = append(missing, depID)
+				}
+			}
+		}
+		status.MissingDependencies = missing
+	}
+	return status
+}
+
 func (s *Service) inspectOne(
 	ctx context.Context,
 	env envtarget.Env,
@@ -220,6 +296,7 @@ func (s *Service) inspectOne(
 	envPaths envtarget.Paths,
 	hasEnvPaths bool,
 	authFiles map[string][]byte,
+	localPath string,
 ) ToolStatus {
 	status := ToolStatus{
 		ID:           spec.ID,
@@ -243,9 +320,17 @@ func (s *Service) inspectOne(
 	var version string
 	inPath := false
 
-	// Check whether any declared binary is already reachable on PATH.
+	// Check whether any declared binary is already reachable on the live refreshed PATH.
 	for _, bin := range spec.Binaries {
-		if found, ok := env.Which(ctx, bin); ok && strings.TrimSpace(found) != "" {
+		found := ""
+		ok := false
+		if env.IsLocal() && localPath != "" {
+			found, ok = LookPathInPath(bin, localPath)
+		}
+		if !ok {
+			found, ok = env.Which(ctx, bin)
+		}
+		if ok && strings.TrimSpace(found) != "" {
 			inPath = true
 			if customPath == "" {
 				res := s.probeCandidate(ctx, env, spec, strings.TrimSpace(found))
@@ -439,12 +524,13 @@ func (s *Service) detectPlatform(ctx context.Context, env envtarget.Env) (string
 
 func (s *Service) readDaemonRegistered(ctx context.Context, isLocal bool) map[string]bool {
 	registered := map[string]bool{}
-	if !isLocal || s.daemon == nil {
+	daemon := s.getDaemonClient()
+	if !isLocal || daemon == nil {
 		return registered
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	status, err := s.daemon.Daemon.GetStatus(probeCtx, &sessiondv1.GetStatusRequest{})
+	status, err := daemon.Daemon.GetStatus(probeCtx, &sessiondv1.GetStatusRequest{})
 	if err != nil || status == nil {
 		return registered
 	}
@@ -493,20 +579,31 @@ func (s *Service) locateBinary(ctx context.Context, env envtarget.Env, spec Tool
 	if len(spec.Binaries) == 0 {
 		return "", false
 	}
-	for _, bin := range spec.Binaries {
-		if found, ok := env.Which(ctx, bin); ok && strings.TrimSpace(found) != "" {
-			return strings.TrimSpace(found), true
-		}
-	}
 	if env.IsLocal() {
+		refreshedPath := s.refreshedLocalPath()
 		for _, bin := range spec.Binaries {
-			for _, candidate := range localExtraCandidates(bin) {
-				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			if found, ok := LookPathInPath(bin, refreshedPath); ok && strings.TrimSpace(found) != "" {
+				return strings.TrimSpace(found), true
+			}
+		}
+		for _, bin := range spec.Binaries {
+			if found, ok := env.Which(ctx, bin); ok && strings.TrimSpace(found) != "" {
+				return strings.TrimSpace(found), true
+			}
+		}
+		for _, bin := range spec.Binaries {
+			for _, candidate := range localExtraCandidates(bin, s.runtimesRoot()) {
+				if isExecutableFile(candidate) {
 					return candidate, true
 				}
 			}
 		}
 		return "", false
+	}
+	for _, bin := range spec.Binaries {
+		if found, ok := env.Which(ctx, bin); ok && strings.TrimSpace(found) != "" {
+			return strings.TrimSpace(found), true
+		}
 	}
 	// Remote Linux/WSL: search common user-space bin directories too.
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -529,7 +626,7 @@ exit 1`
 	return "", false
 }
 
-func localExtraCandidates(binary string) []string {
+func localExtraCandidates(binary, runtimesRoot string) []string {
 	var out []string
 	home, _ := os.UserHomeDir()
 	localAppData := os.Getenv("LOCALAPPDATA")
@@ -542,6 +639,9 @@ func localExtraCandidates(binary string) []string {
 		names = []string{binary + ".exe", binary + ".cmd", binary + ".bat"}
 	}
 	var dirs []string
+	if managed := ManagedRuntimeBinDirs(runtimesRoot); len(managed) > 0 {
+		dirs = append(dirs, managed...)
+	}
 	if home != "" {
 		dirs = append(dirs,
 			filepath.Join(home, ".local", "bin"),
@@ -557,6 +657,7 @@ func localExtraCandidates(binary string) []string {
 			dirs = append(dirs,
 				filepath.Join(localAppData, "agy", "bin"),
 				filepath.Join(localAppData, "hermes", "bin"),
+				filepath.Join(localAppData, "hermes", "hermes-agent", "venv", "Scripts"),
 				filepath.Join(localAppData, "Programs", "nodejs"),
 				filepath.Join(localAppData, "Programs", "Git", "cmd"),
 			)
@@ -602,7 +703,9 @@ func (s *Service) probeCandidate(ctx context.Context, env envtarget.Env, spec To
 	if env.IsLocal() {
 		resolved := candidate
 		if !filepath.IsAbs(resolved) && !strings.ContainsAny(resolved, `/\`) {
-			if found, err := exec.LookPath(resolved); err == nil {
+			if found, ok := LookPathInPath(resolved, s.refreshedLocalPath()); ok {
+				resolved = found
+			} else if found, err := exec.LookPath(resolved); err == nil {
 				resolved = found
 			}
 		}
@@ -616,13 +719,28 @@ func (s *Service) probeCandidate(ctx context.Context, env envtarget.Env, spec To
 		if info.IsDir() {
 			return ValidateResult{Valid: false, Error: "所选路径是目录，请选择具体可执行文件"}
 		}
-		res, runErr := env.Run(probeCtx, envtarget.Command{Name: resolved, Args: spec.VersionArgs})
-		output := res.Output()
+		cmd := exec.CommandContext(probeCtx, resolved, spec.VersionArgs...)
+		configureHiddenCmd(cmd)
+		cmd.Env = s.localChildEnv(nil)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr := cmd.Run()
+		output := strings.TrimSpace(stdout.String())
+		if output == "" {
+			output = strings.TrimSpace(stderr.String())
+		}
+		exitCode := 0
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+			runErr = nil
+		}
 		if runErr != nil && output == "" {
 			return ValidateResult{Valid: false, ResolvedPath: resolved, Error: "无法执行该文件：" + runErr.Error()}
 		}
-		if res.Code != 0 && output == "" {
-			return ValidateResult{Valid: false, ResolvedPath: resolved, Error: fmt.Sprintf("执行校验退出码 %d", res.Code)}
+		if exitCode != 0 && output == "" {
+			return ValidateResult{Valid: false, ResolvedPath: resolved, Error: fmt.Sprintf("执行校验退出码 %d", exitCode)}
 		}
 		return ValidateResult{
 			Valid:        true,
@@ -706,6 +824,7 @@ func (s *Service) SaveExecutable(ctx context.Context, envID, toolID, rawPath str
 	}
 
 	requiresRestart := false
+	daemonReloaded := false
 	message := "已保存可执行文件路径"
 
 	if target.Kind == "ssh" && spec.Kind == ItemKindAgent {
@@ -747,8 +866,19 @@ func (s *Service) SaveExecutable(ctx context.Context, envID, toolID, rawPath str
 			}
 			daemonReg := s.readDaemonRegistered(ctx, true)
 			if changed || !daemonReg[spec.ID] {
-				requiresRestart = true
-				message = "已保存路径并同步写入小内核启动配置；重载小内核后新路径生效"
+				reloadRes := s.tryReloadDaemonConfig(ctx)
+				if reloadRes.Reloaded {
+					daemonReloaded = true
+					requiresRestart = false
+					message = "已保存路径并自动热重载小内核，新路径立即生效"
+				} else {
+					requiresRestart = true
+					if reloadRes.Detail != "" {
+						message = "已保存路径并同步写入小内核配置；" + reloadRes.Detail
+					} else {
+						message = "已保存路径并同步写入小内核启动配置；重载小内核后新路径生效"
+					}
+				}
 			} else {
 				message = "已保存本机 Agent 路径"
 			}
@@ -762,22 +892,15 @@ func (s *Service) SaveExecutable(ctx context.Context, envID, toolID, rawPath str
 		}
 	}
 
-	report, err := s.Inspect(ctx, envID)
-	if err != nil {
-		return SaveExecutableResult{}, err
-	}
-	var updated ToolStatus
-	for _, item := range report.Items {
-		if item.ID == spec.ID {
-			updated = item
-			break
-		}
-	}
+	updated := s.inspectSingleTool(ctx, env, spec)
 	if requiresRestart {
 		updated.RequiresDaemonRestart = true
+	} else if daemonReloaded {
+		updated.RequiresDaemonRestart = false
 	}
 	return SaveExecutableResult{
 		Saved:                 true,
+		DaemonReloaded:        daemonReloaded,
 		RequiresDaemonRestart: requiresRestart,
 		Message:               message,
 		Item:                  updated,
@@ -786,7 +909,13 @@ func (s *Service) SaveExecutable(ctx context.Context, envID, toolID, rawPath str
 
 // LocalInstalledProbe returns a quick check function for agent plugin defaults bootstrap.
 func LocalInstalledProbe(ctx context.Context) func(kind string) bool {
-	svc := NewService(Options{})
+	return LocalInstalledProbeWithDirs(ctx, "", "")
+}
+
+// LocalInstalledProbeWithDirs returns a quick check function that also includes
+// Astrorder-managed portable runtimes under dataDir/stateDir and live PATH.
+func LocalInstalledProbeWithDirs(ctx context.Context, dataDir, stateDir string) func(kind string) bool {
+	svc := NewService(Options{DataDir: dataDir, StateDir: stateDir})
 	env, err := svc.resolver.Open(ctx, "local")
 	if err != nil {
 		return func(string) bool { return false }

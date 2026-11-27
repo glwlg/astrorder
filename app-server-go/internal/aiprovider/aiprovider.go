@@ -36,10 +36,12 @@ const (
 type Provider struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
-	Protocol        string            `json:"protocol"`                   // "openai" | "gemini"
+	Protocol        string            `json:"protocol"`                   // "openai" | "gemini" | "agent"
 	Vendor          string            `json:"vendor,omitempty"`           // "" | "magpie" | "opencodex"
-	BaseURL         string            `json:"base_url"`                   // Inference Base URL
+	BaseURL         string            `json:"base_url"`                   // Inference Base URL (empty for protocol="agent")
 	APIKey          string            `json:"api_key,omitempty"`          // Secret (masked in PublicProvider)
+	AgentID         string            `json:"agent_id,omitempty"`         // Target Agent ID when protocol="agent"
+	AgentKind       string            `json:"agent_kind,omitempty"`       // Target Agent kind (codex/antigravity/hermes/grok)
 	Models          []string          `json:"models,omitempty"`           // Cached fetched/custom model IDs
 	Enabled         bool              `json:"enabled"`                    // Selectable across features
 	ManagementURL   string            `json:"management_url,omitempty"`   // Magpie / OpenCodeX extra API
@@ -57,6 +59,8 @@ type PublicProvider struct {
 	BaseURL             string            `json:"base_url"`
 	APIKeySet           bool              `json:"api_key_set"`
 	MaskedKey           string            `json:"masked_key,omitempty"`
+	AgentID             string            `json:"agent_id,omitempty"`
+	AgentKind           string            `json:"agent_kind,omitempty"`
 	Models              []string          `json:"models"`
 	Enabled             bool              `json:"enabled"`
 	ManagementURL       string            `json:"management_url,omitempty"`
@@ -94,6 +98,8 @@ type ProviderPatch struct {
 	BaseURL            string            `json:"base_url"`
 	APIKey             *string           `json:"api_key,omitempty"`
 	ClearAPIKey        bool              `json:"clear_api_key,omitempty"`
+	AgentID            string            `json:"agent_id,omitempty"`
+	AgentKind          string            `json:"agent_kind,omitempty"`
 	Models             []string          `json:"models,omitempty"`
 	Enabled            *bool             `json:"enabled,omitempty"`
 	ManagementURL      string            `json:"management_url,omitempty"`
@@ -113,8 +119,33 @@ type ResolvedModel struct {
 	Vendor       string
 	BaseURL      string
 	APIKey       string
+	AgentID      string
+	AgentKind    string
 	Model        string
 	Reasoning    string
+}
+
+// IsConfigured reports whether this resolved model can execute completions (either via
+// an API-key HTTP provider or via a connected Agent runtime).
+func (r ResolvedModel) IsConfigured() bool {
+	if llmcompat.NormalizeProtocol(r.Protocol) == llmcompat.ProtocolAgent {
+		return strings.TrimSpace(r.AgentID) != ""
+	}
+	return strings.TrimSpace(r.BaseURL) != "" && strings.TrimSpace(r.APIKey) != ""
+}
+
+// ToChatRequest converts a ResolvedModel into a protocol-neutral llmcompat.ChatRequest.
+func (r ResolvedModel) ToChatRequest(maxTokens int, messages []llmcompat.ChatMessage) llmcompat.ChatRequest {
+	return llmcompat.ChatRequest{
+		Protocol:  llmcompat.NormalizeProtocol(r.Protocol),
+		BaseURL:   strings.TrimRight(strings.TrimSpace(r.BaseURL), "/"),
+		APIKey:    strings.TrimSpace(r.APIKey),
+		AgentID:   strings.TrimSpace(r.AgentID),
+		Model:     strings.TrimSpace(r.Model),
+		Reasoning: strings.TrimSpace(r.Reasoning),
+		MaxTokens: maxTokens,
+		Messages:  messages,
+	}
 }
 
 func randomID(prefix string) string {
@@ -265,6 +296,8 @@ func normalizeConfig(cfg Config) Config {
 			Vendor:          vendor,
 			BaseURL:         base,
 			APIKey:          strings.TrimSpace(p.APIKey),
+			AgentID:         strings.TrimSpace(p.AgentID),
+			AgentKind:       strings.TrimSpace(p.AgentKind),
 			Models:          models,
 			Enabled:         p.Enabled,
 			ManagementURL:   strings.TrimRight(strings.TrimSpace(p.ManagementURL), "/"),
@@ -288,7 +321,7 @@ func normalizeConfig(cfg Config) Config {
 	if !defaultExists {
 		out.DefaultProviderID = ""
 		for _, p := range out.Providers {
-			if p.Enabled && p.APIKey != "" {
+			if p.Enabled && (p.APIKey != "" || (p.Protocol == llmcompat.ProtocolAgent && p.AgentID != "")) {
 				out.DefaultProviderID = p.ID
 				if out.DefaultModel == "" && len(p.Models) > 0 {
 					out.DefaultModel = p.Models[0]
@@ -327,6 +360,8 @@ func (c Config) ToPublic() PublicConfig {
 			BaseURL:             p.BaseURL,
 			APIKeySet:           p.APIKey != "",
 			MaskedKey:           MaskSecret(p.APIKey),
+			AgentID:             p.AgentID,
+			AgentKind:           p.AgentKind,
 			Models:              models,
 			Enabled:             p.Enabled,
 			ManagementURL:       p.ManagementURL,
@@ -341,15 +376,80 @@ func (c Config) ToPublic() PublicConfig {
 			if pub.EffectiveModel == "" && len(p.Models) > 0 {
 				pub.EffectiveModel = p.Models[0]
 			}
-			pub.EffectiveConfigured = p.Enabled && p.BaseURL != "" && p.APIKey != "" && pub.EffectiveModel != ""
+			if p.Protocol == llmcompat.ProtocolAgent {
+				pub.EffectiveConfigured = p.Enabled && p.AgentID != ""
+			} else {
+				pub.EffectiveConfigured = p.Enabled && p.BaseURL != "" && p.APIKey != "" && pub.EffectiveModel != ""
+			}
 		}
 	}
 	return pub
 }
 
+func decodeStoredConfig(st *store.Store, val any) (Config, bool, bool, error) {
+	if val == nil {
+		return Config{}, false, false, nil
+	}
+	raw, err := json.Marshal(val)
+	if err != nil {
+		return Config{}, false, false, nil
+	}
+	var saved Config
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		return Config{}, false, false, nil
+	}
+	decrypted, needsMigration, err := decryptConfigFromStorage(st, saved)
+	if err != nil {
+		return Config{}, true, false, err
+	}
+	return decrypted, true, needsMigration, nil
+}
+
+func persistEncryptedConfig(ctx context.Context, st *store.Store, cfg Config) error {
+	norm := normalizeConfig(cfg)
+	encrypted, err := encryptConfigForStorage(st, norm)
+	if err != nil {
+		return err
+	}
+	return st.SetPreference(ctx, PrefAIProviders, encrypted, true)
+}
+
+func migratePlaintextConfigLocked(ctx context.Context, st *store.Store) (Config, bool, bool, error) {
+	seedMu.Lock()
+	defer seedMu.Unlock()
+
+	pref, err := st.GetPreference(ctx, PrefAIProviders)
+	if err != nil || !pref.Exists || pref.Value == nil {
+		return Config{}, false, false, err
+	}
+	cfg, parsed, stillNeeds, decErr := decodeStoredConfig(st, pref.Value)
+	if decErr != nil {
+		return Config{}, false, false, decErr
+	}
+	if !parsed || !stillNeeds {
+		return cfg, parsed, false, nil
+	}
+	if err := persistEncryptedConfig(ctx, st, cfg); err != nil {
+		return cfg, true, false, err
+	}
+	return cfg, true, true, nil
+}
+
+// MigratePlaintextSecrets encrypts any legacy plaintext APIKey/ManagementKey entries
+// stored in services:ai_providers in-place. It is safe to call repeatedly.
+func MigratePlaintextSecrets(ctx context.Context, st *store.Store) (bool, error) {
+	if st == nil {
+		return false, nil
+	}
+	_, _, migrated, err := migratePlaintextConfigLocked(ctx, st)
+	return migrated, err
+}
+
 // LoadConfig loads the unified AI providers config, automatically seeding and
 // persisting from legacy services:llm, analytics:llm_gateway (Magpie/OpenCodeX),
 // and custom meetings:settings if services:ai_providers has not been saved yet.
+// Legacy plaintext keys in services:ai_providers are read transparently and
+// lazily migrated to AES-256-GCM ciphertext in-place.
 func LoadConfig(ctx context.Context, st *store.Store) (Config, error) {
 	if st == nil {
 		return Config{Providers: []Provider{}, DefaultReasoning: "low"}, nil
@@ -359,12 +459,17 @@ func LoadConfig(ctx context.Context, st *store.Store) (Config, error) {
 		return Config{Providers: []Provider{}, DefaultReasoning: "low"}, err
 	}
 	if pref.Exists && pref.Value != nil {
-		raw, mErr := json.Marshal(pref.Value)
-		if mErr == nil {
-			var saved Config
-			if json.Unmarshal(raw, &saved) == nil {
-				return normalizeConfig(saved), nil
+		cfg, parsed, needsMigration, decErr := decodeStoredConfig(st, pref.Value)
+		if decErr != nil {
+			return Config{Providers: []Provider{}, DefaultReasoning: "low"}, decErr
+		}
+		if parsed {
+			if needsMigration {
+				if migratedCfg, valid, _, mErr := migratePlaintextConfigLocked(ctx, st); mErr == nil && valid {
+					return migratedCfg, nil
+				}
 			}
+			return cfg, nil
 		}
 	}
 
@@ -373,19 +478,24 @@ func LoadConfig(ctx context.Context, st *store.Store) (Config, error) {
 
 	// Re-check after acquiring lock in case a concurrent caller already persisted.
 	if pref2, err2 := st.GetPreference(ctx, PrefAIProviders); err2 == nil && pref2.Exists && pref2.Value != nil {
-		if raw, mErr := json.Marshal(pref2.Value); mErr == nil {
-			var saved Config
-			if json.Unmarshal(raw, &saved) == nil {
-				return normalizeConfig(saved), nil
+		cfg, parsed, needsMigration, decErr := decodeStoredConfig(st, pref2.Value)
+		if decErr != nil {
+			return Config{Providers: []Provider{}, DefaultReasoning: "low"}, decErr
+		}
+		if parsed {
+			if needsMigration {
+				_ = persistEncryptedConfig(ctx, st, cfg)
 			}
+			return cfg, nil
 		}
 	}
 
 	seeded := seedFromLegacySources(ctx, st)
 	if len(seeded.Providers) > 0 {
-		// Persist immediately so subsequent mutations to legacy preferences (such as
-		// switching meetings:settings from "custom" to "provider") never drop migrated providers.
-		_ = st.SetPreference(ctx, PrefAIProviders, seeded, true)
+		// Persist immediately (encrypted) so subsequent mutations to legacy preferences
+		// (such as switching meetings:settings from "custom" to "provider") never drop
+		// migrated providers.
+		_ = persistEncryptedConfig(ctx, st, seeded)
 	}
 	return seeded, nil
 }
@@ -562,14 +672,15 @@ func strVal(m map[string]any, key string) string {
 	return ""
 }
 
-// SaveConfig persists services:ai_providers and keeps legacy services:llm and
-// modelgateway (for Magpie / OpenCodeX vendors) synchronized.
+// SaveConfig persists services:ai_providers (with APIKey and ManagementKey encrypted
+// at rest) and keeps legacy services:llm and modelgateway (for Magpie / OpenCodeX
+// vendors) synchronized.
 func SaveConfig(ctx context.Context, st *store.Store, cfg Config) (Config, error) {
 	if st == nil {
 		return Config{}, errors.New("store unavailable")
 	}
 	norm := normalizeConfig(cfg)
-	if err := st.SetPreference(ctx, PrefAIProviders, norm, true); err != nil {
+	if err := persistEncryptedConfig(ctx, st, norm); err != nil {
 		return Config{}, err
 	}
 	syncDefaultToLegacyLLM(ctx, st, norm)
@@ -690,9 +801,20 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 
 	proto := llmcompat.NormalizeProtocol(patch.Protocol)
 	vendor := NormalizeVendor(proto, patch.Vendor)
-	baseURL, err := validateHTTPURL(patch.BaseURL, "接口地址 (Base URL)")
-	if err != nil {
-		return Config{}, Provider{}, err
+	agentID := strings.TrimSpace(patch.AgentID)
+	agentKind := strings.TrimSpace(patch.AgentKind)
+	baseURL := ""
+	if proto == llmcompat.ProtocolAgent {
+		if agentID == "" {
+			return Config{}, Provider{}, errors.New("请先选择要对接的 Agent")
+		}
+		vendor = VendorStandard
+	} else {
+		var uErr error
+		baseURL, uErr = validateHTTPURL(patch.BaseURL, "接口地址 (Base URL)")
+		if uErr != nil {
+			return Config{}, Provider{}, uErr
+		}
 	}
 
 	mgmtURL := strings.TrimSpace(patch.ManagementURL)
@@ -708,13 +830,30 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 
 	name := strings.TrimSpace(patch.Name)
 	if name == "" {
-		name = inferProviderName(baseURL, proto, vendor)
+		if proto == llmcompat.ProtocolAgent {
+			if agentKind != "" {
+				name = "Agent 直连 · " + agentKind
+			} else {
+				name = "Agent 直连 · " + agentID
+			}
+		} else {
+			name = inferProviderName(baseURL, proto, vendor)
+		}
 	}
 
 	idx := -1
 	if id := strings.TrimSpace(patch.ID); id != "" {
 		for i := range cfg.Providers {
 			if cfg.Providers[i].ID == id {
+				idx = i
+				break
+			}
+		}
+	}
+	// Deduplicate agent-backed providers by AgentID when creating without an explicit ID.
+	if idx < 0 && proto == llmcompat.ProtocolAgent && agentID != "" {
+		for i := range cfg.Providers {
+			if cfg.Providers[i].Protocol == llmcompat.ProtocolAgent && cfg.Providers[i].AgentID == agentID {
 				idx = i
 				break
 			}
@@ -729,6 +868,8 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 		next.Protocol = proto
 		next.Vendor = vendor
 		next.BaseURL = baseURL
+		next.AgentID = agentID
+		next.AgentKind = agentKind
 		next.ManagementURL = mgmtURL
 		if patch.StatisticsURL != "" {
 			next.StatisticsURL = strings.TrimSpace(patch.StatisticsURL)
@@ -742,7 +883,7 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 		if patch.Enabled != nil {
 			next.Enabled = *patch.Enabled
 		}
-		if patch.ClearAPIKey {
+		if patch.ClearAPIKey || proto == llmcompat.ProtocolAgent {
 			next.APIKey = ""
 		} else if patch.APIKey != nil && strings.TrimSpace(*patch.APIKey) != "" {
 			next.APIKey = strings.TrimSpace(*patch.APIKey)
@@ -763,7 +904,7 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 			enabled = *patch.Enabled
 		}
 		apiKey := ""
-		if patch.APIKey != nil {
+		if proto != llmcompat.ProtocolAgent && patch.APIKey != nil {
 			apiKey = strings.TrimSpace(*patch.APIKey)
 		}
 		mgmtKey := ""
@@ -777,6 +918,8 @@ func UpsertProvider(ctx context.Context, st *store.Store, patch ProviderPatch) (
 			Vendor:          vendor,
 			BaseURL:         baseURL,
 			APIKey:          apiKey,
+			AgentID:         agentID,
+			AgentKind:       agentKind,
 			Models:          cleanModels(patch.Models),
 			Enabled:         enabled,
 			ManagementURL:   mgmtURL,
@@ -970,6 +1113,8 @@ func resolveFromConfig(cfg Config, providerID, modelOverride string) (ResolvedMo
 			Vendor:       p.Vendor,
 			BaseURL:      p.BaseURL,
 			APIKey:       p.APIKey,
+			AgentID:      p.AgentID,
+			AgentKind:    p.AgentKind,
 			Model:        model,
 			Reasoning:    NormalizeReasoning(cfg.DefaultReasoning),
 		}, true
@@ -1048,7 +1193,7 @@ func SyncFromModelGateway(ctx context.Context, st *store.Store, gw modelgateway.
 		})
 	}
 	norm := normalizeConfig(cfg)
-	return st.SetPreference(ctx, PrefAIProviders, norm, true)
+	return persistEncryptedConfig(ctx, st, norm)
 }
 
 // SyncFromLegacyLLM keeps services:ai_providers in sync if legacy /api/v1/services/llm/config is called.
@@ -1101,5 +1246,5 @@ func SyncFromLegacyLLM(ctx context.Context, st *store.Store, llm map[string]stri
 		cfg.DefaultProviderID = p.ID
 	}
 	norm := normalizeConfig(cfg)
-	return st.SetPreference(ctx, PrefAIProviders, norm, true)
+	return persistEncryptedConfig(ctx, st, norm)
 }

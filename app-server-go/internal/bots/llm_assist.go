@@ -14,20 +14,20 @@ import (
 
 var skillPathPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_-])skills[/\\]([a-z0-9][a-z0-9_-]{1,63})[/\\]SKILL\.md`)
 
-func (s *Service) resolveLLM(ctx context.Context, providerID, model string) (protocol, baseURL, apiKey, resolvedModel, reasoning string) {
+func (s *Service) resolveLLM(ctx context.Context, providerID, model string) aiprovider.ResolvedModel {
 	if s.options.Store == nil {
-		return "", "", "", "", ""
+		return aiprovider.ResolvedModel{}
 	}
 	if strings.TrimSpace(providerID) != "" {
 		if cfg, ok := aiprovider.Resolve(ctx, s.options.Store, providerID, model); ok {
-			return cfg.Protocol, cfg.BaseURL, cfg.APIKey, cfg.Model, cfg.Reasoning
+			return cfg
 		}
 	}
 	cfg := aiprovider.ResolveDefault(ctx, s.options.Store)
 	if strings.TrimSpace(model) != "" {
 		cfg.Model = strings.TrimSpace(model)
 	}
-	return cfg.Protocol, cfg.BaseURL, cfg.APIKey, cfg.Model, cfg.Reasoning
+	return cfg
 }
 
 // Optimize transforms plain-language basic settings into a structured AGENTS.md constitution.
@@ -55,18 +55,18 @@ func (s *Service) Optimize(ctx context.Context, req OptimizeRequest) (*OptimizeR
 	}
 	fallbackMD := buildTemplateAgentsMD(name, fallbackDesc, instructions, req.ExistingAgentsMD)
 
-	protocol, baseURL, apiKey, model, reasoning := s.resolveLLM(ctx, req.ProviderID, req.Model)
-	llmConfigured := strings.TrimSpace(apiKey) != ""
+	llmCfg := s.resolveLLM(ctx, req.ProviderID, req.Model)
+	llmConfigured := llmCfg.IsConfigured()
 	if strings.EqualFold(strings.TrimSpace(req.Mode), "template") || !llmConfigured {
 		msg := ""
 		if !llmConfigured {
-			msg = "未配置辅助 AI 模型 API Key，已使用结构化专业模板生成 AGENTS.md，可直接编辑保存。"
+			msg = "未配置通用 AI 模型（可在设置中选择已接入 Agent 或填写 API Key），已使用结构化专业模板生成 AGENTS.md，可直接编辑保存。"
 		}
 		return &OptimizeResponse{
 			OK:                   true,
 			Mode:                 "template",
 			LLMConfigured:        llmConfigured,
-			Model:                model,
+			Model:                llmCfg.Model,
 			SuggestedName:        name,
 			SuggestedSlug:        fallbackSlug,
 			SuggestedDescription: fallbackDesc,
@@ -111,18 +111,10 @@ AGENTS.md 编写规范：
 
 	callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	res, err := llmcompat.CompleteChat(callCtx, s.httpClient, llmcompat.ChatRequest{
-		Protocol:  protocol,
-		BaseURL:   baseURL,
-		APIKey:    apiKey,
-		Model:     model,
-		Reasoning: reasoning,
-		MaxTokens: 3200,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userBuf.String()},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, s.httpClient, llmCfg.ToChatRequest(3200, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userBuf.String()},
+	}))
 	if err != nil || res.Status >= 400 || strings.TrimSpace(res.Content) == "" {
 		errHint := "调用辅助 AI 模型失败，已回退为结构化模板。"
 		if err != nil {
@@ -134,7 +126,7 @@ AGENTS.md 编写规范：
 			OK:                   true,
 			Mode:                 "template",
 			LLMConfigured:        true,
-			Model:                model,
+			Model:                llmCfg.Model,
 			SuggestedName:        name,
 			SuggestedSlug:        fallbackSlug,
 			SuggestedDescription: fallbackDesc,
@@ -161,7 +153,7 @@ AGENTS.md 编写规范：
 			OK:                   true,
 			Mode:                 "llm",
 			LLMConfigured:        true,
-			Model:                nonEmpty(res.Model, model),
+			Model:                nonEmpty(res.Model, llmCfg.Model),
 			SuggestedName:        name,
 			SuggestedSlug:        fallbackSlug,
 			SuggestedDescription: fallbackDesc,
@@ -181,7 +173,7 @@ AGENTS.md 编写规范：
 		OK:                   true,
 		Mode:                 "llm",
 		LLMConfigured:        true,
-		Model:                nonEmpty(res.Model, model),
+		Model:                nonEmpty(res.Model, llmCfg.Model),
 		SuggestedName:        outName,
 		SuggestedSlug:        outSlug,
 		SuggestedDescription: outDesc,
@@ -332,17 +324,17 @@ func (s *Service) Distill(ctx context.Context, req DistillRequest) (*DistillResp
 		MessageCount:         len(messages),
 	}
 
-	protocol, baseURL, apiKey, model, reasoning := s.resolveLLM(ctx, req.ProviderID, req.Model)
-	llmConfigured := strings.TrimSpace(apiKey) != ""
+	llmCfg := s.resolveLLM(ctx, req.ProviderID, req.Model)
+	llmConfigured := llmCfg.IsConfigured()
 	baseResp.LLMConfigured = llmConfigured
-	baseResp.Model = model
+	baseResp.Model = llmCfg.Model
 
 	if strings.EqualFold(strings.TrimSpace(req.Mode), "template") || !llmConfigured {
 		if !llmConfigured {
 			if generateSkill {
-				baseResp.Message = "未配置辅助 AI 模型 API Key，已基于会话记录生成结构化 AGENTS.md 与 SKILL.md 草案，可编辑后保存。"
+				baseResp.Message = "未配置通用 AI 模型（可在设置中选择已接入 Agent 或填写 API Key），已基于会话记录生成结构化 AGENTS.md 与 SKILL.md 草案，可编辑后保存。"
 			} else {
-				baseResp.Message = "未配置辅助 AI 模型 API Key，已基于会话记录与关联 Skill 生成结构化 AGENTS.md 草案，可编辑后保存。"
+				baseResp.Message = "未配置通用 AI 模型（可在设置中选择已接入 Agent 或填写 API Key），已基于会话记录与关联 Skill 生成结构化 AGENTS.md 草案，可编辑后保存。"
 			}
 		}
 		return baseResp, nil
@@ -431,18 +423,10 @@ func (s *Service) Distill(ctx context.Context, req DistillRequest) (*DistillResp
 
 	callCtx, cancel := context.WithTimeout(ctx, 110*time.Second)
 	defer cancel()
-	res, err := llmcompat.CompleteChat(callCtx, s.httpClient, llmcompat.ChatRequest{
-		Protocol:  protocol,
-		BaseURL:   baseURL,
-		APIKey:    apiKey,
-		Model:     model,
-		Reasoning: reasoning,
-		MaxTokens: 4096,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userBuf.String()},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, s.httpClient, llmCfg.ToChatRequest(4096, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userBuf.String()},
+	}))
 	if err != nil || res.Status >= 400 || strings.TrimSpace(res.Content) == "" {
 		if err != nil {
 			baseResp.Message = fmt.Sprintf("调用辅助 AI 模型失败（%v），已回退为结构化模板草案。", err)
@@ -471,7 +455,7 @@ func (s *Service) Distill(ctx context.Context, req DistillRequest) (*DistillResp
 	}
 
 	baseResp.Mode = "llm"
-	baseResp.Model = nonEmpty(res.Model, model)
+	baseResp.Model = nonEmpty(res.Model, llmCfg.Model)
 	if strings.TrimSpace(parsed.Name) != "" && existingBot == nil {
 		baseResp.SuggestedName = strings.TrimSpace(parsed.Name)
 	}

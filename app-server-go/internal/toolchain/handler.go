@@ -45,6 +45,14 @@ func Matches(method, path string) bool {
 		return method == http.MethodPut
 	case clean == "/api/v1/toolchain/install/jobs":
 		return method == http.MethodGet || method == http.MethodPost
+	case clean == "/api/v1/toolchain/onboarding/configure":
+		return method == http.MethodPost
+	case clean == "/api/v1/toolchain/oauth/start":
+		return method == http.MethodPost
+	case clean == "/api/v1/toolchain/oauth/status" || strings.HasPrefix(clean, "/api/v1/toolchain/oauth/status/"):
+		return method == http.MethodGet
+	case clean == "/api/v1/toolchain/oauth/cancel":
+		return method == http.MethodPost
 	case strings.HasPrefix(clean, "/api/v1/toolchain/install/jobs/") && strings.HasSuffix(clean, "/cancel"):
 		return method == http.MethodPost
 	case strings.HasPrefix(clean, "/api/v1/toolchain/install/jobs/"):
@@ -81,6 +89,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"items": h.service.ListInstallJobs()})
 	case clean == "/api/v1/toolchain/install/jobs" && r.Method == http.MethodPost:
 		h.handleStartInstallJob(w, r)
+	case clean == "/api/v1/toolchain/onboarding/configure" && r.Method == http.MethodPost:
+		h.handleConfigureOnboarding(w, r)
+	case clean == "/api/v1/toolchain/oauth/start" && r.Method == http.MethodPost:
+		h.handleStartOAuth(w, r)
+	case (clean == "/api/v1/toolchain/oauth/status" || strings.HasPrefix(clean, "/api/v1/toolchain/oauth/status/")) && r.Method == http.MethodGet:
+		h.handleGetOAuthStatus(w, r)
+	case clean == "/api/v1/toolchain/oauth/cancel" && r.Method == http.MethodPost:
+		h.handleCancelOAuth(w, r)
 	case strings.HasPrefix(clean, "/api/v1/toolchain/install/jobs/") && strings.HasSuffix(clean, "/cancel") && r.Method == http.MethodPost:
 		id := strings.TrimSuffix(strings.TrimPrefix(clean, "/api/v1/toolchain/install/jobs/"), "/cancel")
 		job, err := h.service.CancelInstallJob(id)
@@ -178,6 +194,75 @@ func (h *Handler) handleStartInstallJob(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (h *Handler) handleConfigureOnboarding(w http.ResponseWriter, r *http.Request) {
+	var body OnboardingConfigureRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"detail": "初始化配置请求格式无效"})
+		return
+	}
+	result, err := h.service.ConfigureOnboarding(r.Context(), body)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) handleStartOAuth(w http.ResponseWriter, r *http.Request) {
+	var body OAuthStartRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"detail": "授权登录请求格式无效"})
+		return
+	}
+	result, err := h.service.StartOAuth(r.Context(), body)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) handleGetOAuthStatus(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" {
+		clean := strings.TrimRight(r.URL.Path, "/")
+		if strings.HasPrefix(clean, "/api/v1/toolchain/oauth/status/") {
+			id = strings.TrimSpace(strings.TrimPrefix(clean, "/api/v1/toolchain/oauth/status/"))
+		}
+	}
+	result, err := h.service.GetOAuthStatus(id)
+	if errors.Is(err, ErrOAuthNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": err.Error()})
+		return
+	}
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) handleCancelOAuth(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" && r.Body != nil {
+		var body struct {
+			ID string `json:"id"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body)
+		id = strings.TrimSpace(body.ID)
+	}
+	result, err := h.service.CancelOAuth(id)
+	if errors.Is(err, ErrOAuthNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": err.Error()})
+		return
+	}
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) handleGetNetwork(w http.ResponseWriter, r *http.Request) {

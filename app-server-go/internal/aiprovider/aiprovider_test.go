@@ -153,3 +153,53 @@ func TestUpsertDefaultAndGatewayBidirectionalSync(t *testing.T) {
 		t.Fatalf("public view masking broken: %+v", pub.Providers[0])
 	}
 }
+
+func TestAgentBackedProviderWithoutAPIKey(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+
+	cfg, saved, err := UpsertProvider(ctx, st, ProviderPatch{
+		Name:         "OpenAI Codex（免 Key 直连）",
+		Protocol:     llmcompat.ProtocolAgent,
+		AgentID:      "codex-local",
+		AgentKind:    "codex",
+		Models:       []string{"gpt-5.4", "gpt-5.3-codex"},
+		SetAsDefault: true,
+		DefaultModel: "gpt-5.4",
+	})
+	if err != nil {
+		t.Fatalf("upsert agent provider: %v", err)
+	}
+	if saved.Protocol != llmcompat.ProtocolAgent || saved.AgentID != "codex-local" || saved.APIKey != "" || saved.BaseURL != "" {
+		t.Fatalf("unexpected agent provider saved: %+v", saved)
+	}
+	pub := cfg.ToPublic()
+	if !pub.EffectiveConfigured {
+		t.Fatalf("expected EffectiveConfigured=true for agent-backed provider without API key: %+v", pub)
+	}
+
+	resolved := ResolveDefault(ctx, st)
+	if !resolved.IsConfigured() {
+		t.Fatalf("expected ResolveDefault().IsConfigured()=true for agent-backed provider: %+v", resolved)
+	}
+	if resolved.Protocol != llmcompat.ProtocolAgent || resolved.AgentID != "codex-local" || resolved.Model != "gpt-5.4" {
+		t.Fatalf("unexpected resolved default: %+v", resolved)
+	}
+
+	// Upserting same AgentID without explicit ID deduplicates cleanly instead of duplicating entries.
+	cfg2, saved2, err := UpsertProvider(ctx, st, ProviderPatch{
+		Name:         "Codex 更新",
+		Protocol:     llmcompat.ProtocolAgent,
+		AgentID:      "codex-local",
+		AgentKind:    "codex",
+		Models:       []string{"gpt-5.4"},
+		SetAsDefault: true,
+		DefaultModel: "gpt-5.4",
+	})
+	if err != nil {
+		t.Fatalf("upsert duplicate agent provider: %v", err)
+	}
+	if saved2.ID != saved.ID || len(cfg2.Providers) != 1 {
+		t.Fatalf("expected deduplication by AgentID, got id=%s len=%d", saved2.ID, len(cfg2.Providers))
+	}
+}

@@ -21,7 +21,7 @@ type service struct {
 func (service *service) GetCapabilities(context.Context, *sessiondv1.GetCapabilitiesRequest) (*sessiondv1.GetCapabilitiesResponse, error) {
 	return &sessiondv1.GetCapabilitiesResponse{
 		ProtocolMajor: 1,
-		ProtocolMinor: 2, // Safe idle reclamation admission and native work checks.
+		ProtocolMinor: 3, // Safe idle reclamation admission, native work checks, and dynamic runtime config hot-reload.
 		DaemonId:      service.daemon.DaemonID(),
 		Services: []string{
 			"astrorder.sessiond.v1.ConnectorIngress",
@@ -30,6 +30,7 @@ func (service *service) GetCapabilities(context.Context, *sessiondv1.GetCapabili
 			"astrorder.sessiond.v1.ModelConfig",
 			"astrorder.sessiond.v1.OperationQuery",
 			"astrorder.sessiond.v1.RuntimeQuery",
+			"astrorder.sessiond.v1.RuntimeReload",
 			"astrorder.sessiond.v1.SessionControl",
 			"astrorder.sessiond.v1.TerminalStream",
 		},

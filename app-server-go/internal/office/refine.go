@@ -37,15 +37,8 @@ type RefineResponse struct {
 	Message         string `json:"message,omitempty"`
 }
 
-func loadHelperLLMConfig(ctx context.Context, st *store.Store) map[string]string {
-	resolved := aiprovider.ResolveDefault(ctx, st)
-	return map[string]string{
-		"protocol":  resolved.Protocol,
-		"base_url":  resolved.BaseURL,
-		"api_key":   resolved.APIKey,
-		"model":     resolved.Model,
-		"reasoning": resolved.Reasoning,
-	}
+func loadHelperLLMConfig(ctx context.Context, st *store.Store) aiprovider.ResolvedModel {
+	return aiprovider.ResolveDefault(ctx, st)
 }
 
 func (h *Handler) refineSelection(ctx context.Context, req RefineRequest) (*RefineResponse, error) {
@@ -84,46 +77,31 @@ func (h *Handler) refineSelection(ctx context.Context, req RefineRequest) (*Refi
 	llmCfg := loadHelperLLMConfig(ctx, h.options.Store)
 	if strings.TrimSpace(req.ProviderID) != "" {
 		if resolved, ok := aiprovider.Resolve(ctx, h.options.Store, req.ProviderID, req.Model); ok {
-			llmCfg = map[string]string{
-				"protocol":  resolved.Protocol,
-				"base_url":  resolved.BaseURL,
-				"api_key":   resolved.APIKey,
-				"model":     resolved.Model,
-				"reasoning": resolved.Reasoning,
-			}
+			llmCfg = resolved
 		}
 	} else if strings.TrimSpace(req.Model) != "" {
-		llmCfg["model"] = strings.TrimSpace(req.Model)
+		llmCfg.Model = strings.TrimSpace(req.Model)
 	}
-	apiKey := strings.TrimSpace(llmCfg["api_key"])
-	llmConfigured := apiKey != ""
+	llmConfigured := llmCfg.IsConfigured()
 	if strings.EqualFold(strings.TrimSpace(req.Mode), "prompt_only") || !llmConfigured {
 		return &RefineResponse{
 			OK:              true,
 			Mode:            "prompt_only",
 			LLMConfigured:   llmConfigured,
-			Model:           llmCfg["model"],
+			Model:           llmCfg.Model,
 			RewrittenText:   selected,
 			AssembledPrompt: assembled,
-			Message:         "未配置辅助模型 API Key，可将改写指令直接发给当前会话 Agent 执行。",
+			Message:         "未配置通用 AI 模型（可在设置中选择已接入 Agent 或填写 API Key），可将改写指令直接发给当前会话助手执行。",
 		}, nil
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmcompat.ChatRequest{
-		Protocol:  llmCfg["protocol"],
-		BaseURL:   llmCfg["base_url"],
-		APIKey:    apiKey,
-		Model:     llmCfg["model"],
-		Reasoning: llmCfg["reasoning"],
-		MaxTokens: 2048,
-		Messages: []llmcompat.ChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-	})
+	res, err := llmcompat.CompleteChat(callCtx, h.httpClient, llmCfg.ToChatRequest(2048, []llmcompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("调用 AI 供应商模型失败：%w", err)
 	}
