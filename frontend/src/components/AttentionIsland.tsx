@@ -85,7 +85,7 @@ function formatIslandNoticeCopy(
   if (suffix && rawMessage.endsWith(suffix)) {
     const sessionPart = rawMessage.slice(0, -suffix.length).trim()
     return {
-      title: sessionPart || (session ? displaySessionTitle(session) : rawTitle),
+      title: (session ? displaySessionTitle(session) : sessionPart) || rawTitle,
       detail: rawTitle,
     }
   }

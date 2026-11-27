@@ -304,4 +304,33 @@ describe('AttentionIsland', () => {
     expect(within(region).getByText('已保存个人办公画像')).toBeInTheDocument()
     expect(document.querySelector('.attention-island.is-standalone')).not.toBeNull()
   })
+
+  it('prefers the renamed session list title over an older title baked into notice.message', () => {
+    useAstrorderStore.getState().hydrateBootstrap({
+      protocol_version: 1,
+      cursor: 10,
+      agents: [{ id: 'agy', name: 'Antigravity', kind: 'antigravity', status: 'ready', capabilities: ['chat'], limitation: null }],
+      sessions: [
+        { id: 'active-session', agent_id: 'agy', title: '当前会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-24T08:00:00Z' },
+        { id: 'renamed-session', agent_id: 'agy', title: '已重命名会话', workspace: '/repo', status: 'idle', updated_at: '2026-11-24T08:05:00Z' },
+      ],
+    })
+
+    renderIsland('/chat/active-session?agent_id=agy', 'agy::active-session')
+
+    act(() => {
+      pushIslandNotification({
+        key: 'notice-renamed',
+        kind: 'task_completed',
+        title: '会话已完成',
+        message: 'UI/UX Review Of Astrorder · 会话已完成',
+        agent_id: 'agy',
+        session_id: 'renamed-session',
+        created_at: '2026-11-24T08:09:00Z',
+      })
+    })
+
+    expect(screen.getByText('已重命名会话')).toBeInTheDocument()
+    expect(screen.queryByText('UI/UX Review Of Astrorder')).not.toBeInTheDocument()
+  })
 })

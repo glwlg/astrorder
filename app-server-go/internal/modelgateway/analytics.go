@@ -664,7 +664,11 @@ func (h *Handler) readSessionSpeed(ctx context.Context, agentID, sessionID strin
 		return nil
 	}
 	if m, ok := pref.Value.(map[string]any); ok {
-		if s, parseErr := strconv.ParseFloat(fmt.Sprint(m["speed"]), 64); parseErr == nil && s > 0 {
+		ver, err := strconv.ParseFloat(fmt.Sprint(m["v"]), 64)
+		if err != nil || ver < 2 {
+			return nil
+		}
+		if s, parseErr := strconv.ParseFloat(fmt.Sprint(m["speed"]), 64); parseErr == nil && s > 0 && s <= 1000.0 {
 			return math.Round(s*10) / 10
 		}
 	}

@@ -22,6 +22,7 @@ import type { Agent, BotGroup, BotGroupMember, Session } from "../domain/types";
 import { useAstrorderStore } from "../state/store";
 import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
 import { AgentBrandIcon } from "./AgentBrandIcon";
+import { displaySessionTitle } from "./sessionRailModel";
 import { REASONING_EFFORTS } from "../features/chat/composerMedia";
 
 type MemberDraft = {
@@ -319,7 +320,7 @@ export function CreateBotGroupDialog({
               );
               const sources = candidates.map((session) => ({
                 value: session.id,
-                label: `${session.title || session.id} · ${session.workspace || "未设置工作区"}`,
+                label: `${displaySessionTitle(session)} · ${session.workspace || "未设置工作区"}`,
                 disabled: !session.workspace?.trim(),
               }));
               if (member.sourceSessionId && !sources.some((item) => item.value === member.sourceSessionId)) {

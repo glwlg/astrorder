@@ -30,8 +30,22 @@ func TestSessionUsageReadsExactAgentMetrics(t *testing.T) {
 		t.Fatalf("usage not read: %s", w.Body.String())
 	}
 
-	// Recording session_speed preference surfaces via /sessions/{id}/usage as speed.
-	if err := st.SetPreference(context.Background(), "session_speed:a\x00s", map[string]any{"speed": 68.42}, false); err != nil {
+	// Legacy unversioned v1 session_speed preference must be ignored.
+	if err := st.SetPreference(context.Background(), "session_speed:a\x00s", map[string]any{"speed": 2086.6}, false); err != nil {
+		t.Fatal(err)
+	}
+	wLegacy := httptest.NewRecorder()
+	h.handleGetSessionUsage(wLegacy, httptest.NewRequest("GET", "/api/v1/sessions/s/usage?agent_id=a", nil))
+	var dataLegacy map[string]any
+	if err := json.Unmarshal(wLegacy.Body.Bytes(), &dataLegacy); err != nil {
+		t.Fatal(err)
+	}
+	if wLegacy.Code != 200 || dataLegacy["speed"] != nil {
+		t.Fatalf("expected legacy v1 speed to be ignored, got %s", wLegacy.Body.String())
+	}
+
+	// Recording v2 session_speed preference surfaces via /sessions/{id}/usage as speed.
+	if err := st.SetPreference(context.Background(), "session_speed:a\x00s", map[string]any{"v": 2, "speed": 68.42}, true); err != nil {
 		t.Fatal(err)
 	}
 	w2 := httptest.NewRecorder()

@@ -33,6 +33,7 @@ import {
 import type { Agent, Session } from '../../domain/types'
 import { scopeKey } from '../../domain/semantics'
 import { AgentBrandIcon } from '../../components/AgentBrandIcon'
+import { displaySessionTitle } from '../../components/sessionRailModel'
 import { buildSwarmTopology, type SwarmConstellationNode } from '../../domain/swarmTopology'
 import { MonitorCard } from './MonitorPage'
 import { api } from '../../api/client'
@@ -694,9 +695,9 @@ export function SwarmDagView({
                             whiteSpace: 'nowrap',
                             maxWidth: 95,
                           }}
-                          title={node.session.title || '主星会话'}
+                          title={displaySessionTitle(node.session)}
                         >
-                          {node.session.title || '主星会话'}
+                          {displaySessionTitle(node.session)}
                         </span>
                         {node.childrenKeys.length > 0 && (
                           <Badge size="xs" variant="light" color="gray">
@@ -902,9 +903,9 @@ export function SwarmDagView({
                         whiteSpace: 'nowrap',
                         flex: 1,
                       }}
-                      title={node.session.title || '未命名会话'}
+                      title={displaySessionTitle(node.session)}
                     >
-                      {node.session.title || '未命名会话'}
+                      {displaySessionTitle(node.session)}
                     </div>
                   </div>
 
@@ -1062,7 +1063,7 @@ export function SwarmDagView({
                 {selectedNode.level === 0 ? '🌟 主星 (Alpha 核心)' : `🌟 主星 → 🪐 伴星 L${selectedNode.level}`}
               </div>
               <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--astr-text, #202124)' }}>
-                {selectedNode.session.title || '会话详情'}
+                {displaySessionTitle(selectedNode.session)}
               </div>
             </div>
             <Group gap={6}>
@@ -1372,7 +1373,7 @@ export function SwarmDagView({
         {deleteModalData && (
           <Stack gap="md">
             <Text size="sm" c="dimmed">
-              您正在请求删除由主星【<strong style={{ color: 'var(--astr-text, #1E293B)' }}>{deleteModalData.rootNode.session.title || '主星会话'}</strong>】发起的完整星系任务链。
+              您正在请求删除由主星【<strong style={{ color: 'var(--astr-text, #1E293B)' }}>{displaySessionTitle(deleteModalData.rootNode.session)}</strong>】发起的完整星系任务链。
             </Text>
 
             <div
@@ -1413,7 +1414,7 @@ export function SwarmDagView({
                   <Group gap={6} style={{ minWidth: 0 }}>
                     <AgentBrandIcon kind={item.agent?.kind} size={15} />
                     <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
-                      {item.session.title || '会话'}
+                      {displaySessionTitle(item.session)}
                     </span>
                   </Group>
                   <Badge size="xs" variant="light" color={item.level === 0 ? 'indigo' : 'gray'}>
@@ -1455,7 +1456,7 @@ export function SwarmDagView({
                     await queryClient.invalidateQueries({ queryKey: ['astrorder', 'sessions'] })
                     notifications.show({
                       color: 'teal',
-                      message: `已彻底删除星系「${deleteModalData.rootNode.session.title || '主星'}」及下辖所有伴星与黑板`,
+                      message: `已彻底删除星系「${displaySessionTitle(deleteModalData.rootNode.session)}」及下辖所有伴星与黑板`,
                     })
                     setDeleteModalData(null)
                   } catch (err: any) {

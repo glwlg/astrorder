@@ -2,10 +2,15 @@ import { MantineProvider } from '@mantine/core'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
+import { useAstrorderStore } from '../../state/store'
 import { AnalyticsPage } from './AnalyticsPage'
 
 vi.mock('../../api/client', () => ({ api: { getAnalyticsUsage: vi.fn(), getAgentUsage: vi.fn() } }))
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => {
+  cleanup()
+  vi.resetAllMocks()
+  useAstrorderStore.setState({ sessions: {}, agents: {} })
+})
 const mount = () => render(<MantineProvider><AnalyticsPage /></MantineProvider>)
 
 const sampleSessionUsage = {
@@ -129,4 +134,30 @@ it('switches cleanly to CLI usage tab', async () => {
   await screen.findByText('ACP 升级会话')
   fireEvent.click(screen.getByRole('tab', { name: 'CLI 使用' }))
   expect(await screen.findByText('此时间范围内暂无调用记录')).toBeInTheDocument()
+})
+
+it('prefers the live session list title from the store over stale or native analytics row titles', async () => {
+  useAstrorderStore.getState().hydrateBootstrap({
+    protocol_version: 1,
+    cursor: 1,
+    agents: [{ id: 'ssh-antigravity-wsl', name: 'Antigravity · WSL', kind: 'antigravity-ssh', status: 'ready', capabilities: ['chat'], limitation: null }],
+    sessions: [{
+      id: '52794208-5f2e-4120-a6b1-99e5ee29c7f1',
+      agent_id: 'ssh-antigravity-wsl',
+      title: '星序界面与交互优化',
+      workspace: '/home/fixture/workspace/example-org/astrorder',
+      status: 'idle',
+      updated_at: '2026-11-18T09:30:00Z',
+    }],
+  })
+  vi.mocked(api.getAnalyticsUsage).mockResolvedValue({
+    ...sampleSessionUsage,
+    directSessions: [{
+      ...sampleSessionUsage.directSessions[0],
+      title: 'UI/UX Review Of Astrorder',
+    }],
+  } as never)
+  mount()
+  expect(await screen.findByText('星序界面与交互优化')).toBeInTheDocument()
+  expect(screen.queryByText('UI/UX Review Of Astrorder')).not.toBeInTheDocument()
 })

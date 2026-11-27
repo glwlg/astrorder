@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"astrorder.dev/app-server/internal/store"
 	pb "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 )
 
@@ -154,6 +155,8 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 		}
 		entries := make([]memberEntry, 0, len(rawMembers))
 		nativeWorking := 0
+		coordNativeTitle := ""
+		coordStoredTitle := ""
 
 		for idx, item := range rawMembers {
 			m, ok := item.(map[string]any)
@@ -163,6 +166,10 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 			m["agent_id"] = aid
 			cid := stringValue(m, "conversation_id")
 			isCoord, _ := m["is_coordinator"].(bool)
+			nativeMemberTitle := strings.TrimSpace(stringValue(m, "title"))
+			if isCoord {
+				coordNativeTitle = nativeMemberTitle
+			}
 			state := strings.TrimSpace(stringValue(m, "state"))
 			if state == "working" {
 				nativeWorking++
@@ -182,14 +189,21 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 					if isOwnedSessionRunning(existing) {
 						ownedActive = true
 					}
+					storedTitle := strings.TrimSpace(stringValue(existing, "title"))
+					if !store.IsPlaceholderSessionTitle(storedTitle, cid) {
+						m["title"] = storedTitle
+						if isCoord {
+							coordStoredTitle = storedTitle
+						}
+					}
 					if !isCoord {
 						patch := map[string]any{}
 						if existing["ephemeral"] != true {
 							patch["ephemeral"] = true
 						}
 						memberName := strings.TrimSpace(stringValue(m, "name"))
-						existingTitle := strings.TrimSpace(stringValue(existing, "title"))
-						if memberName != "" && (existingTitle == "" || existingTitle == cid || existingTitle == "New Session" || existingTitle == "新会话") {
+						existingTitle := storedTitle
+						if memberName != "" && store.IsPlaceholderSessionTitle(existingTitle, cid) {
 							patch["title"] = "@" + memberName
 						}
 						if len(patch) > 0 {
@@ -207,6 +221,13 @@ func (h *Handler) handleGetSessionSwarm(w http.ResponseWriter, r *http.Request, 
 				ownedActive: ownedActive,
 				isCoord:     isCoord,
 			})
+		}
+
+		if coordStoredTitle != "" {
+			payloadTitle := strings.TrimSpace(stringValue(payload, "title"))
+			if payloadTitle == "" || payloadTitle == coordNativeTitle || store.IsPlaceholderSessionTitle(payloadTitle, sid) {
+				payload["title"] = coordStoredTitle
+			}
 		}
 
 		// Reconcile live owned ACP runtime state when native conversation_summaries.db lags

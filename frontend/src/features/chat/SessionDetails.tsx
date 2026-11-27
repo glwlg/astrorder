@@ -20,7 +20,7 @@ import { UserInputCard, isUserInput } from '../../components/UserInputCard'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { SessionRuntimeFacts } from '../../components/SessionRuntimeFacts'
 import { NativeObservationPanel } from '../../components/NativeObservationPanel'
-import { sessionActivityStatus } from '../../components/sessionRailModel'
+import { displaySessionTitle, sessionActivityStatus } from '../../components/sessionRailModel'
 import { useGitStatus } from '../../hooks/useGitStatus'
 import { useSessionModel } from '../../hooks/useSessionModel'
 import { useAstrorderStore } from '../../state/store'
@@ -199,7 +199,7 @@ export function SessionDetails({
             </span>
           </div>
 
-          <h3 className="si-title">{session.title || '未命名会话'}</h3>
+          <h3 className="si-title">{displaySessionTitle(session)}</h3>
 
           {handoffLink && (
             <button

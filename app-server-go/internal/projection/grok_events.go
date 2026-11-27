@@ -183,7 +183,9 @@ func handleGrokNotificationTx(ctx context.Context, tx *sql.Tx, streamID string, 
 				var existingTitle string
 				err := tx.QueryRowContext(ctx, "SELECT title FROM sessions WHERE agent_id=? AND id=?", agentID, sid).Scan(&existingTitle)
 				if err == nil {
-					if !isPlaceholderTitle(existingTitle, sid) && isPlaceholderTitle(title, sid) {
+					if isPlaceholderTitle(title, sid) && !isPlaceholderTitle(existingTitle, sid) {
+						title = existingTitle
+					} else if !isPlaceholderTitle(existingTitle, sid) && title != existingTitle && !canUpgradeProjectedSessionTitleTx(ctx, tx, agentID, sid, existingTitle) {
 						title = existingTitle
 					}
 					if title != existingTitle {

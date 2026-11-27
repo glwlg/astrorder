@@ -28,6 +28,8 @@ import {
   useAllSchedules,
 } from '../../hooks/useSessionSchedules'
 import { isAntigravityAgent } from '../../hooks/useSessionSwarm'
+import { resolveSessionDisplayTitle } from '../../components/sessionRailModel'
+import { useAstrorderStore } from '../../state/store'
 import './workspaceChanges.css'
 
 export interface SessionSchedulesViewProps {
@@ -773,7 +775,9 @@ export function SessionSchedulesView({
                       <div className="sched-all-title">
                         <strong>{item.name}</strong>
                         <span className="swarm-meta-chip">
-                          {item.session_title || item.session_id}
+                          {resolveSessionDisplayTitle(useAstrorderStore.getState().sessions, item.agent_id, item.session_id, {
+                            title: item.session_title,
+                          })}
                         </span>
                         {item.agent_name && (
                           <span className="swarm-meta-chip">{item.agent_name}</span>

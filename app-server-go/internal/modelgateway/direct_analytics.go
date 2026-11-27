@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"astrorder.dev/app-server/internal/store"
 	sessiondv1 "astrorder.dev/contracts/gen/go/astrorder/sessiond/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -558,15 +559,27 @@ func (h *Handler) collectSessionUsage(ctx context.Context, cfg GatewayConfig, pe
 
 				for _, sr := range payload.Sessions {
 					sid := strField(sr, "session_id")
-					title := strings.TrimSpace(strField(sr, "title"))
-					ws := strField(sr, "workspace")
-					if title == "" {
-						if storedSess, sErr := h.store.GetSession(ctx, desc.AgentID, sid); sErr == nil && storedSess != nil {
-							title = strings.TrimSpace(strField(storedSess, "title"))
-							if ws == "" {
-								ws = strField(storedSess, "workspace")
-							}
+					nativeTitle := strings.TrimSpace(strField(sr, "title"))
+					ws := strings.TrimSpace(strField(sr, "workspace"))
+					title := ""
+					if storedSess, sErr := h.store.GetSession(ctx, desc.AgentID, sid); sErr == nil && storedSess != nil {
+						storedTitle := strings.TrimSpace(strField(storedSess, "title"))
+						storedNativeKind := strings.ToLower(strings.TrimSpace(strField(storedSess, "native_kind")))
+						if storedTitle == "转交摘要" || storedTitle == "[侧边聊天]" || storedNativeKind == "smoke" {
+							continue
 						}
+						if storedWS := strings.TrimSpace(strField(storedSess, "workspace")); storedWS != "" {
+							ws = storedWS
+						}
+						if !store.IsPlaceholderSessionTitle(storedTitle, sid) {
+							title = storedTitle
+						}
+					}
+					if title == "" && !store.IsPlaceholderSessionTitle(nativeTitle, sid) {
+						title = nativeTitle
+					}
+					if title == "" {
+						title = store.DisplaySessionTitle(title, sid, ws, desc.AgentID)
 					}
 					if title == "" {
 						title = sid
@@ -607,13 +620,20 @@ func (h *Handler) collectSessionUsage(ctx context.Context, cfg GatewayConfig, pe
 		}
 		filterClause := ""
 		if directOnly {
-			filterClause = " AND COALESCE(provider, '') NOT IN ('ocx', 'opencodex', 'magpie', 'custom')"
+			filterClause = " AND COALESCE(tm.provider, '') NOT IN ('ocx', 'opencodex', 'magpie', 'custom')"
 		}
 		query := fmt.Sprintf(
-			`SELECT agent_id, session_id, model, provider, date, input_tokens, output_tokens, cached_tokens, reasoning_tokens, total_tokens, updated_at
-			 FROM token_metrics
-			 WHERE agent_id IN (%s)%s AND total_tokens > 0
-			 ORDER BY agent_id, session_id, date ASC, total_tokens DESC`,
+			`SELECT tm.agent_id, tm.session_id, tm.model, tm.provider, tm.date,
+			        tm.input_tokens, tm.output_tokens, tm.cached_tokens, tm.reasoning_tokens, tm.total_tokens, tm.updated_at,
+			        COALESCE(s.title, '') AS session_title, COALESCE(s.workspace, '') AS session_workspace
+			 FROM token_metrics tm
+			 LEFT JOIN sessions s ON s.agent_id = tm.agent_id AND s.id = tm.session_id
+			 WHERE tm.agent_id IN (%s)%s
+			   AND tm.total_tokens > 0
+			   AND COALESCE(s.ephemeral, 0) = 0
+			   AND COALESCE(s.title, '') NOT IN ('转交摘要', '[侧边聊天]')
+			   AND COALESCE(s.native_kind, '') <> 'smoke'
+			 ORDER BY tm.agent_id, tm.session_id, tm.date ASC, tm.total_tokens DESC`,
 			strings.Join(placeholders, ","),
 			filterClause,
 		)
@@ -719,13 +739,10 @@ func (h *Handler) collectSessionUsage(ctx context.Context, cfg GatewayConfig, pe
 
 				sr := sessAgg[sessKey]
 				if sr == nil {
-					title := sid
-					ws := ""
-					if sRow, sErr := h.store.GetSession(ctx, aid, sid); sErr == nil && sRow != nil {
-						if tStr := strings.TrimSpace(strField(sRow, "title")); tStr != "" {
-							title = tStr
-						}
-						ws = strField(sRow, "workspace")
+					ws := strings.TrimSpace(strField(r, "session_workspace"))
+					title := store.DisplaySessionTitle(strField(r, "session_title"), sid, ws, aid)
+					if title == "" {
+						title = sid
 					}
 					sr = &directSessionRow{
 						SessionID:      sid,

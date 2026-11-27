@@ -3,6 +3,8 @@ import { Alert, Badge, Button, Group, Paper, Progress, ScrollArea, SegmentedCont
 import { IconRefresh } from '@tabler/icons-react'
 import { useInRouterContext, useNavigate } from 'react-router-dom'
 import { api, type DirectUsageSessionRow, type OcxUsageResponse, type UsageServerOption } from '../../api/client'
+import { resolveSessionDisplayTitle } from '../../components/sessionRailModel'
+import { useAstrorderStore } from '../../state/store'
 import { formatTokens, getModelColor } from './usageFormat'
 import './directTokenUsage.css'
 
@@ -36,22 +38,23 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
   )
 }
 
-function SessionNavTrigger({ row }: { row: DirectUsageSessionRow }) {
+function SessionNavTrigger({ row, title }: { row: DirectUsageSessionRow; title: string }) {
   const navigate = useNavigate()
   return (
     <button
       type="button"
       className="direct-usage-session-link"
       onClick={() => navigate(`/chat/${encodeURIComponent(row.sessionId)}?agent_id=${encodeURIComponent(row.agentId)}`)}
-      title={`${row.title}${row.workspace ? ` · ${row.workspace}` : ''}`}
+      title={`${title}${row.workspace ? ` · ${row.workspace}` : ''}`}
     >
-      <span className="direct-usage-session-title">{row.title || row.sessionId}</span>
+      <span className="direct-usage-session-title">{title}</span>
       {row.workspace && <span className="direct-usage-session-sub">{row.workspace}</span>}
     </button>
   )
 }
 
 export function DirectTokenUsageView() {
+  const sessionsByKey = useAstrorderStore((state) => state.sessions)
   const [range, setRange] = useState<DirectRange>('7d')
   const [surface, setSurface] = useState<DirectSurface>('all')
   const [connectionId, setConnectionId] = useState<string>('all')
@@ -365,14 +368,19 @@ export function DirectTokenUsageView() {
                           </tr>
                         </thead>
                         <tbody>
-                          {directSessions.map((row) => (
+                          {directSessions.map((row) => {
+                            const sessionTitle = resolveSessionDisplayTitle(sessionsByKey, row.agentId, row.sessionId, {
+                              title: row.title,
+                              workspace: row.workspace,
+                            })
+                            return (
                             <tr key={`${row.agentId}:${row.sessionId}`}>
                               <th scope="row">
                                 {inRouter ? (
-                                  <SessionNavTrigger row={row} />
+                                  <SessionNavTrigger row={row} title={sessionTitle} />
                                 ) : (
                                   <div>
-                                    <span className="direct-usage-session-title">{row.title || row.sessionId}</span>
+                                    <span className="direct-usage-session-title">{sessionTitle}</span>
                                     {row.workspace && <span className="direct-usage-session-sub">{row.workspace}</span>}
                                   </div>
                                 )}
@@ -394,7 +402,8 @@ export function DirectTokenUsageView() {
                                 <Text size="sm" fw={600} component="span">{formatTokens(row.totalTokens)}</Text>
                               </td>
                             </tr>
-                          ))}
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>

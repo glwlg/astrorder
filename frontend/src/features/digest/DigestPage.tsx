@@ -48,6 +48,7 @@ import {
   type DigestTemplate,
 } from '../../api/client'
 import { MarkdownContent } from '../../components/MarkdownContent'
+import { resolveSessionDisplayTitle } from '../../components/sessionRailModel'
 import { useAstrorderStore } from '../../state/store'
 import { AI_PROVIDERS_SYNC_KEY } from '../meetings/meetingSessionStore'
 import { useIsOfficeProfile } from '../office/appProfile'
@@ -986,6 +987,14 @@ export function DigestPage() {
                           {proj.items.map((item) => {
                             const checked = itemSelection[item.item_id] ?? item.selected
                             const meta = kindMeta(item.kind)
+                            const itemAgentId = typeof item.meta?.agent_id === 'string' ? item.meta.agent_id : undefined
+                            const itemSessionId = typeof item.meta?.session_id === 'string' ? item.meta.session_id : undefined
+                            const itemDisplayTitle = item.kind === 'session' && itemAgentId && itemSessionId
+                              ? resolveSessionDisplayTitle(useAstrorderStore.getState().sessions, itemAgentId, itemSessionId, {
+                                  title: item.title,
+                                  workspace: proj.workspace,
+                                })
+                              : item.title
                             return (
                               <div key={item.item_id} className="digest-item-row">
                                 <Checkbox
@@ -1005,8 +1014,8 @@ export function DigestPage() {
                                       <Badge size="xs" variant="light" color={meta.color} style={{ flexShrink: 0 }}>
                                         {meta.label}
                                       </Badge>
-                                      <Text size="xs" fw={550} truncate title={item.title}>
-                                        {item.title}
+                                      <Text size="xs" fw={550} truncate title={itemDisplayTitle}>
+                                        {itemDisplayTitle}
                                       </Text>
                                     </Group>
                                     {item.timestamp && (

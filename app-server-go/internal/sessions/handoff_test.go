@@ -64,7 +64,7 @@ func TestHandoffLocalNativeSummaryAndFirstSend(t *testing.T) {
 }
 
 func testHandoffNativeSummaryAndFirstSend(t *testing.T, connection string) {
-	creates, sends, closes := 0, 0, 0
+	creates, sends, closes, deletes := 0, 0, 0, 0
 	srv := &mockDaemonServer{}
 	srv.statusCb = func() (*pb.GetStatusResponse, error) {
 		owned, runtime := true, pb.RuntimeKind_RUNTIME_KIND_HERMES
@@ -135,6 +135,13 @@ func testHandoffNativeSummaryAndFirstSend(t *testing.T, connection string) {
 		closes++
 		return &pb.CommandReceipt{OperationState: pb.OperationState_OPERATION_STATE_COMPLETED, Outcome: &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}}}, nil
 	}
+	srv.deleteCb = func(r *pb.DeleteSessionRequest) (*pb.CommandReceipt, error) {
+		deletes++
+		if r.GetSession().GetSessionId() != "summary" {
+			t.Fatalf("unexpected delete session target: %+v", r.GetSession())
+		}
+		return &pb.CommandReceipt{OperationState: pb.OperationState_OPERATION_STATE_COMPLETED, Outcome: &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}}}, nil
+	}
 	h, st, _, cleanup := setupTestServer(t, srv)
 	defer cleanup()
 	ctx := context.Background()
@@ -154,16 +161,23 @@ func testHandoffNativeSummaryAndFirstSend(t *testing.T, connection string) {
 			t.Fatalf("handoff: %d %s", w.Code, w.Body.String())
 		}
 	}
-	if creates != 2 || sends != 1 || closes != 1 {
-		t.Fatalf("duplicate handoff: creates=%d sends=%d", creates, sends)
+	if creates != 2 || sends != 1 || deletes != 1 || closes != 0 {
+		t.Fatalf("duplicate handoff or missing fork delete: creates=%d sends=%d deletes=%d closes=%d", creates, sends, deletes, closes)
+	}
+	if forkRow, err := st.GetSession(ctx, "source", "summary"); err != nil || forkRow != nil {
+		t.Fatalf("expected completed handoff summary fork deleted from app storage, got row=%+v err=%v", forkRow, err)
 	}
 	row, _ := st.GetSession(ctx, "target", "target-native")
 	h.bgTasks = newBackgroundTaskManager()
 	if w := handoffPost(h, "/api/v1/sessions/parent/handoff", body); w.Code != 200 || creates != 2 {
 		t.Fatal("completed retry after restart failed", w.Code)
 	}
-	if strings.Contains(stringValue(row, "handoff_context"), "complete native summary") {
-		t.Fatal("summary duplicated in App storage")
+	if !strings.Contains(stringValue(row, "handoff_context"), "complete native summary") || strings.HasPrefix(stringValue(row, "handoff_context"), handoffRefPrefix) {
+		t.Fatalf("expected inline handoff summary stored on target session, got %q", stringValue(row, "handoff_context"))
+	}
+	previewW := handoffGet(h, "/api/v1/sessions/target-native/handoff-context?agent_id=target")
+	if previewW.Code != 200 || !strings.Contains(previewW.Body.String(), `"mode":"native_summary"`) || !strings.Contains(previewW.Body.String(), "complete native summary") {
+		t.Fatalf("expected inline summary preview readable after fork deletion, got %d %s", previewW.Code, previewW.Body.String())
 	}
 	for i := 0; i < 2; i++ {
 		raw, _ := json.Marshal(map[string]any{"id": string(rune('a' + i)), "agent_id": "target", "session_id": "target-native", "action": "send", "text": "continue"})
@@ -211,8 +225,8 @@ func testHandoffNativeSummaryAndFirstSend(t *testing.T, connection string) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("cancel did not finish")
 	}
-	if creates != 3 || closes != 3 || interrupts != 1 {
-		t.Fatalf("cancel cleanup: creates=%d closes=%d interrupts=%d", creates, closes, interrupts)
+	if creates != 3 || deletes != 1 || closes != 1 || interrupts != 1 {
+		t.Fatalf("cancel cleanup: creates=%d deletes=%d closes=%d interrupts=%d", creates, deletes, closes, interrupts)
 	}
 }
 
@@ -378,6 +392,12 @@ func TestHandoffCodexToAntigravityAndReverse(t *testing.T) {
 							Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
 						}, nil
 					}
+					srv.deleteCb = func(r *pb.DeleteSessionRequest) (*pb.CommandReceipt, error) {
+						return &pb.CommandReceipt{
+							OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+							Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+						}, nil
+					}
 
 					h, st, _, cleanup := setupTestServer(t, srv)
 					defer cleanup()
@@ -405,6 +425,9 @@ func TestHandoffCodexToAntigravityAndReverse(t *testing.T) {
 					}
 					if len(creates) != 2 {
 						t.Fatalf("expected 2 native creates, got %d", len(creates))
+					}
+					if forkRow, err := st.GetSession(ctx, "codex-agent", "codex-summary"); err != nil || forkRow != nil {
+						t.Fatalf("expected codex handoff summary fork removed after completion, got %+v %v", forkRow, err)
 					}
 					row, err := st.GetSession(ctx, "agy-agent", "agy-target")
 					if err != nil || row == nil {
@@ -861,6 +884,12 @@ func TestHandoffCodexReadsOnlyNewestPageAndFallsBackToUnboundOnTimeout(t *testin
 			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
 		}, nil
 	}
+	srv.deleteCb = func(r *pb.DeleteSessionRequest) (*pb.CommandReceipt, error) {
+		return &pb.CommandReceipt{
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
 	// Also test resolveHandoffContext when rebinding fails (e.g. active writer lock still held).
 	srv.attachCb = func(r *pb.AttachSessionRequest) (*pb.SessionReceipt, error) {
 		if r.GetSession().GetSessionId() == "codex-summary" {
@@ -890,7 +919,7 @@ func TestHandoffCodexReadsOnlyNewestPageAndFallsBackToUnboundOnTimeout(t *testin
 		t.Fatalf("expected 1 unbound fallback query during handoff, got %d", unboundQueries)
 	}
 
-	// First send to target Antigravity should resolve the summary even when summary bind fails.
+	// First send to target Antigravity uses the inlined summary directly (no extra daemon read after fork deletion).
 	sendW := handoffPost(h, "/api/v1/commands", `{"id":"send-agy-after-fallback","agent_id":"agy-agent","session_id":"agy-target","action":"send","text":"continue work"}`)
 	if sendW.Code != 200 {
 		t.Fatalf("first send failed: %d %s", sendW.Code, sendW.Body.String())
@@ -898,8 +927,22 @@ func TestHandoffCodexReadsOnlyNewestPageAndFallsBackToUnboundOnTimeout(t *testin
 	if len(sends) != 2 || !strings.Contains(sends[1].Input[0].GetText().Text, "Recovered via unbound read.") {
 		t.Fatalf("expected recovered handoff summary in first send, got %+v", sends)
 	}
+	if unboundQueries != 1 {
+		t.Fatalf("expected inline summary to avoid extra unbound read on first send, got %d", unboundQueries)
+	}
+	if forkRow, err := st.GetSession(ctx, "codex-agent", "codex-summary"); err != nil || forkRow != nil {
+		t.Fatalf("expected codex-summary fork deleted after handoff, got %+v %v", forkRow, err)
+	}
+
+	// Legacy native-handoff-v1 reference still falls back to unbound read when rebinding fails.
+	legacyRef, _ := json.Marshal(handoffReference{AgentID: "codex-agent", SessionID: "codex-summary", ConnectionID: "ssh-wsl", MessageID: "msg-summary"})
+	legacySession := map[string]any{"id": "agy-legacy", "agent_id": "agy-agent", "connection_id": "ssh-wsl", "workspace": "/work", "handoff_from_session_id": "codex-parent"}
+	resolved, err := h.resolveHandoffContext(ctx, handoffRefPrefix+string(legacyRef), legacySession)
+	if err != nil || !strings.Contains(resolved, "Recovered via unbound read.") {
+		t.Fatalf("expected legacy native-handoff-v1 unbound fallback to remain readable, got resolved=%q err=%v", resolved, err)
+	}
 	if unboundQueries != 2 {
-		t.Fatalf("expected unbound read on first send after bind failure, got %d", unboundQueries)
+		t.Fatalf("expected unbound read for legacy native-handoff-v1 fallback, got %d", unboundQueries)
 	}
 }
 
@@ -1071,5 +1114,110 @@ func TestGetSessionHandoffContext(t *testing.T) {
 	}
 	if wMissing := handoffGet(h, "/api/v1/sessions/no-such-session/handoff-context?agent_id=agy-agent"); wMissing.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for unknown session, got %d", wMissing.Code)
+	}
+}
+
+func TestHandoffForkDeleteFailureFallsBackToCloseAndKeepsEphemeralRow(t *testing.T) {
+	var (
+		deletes int
+		closes  int
+	)
+	srv := &mockDaemonServer{}
+	srv.statusCb = func() (*pb.GetStatusResponse, error) {
+		owned, runtime := true, pb.RuntimeKind_RUNTIME_KIND_CODEX
+		return &pb.GetStatusResponse{DaemonId: "test-daemon", Sessions: []*pb.SessionSnapshot{
+			{Session: buildSessionRef("codex-agent", "native-codex", ""), Status: pb.SessionStatus_SESSION_STATUS_IDLE, RuntimeOwned: &owned, Runtime: &runtime},
+		}}, nil
+	}
+	srv.readModelCb = func(req *pb.ReadModelRequest) (*pb.ModelState, error) {
+		if req.GetSession().GetAgentId() == "agy-agent" {
+			return &pb.ModelState{Provider: optString("antigravity"), Model: optString("gemini-4-carbon-medium")}, nil
+		}
+		return &pb.ModelState{Provider: optString("openai"), Model: optString("gpt-5.4"), Effort: optString("high")}, nil
+	}
+	srv.createCb = func(r *pb.CreateSessionRequest) (*pb.CommandReceipt, error) {
+		if r.GetCodex() != nil {
+			return &pb.CommandReceipt{
+				Session:        buildSessionRef("codex-agent", "codex-summary-keep", ""),
+				OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+				Status:         pb.SessionStatus_SESSION_STATUS_IDLE,
+				Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+			}, nil
+		}
+		return &pb.CommandReceipt{
+			Session:        buildSessionRef("agy-agent", "agy-target-keep", ""),
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Status:         pb.SessionStatus_SESSION_STATUS_IDLE,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	sends := 0
+	srv.getHistoryPageCb = func(r *pb.HistoryPageRequest) (*pb.HistoryPageResponse, error) {
+		items := []*pb.NativeJson{{Schema: "codex.item.v1", Utf8Json: []byte(`{"id":"old","role":"assistant","text":"prior"}`)}}
+		if sends > 0 {
+			items = append(items, &pb.NativeJson{Schema: "codex.item.v1", Utf8Json: []byte(`{"id":"sum-1","role":"assistant","text":"fallback delete summary"}`)})
+		}
+		return &pb.HistoryPageResponse{Session: r.Session, Items: items}, nil
+	}
+	srv.sendCb = func(r *pb.SendRequest) (*pb.CommandReceipt, error) {
+		sends++
+		return &pb.CommandReceipt{
+			Session:        r.Session,
+			Accepted:       true,
+			TurnId:         optString("turn-1"),
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Status:         pb.SessionStatus_SESSION_STATUS_RUNNING,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+	srv.eventsCb = func(r *pb.SubscribeRequest, stream grpc.ServerStreamingServer[pb.EventStreamFrame]) error {
+		native, _ := encodeNativeJSON("astrorder.event.payload.v1", map[string]any{
+			"agent_id": "codex-agent",
+			"frame": map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"turn": map[string]any{"id": "turn-1", "status": "completed"}},
+			},
+		})
+		return stream.Send(&pb.EventStreamFrame{Frame: &pb.EventStreamFrame_Live{Live: &pb.EventEnvelope{
+			DaemonId:      "test-daemon",
+			Session:       &pb.SessionRef{SessionId: "codex-summary-keep"},
+			SeqId:         1,
+			EventType:     "codex.notification",
+			NativePayload: native,
+		}}})
+	}
+	srv.deleteCb = func(r *pb.DeleteSessionRequest) (*pb.CommandReceipt, error) {
+		deletes++
+		return nil, status.Error(codes.Unavailable, "native delete temporarily failed")
+	}
+	srv.closeCb = func(r *pb.CloseSessionRequest) (*pb.CommandReceipt, error) {
+		closes++
+		return &pb.CommandReceipt{
+			OperationState: pb.OperationState_OPERATION_STATE_COMPLETED,
+			Outcome:        &pb.CommandReceipt_Completed{Completed: &pb.CommandResult{}},
+		}, nil
+	}
+
+	h, st, _, cleanup := setupTestServer(t, srv)
+	defer cleanup()
+	ctx := context.Background()
+	st.UpsertAgent(ctx, map[string]any{"id": "codex-agent", "kind": "codex", "name": "Codex", "status": "ready"})
+	st.UpsertAgent(ctx, map[string]any{"id": "agy-agent", "kind": "antigravity", "name": "Antigravity", "status": "ready"})
+	st.UpsertSession(ctx, map[string]any{"id": "codex-parent", "source_session_id": "native-codex", "agent_id": "codex-agent", "title": "work", "workspace": "/work", "status": "idle", "updated_at": "2026-11-27T00:00:00Z"})
+
+	w := handoffPost(h, "/api/v1/sessions/codex-parent/handoff", `{"operation_id":"delete-fallback-op","source_agent_id":"codex-agent","target_agent_id":"agy-agent","provider":"antigravity","model":"gemini-4-carbon-medium","effort":""}`)
+	if w.Code != 200 {
+		t.Fatalf("handoff should still succeed when fork delete fails: %d %s", w.Code, w.Body.String())
+	}
+	if deletes != 1 || closes != 1 {
+		t.Fatalf("expected 1 delete attempt and 1 fallback close, got deletes=%d closes=%d", deletes, closes)
+	}
+	targetRow, err := st.GetSession(ctx, "agy-agent", "agy-target-keep")
+	if err != nil || !strings.Contains(stringValue(targetRow, "handoff_context"), "fallback delete summary") {
+		t.Fatalf("expected target session to preserve inline summary, got %+v %v", targetRow, err)
+	}
+	forkRow, err := st.GetSession(ctx, "codex-agent", "codex-summary-keep")
+	if err != nil || forkRow == nil || forkRow["ephemeral"] != true {
+		t.Fatalf("expected fork row kept as ephemeral=true when native delete fails, got %+v %v", forkRow, err)
 	}
 }

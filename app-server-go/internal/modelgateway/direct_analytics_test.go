@@ -453,3 +453,256 @@ func TestSessionUsageSupportsAllAgentsAndServerFiltering(t *testing.T) {
 		t.Fatalf("expected QueryNative called only for wsl, got %v", gotConns)
 	}
 }
+
+func TestSessionUsagePrefersStoredSessionListTitleOverNativeTitle(t *testing.T) {
+	nowSlot := time.Now().Unix() / 900
+	daemon := &stubDirectAnalyticsDaemon{
+		stubRuntimeQueryServer: stubRuntimeQueryServer{
+			queryNative: func(ctx context.Context, req *sessiondv1.NativeQueryRequest) (*sessiondv1.NativeQueryResponse, error) {
+				raw, _ := json.Marshal(map[string]any{
+					"provider":        "antigravity",
+					"active_sessions": 2,
+					"slots": []map[string]any{
+						{
+							"slot_15m": nowSlot,
+							"model":    "gemini-4-neon",
+							"calls":    4,
+							"input":    20000,
+							"output":   5000,
+						},
+					},
+					"sessions": []map[string]any{
+						{
+							"session_id": "agy-renamed",
+							"title":      "UI/UX Review Of Astrorder",
+							"workspace":  "/home/luwei/workspace/glwlg/astrorder",
+							"model":      "gemini-4-neon",
+							"updated_at": time.Now().UTC().Format(time.RFC3339),
+							"calls":      3,
+							"input":      15000,
+							"output":     4000,
+							"total":      19000,
+						},
+						{
+							"session_id": "agy-unlisted",
+							"title":      "Native Only Title",
+							"workspace":  "/home/luwei/workspace/glwlg/astrorder",
+							"model":      "gemini-4-neon",
+							"updated_at": time.Now().UTC().Format(time.RFC3339),
+							"calls":      1,
+							"input":      5000,
+							"output":     1000,
+							"total":      6000,
+						},
+					},
+				})
+				return &sessiondv1.NativeQueryResponse{
+					Result: &sessiondv1.NativeJson{Schema: "antigravity.usage.summary.v1", Utf8Json: raw},
+				}, nil
+			},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	sessiondv1.RegisterDaemonControlServer(srv, daemon)
+	sessiondv1.RegisterRuntimeQueryServer(srv, daemon)
+	sessiondv1.RegisterModelConfigServer(srv, daemon)
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.Stop()
+
+	dc, err := daemonclient.Dial(context.Background(), daemonclient.Config{
+		Target:         lis.Addr().String(),
+		Credential:     "test-cred",
+		RequestTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dc.Close()
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "titles.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.SaveSSHConnection(ctx, map[string]any{"id": "wsl", "display_name": "WSL", "host": "127.0.0.1", "port": 2222, "state": "configured"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "ssh-antigravity-wsl", "kind": "antigravity-ssh", "connection_id": "wsl", "name": "Antigravity · WSL", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "local-codex", "kind": "codex", "name": "Codex", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	// Stored session in Astrorder has user's renamed session list title.
+	if _, err := st.UpsertSession(ctx, map[string]any{
+		"id":            "agy-renamed",
+		"agent_id":      "ssh-antigravity-wsl",
+		"connection_id": "wsl",
+		"title":         "星序界面与交互优化",
+		"workspace":     "/home/luwei/workspace/glwlg/astrorder-moved",
+		"status":        "idle",
+		"updated_at":    time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Non-Antigravity session with placeholder title falls back to workspace basename.
+	if _, err := st.UpsertSession(ctx, map[string]any{
+		"id":         "codex-placeholder",
+		"agent_id":   "local-codex",
+		"title":      "New Session",
+		"workspace":  "/home/luwei/workspace/OpsCore",
+		"status":     "idle",
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	todayStr := time.Now().In(time.Local).Format("2006-01-02")
+	if _, err := st.UpsertTokenMetric(ctx, map[string]any{
+		"agent_id":      "local-codex",
+		"session_id":    "codex-placeholder",
+		"model":         "gpt-5.6-sol",
+		"provider":      "codex",
+		"date":          todayStr,
+		"input_tokens":  int64(2000),
+		"output_tokens": int64(500),
+		"total_tokens":  int64(2500),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rawHandler, err := NewHandler(Options{Store: st, Client: dc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := rawHandler.(*Handler)
+
+	w := httptest.NewRecorder()
+	h.handleGetAnalyticsUsage(w, httptest.NewRequest(http.MethodGet, "/api/v1/analytics/usage?source=sessions&range=today&surface=all", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		DirectSessions []struct {
+			SessionID string `json:"sessionId"`
+			Title     string `json:"title"`
+			Workspace string `json:"workspace"`
+		} `json:"directSessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]struct{ title, ws string }{}
+	for _, row := range resp.DirectSessions {
+		byID[row.SessionID] = struct{ title, ws string }{row.Title, row.Workspace}
+	}
+	if byID["agy-renamed"].title != "星序界面与交互优化" || byID["agy-renamed"].ws != "/home/luwei/workspace/glwlg/astrorder-moved" {
+		t.Fatalf("expected stored session list title and workspace, got %+v", byID["agy-renamed"])
+	}
+	if byID["agy-unlisted"].title != "Native Only Title" {
+		t.Fatalf("expected fallback to native title when unlisted, got %+v", byID["agy-unlisted"])
+	}
+	if byID["codex-placeholder"].title != "OpsCore" {
+		t.Fatalf("expected placeholder codex title to display workspace basename OpsCore, got %+v", byID["codex-placeholder"])
+	}
+}
+
+func TestSessionUsageExcludesEphemeralHandoffSummaryAndSideChatForks(t *testing.T) {
+	daemon := &stubDirectAnalyticsDaemon{}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	sessiondv1.RegisterDaemonControlServer(srv, daemon)
+	sessiondv1.RegisterRuntimeQueryServer(srv, daemon)
+	sessiondv1.RegisterModelConfigServer(srv, daemon)
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.Stop()
+
+	dc, err := daemonclient.Dial(context.Background(), daemonclient.Config{
+		Target:         lis.Addr().String(),
+		Credential:     "test-cred",
+		RequestTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dc.Close()
+
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "handoff-dedup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertAgent(ctx, map[string]any{"id": "local-codex", "kind": "codex", "name": "Codex", "status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	todayStr := time.Now().In(time.Local).Format("2006-01-02")
+	sessions := []map[string]any{
+		{"id": "codex-normal", "agent_id": "local-codex", "title": "正常业务会话", "workspace": "/home/luwei/workspace/OpsCore", "status": "idle", "ephemeral": false, "updated_at": nowStr},
+		{"id": "codex-handoff-fork", "agent_id": "local-codex", "title": "转交摘要", "workspace": "/home/luwei/workspace/OpsCore", "status": "idle", "ephemeral": true, "updated_at": nowStr},
+		{"id": "codex-sidechat-fork", "agent_id": "local-codex", "title": "[侧边聊天]", "workspace": "/home/luwei/workspace/OpsCore", "status": "idle", "ephemeral": true, "updated_at": nowStr},
+		{"id": "codex-smoke", "agent_id": "local-codex", "title": "Smoke Check", "workspace": "/home/luwei/workspace/OpsCore", "status": "idle", "ephemeral": false, "native_kind": "smoke", "updated_at": nowStr},
+	}
+	for _, sess := range sessions {
+		if _, err := st.UpsertSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	metrics := []map[string]any{
+		{"agent_id": "local-codex", "session_id": "codex-normal", "model": "codex", "provider": "codex", "date": todayStr, "input_tokens": int64(8000), "cached_tokens": int64(5000), "output_tokens": int64(2000), "total_tokens": int64(10000)},
+		{"agent_id": "local-codex", "session_id": "codex-handoff-fork", "model": "codex", "provider": "codex", "date": todayStr, "input_tokens": int64(185000000), "cached_tokens": int64(170000000), "output_tokens": int64(1000000), "total_tokens": int64(186000000)},
+		{"agent_id": "local-codex", "session_id": "codex-sidechat-fork", "model": "codex", "provider": "codex", "date": todayStr, "input_tokens": int64(185000000), "cached_tokens": int64(170000000), "output_tokens": int64(1000000), "total_tokens": int64(186000000)},
+		{"agent_id": "local-codex", "session_id": "codex-smoke", "model": "codex", "provider": "codex", "date": todayStr, "input_tokens": int64(40000), "output_tokens": int64(10000), "total_tokens": int64(50000)},
+	}
+	for _, m := range metrics {
+		if _, err := st.UpsertTokenMetric(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rawHandler, err := NewHandler(Options{Store: st, Client: dc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := rawHandler.(*Handler)
+
+	w := httptest.NewRecorder()
+	h.handleGetAnalyticsUsage(w, httptest.NewRequest(http.MethodGet, "/api/v1/analytics/usage?source=sessions&range=today&surface=all", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Summary struct {
+			TotalTokens    int64 `json:"totalTokens"`
+			ActiveSessions int   `json:"activeSessions"`
+		} `json:"summary"`
+		DirectSessions []struct {
+			SessionID   string `json:"sessionId"`
+			Title       string `json:"title"`
+			TotalTokens int64  `json:"totalTokens"`
+		} `json:"directSessions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Summary.TotalTokens != 10000 {
+		t.Fatalf("expected summary totalTokens=10000 (excluding handoff/sidechat/smoke forks), got %d", resp.Summary.TotalTokens)
+	}
+	if resp.Summary.ActiveSessions != 1 {
+		t.Fatalf("expected summary activeSessions=1, got %d", resp.Summary.ActiveSessions)
+	}
+	if len(resp.DirectSessions) != 1 || resp.DirectSessions[0].SessionID != "codex-normal" || resp.DirectSessions[0].Title != "正常业务会话" {
+		t.Fatalf("expected only codex-normal in directSessions, got %+v", resp.DirectSessions)
+	}
+}

@@ -154,6 +154,26 @@ export function displaySessionTitle(session: Pick<Session, 'title' | 'workspace'
   return workspaceBasename(session.workspace) || '未命名'
 }
 
+export function resolveSessionDisplayTitle(
+  sessions: Record<string, Session>,
+  agentId: string | null | undefined,
+  sessionId: string | null | undefined,
+  fallback?: { title?: string | null; workspace?: string | null },
+): string {
+  const live = agentId && sessionId ? sessions[scopeKey(agentId, sessionId)] : undefined
+  if (live) return displaySessionTitle(live)
+  const raw = (fallback?.title || '').trim()
+  if (raw && !isPlaceholderTitle(raw)) return raw
+  if (fallback?.workspace) {
+    return displaySessionTitle({
+      title: raw,
+      workspace: fallback.workspace,
+      agent_id: agentId || undefined,
+    })
+  }
+  return raw || sessionId || '未命名'
+}
+
 export function isHiddenRailSession(session: Session): boolean {
   if (session.native_kind === 'smoke') return true
   if (isEphemeralSession(session)) return true

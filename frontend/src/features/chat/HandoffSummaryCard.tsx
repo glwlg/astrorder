@@ -2,6 +2,7 @@ import { IconCheck, IconChevronRight, IconCopy, IconLoader2, IconRefresh, IconTr
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../../api/client'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
+import { resolveSessionDisplayTitle } from '../../components/sessionRailModel'
 import type { Session, SessionHandoffContext } from '../../domain/types'
 import { useAstrorderStore } from '../../state/store'
 
@@ -68,6 +69,7 @@ export function HandoffSummaryCard({ session, compact = false, renderMarkdown }:
   const sourceAgent = useAstrorderStore((state) =>
     session?.handoff_from_agent_id ? state.agents[session.handoff_from_agent_id] : undefined,
   )
+  const sessionsByKey = useAstrorderStore((state) => state.sessions)
 
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<SessionHandoffContext | null>(() =>
@@ -130,6 +132,14 @@ export function HandoffSummaryCard({ session, compact = false, renderMarkdown }:
 
   const sourceKind = data?.source_agent_kind || sourceAgent?.kind
   const sourceLabel = sourceKind ? agentKindLabel(sourceKind) : (data?.source_agent_name || '')
+  const sourceSessionTitle = (session.handoff_from_agent_id && session.handoff_from_session_id) || data?.source_session_title
+    ? resolveSessionDisplayTitle(
+        sessionsByKey,
+        session.handoff_from_agent_id,
+        session.handoff_from_session_id,
+        { title: data?.source_session_title },
+      )
+    : ''
   const consumed = Boolean(session.handoff_context_consumed || data?.consumed)
 
   const handleCopy = () => {
@@ -197,9 +207,9 @@ export function HandoffSummaryCard({ session, compact = false, renderMarkdown }:
               <div className="handoff-summary-toolbar">
                 <div className="handoff-summary-meta">
                   <span>{handoffModeLabel(data.mode)}</span>
-                  {data.source_session_title && (
-                    <span className="handoff-summary-meta-sep" title={data.source_session_title}>
-                      原会话：{data.source_session_title}
+                  {sourceSessionTitle && (
+                    <span className="handoff-summary-meta-sep" title={sourceSessionTitle}>
+                      原会话：{sourceSessionTitle}
                     </span>
                   )}
                 </div>

@@ -5,7 +5,7 @@ import type { Agent, Session } from '../../domain/types'
 import type { MessageSearchHit } from '../../api/client'
 import { sessionHandoffTargets } from '../../domain/handoff'
 import { scopeKey } from '../../domain/semantics'
-import { displaySessionTitle, formatRelativeTime, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
+import { displaySessionTitle, formatRelativeTime, resolveSessionDisplayTitle, sessionActivityStatus, type ProjectGroup } from '../../components/sessionRailModel'
 import { ProjectGlyph, projectAppearanceColor, type ProjectAppearanceMap } from '../../components/projectAppearance'
 import { useAstrorderStore } from '../../state/store'
 import { useShallow } from 'zustand/react/shallow'
@@ -279,7 +279,10 @@ export function MobileSessionDrawer({ groups, pins, pinnedProjects, selectedKey,
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <AgentBrandIcon kind={hit.agent_kind || agents?.[hit.agent_id]?.kind} size={14} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {hit.session_title || hit.session_id}
+                  {resolveSessionDisplayTitle(useAstrorderStore.getState().sessions, hit.agent_id, hit.session_id, {
+                    title: hit.session_title,
+                    workspace: hit.workspace,
+                  })}
                 </span>
               </span>
               <span className="m-msg-search-hit-time">{formatRelativeTime(hit.created_at)}</span>

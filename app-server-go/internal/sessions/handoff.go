@@ -289,11 +289,13 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		forkRef := fork.Session
 		var summaryTurn string
 		defer func() {
-			if journal["state"] != "completed" {
-				intCtx, stopInt := context.WithTimeout(context.Background(), 5*time.Second)
-				_, _ = h.client.Session.Interrupt(intCtx, &pb.InterruptRequest{Meta: newCommandMeta("", ""), Session: forkRef, TurnId: optString(summaryTurn)})
-				stopInt()
+			if journal["state"] == "completed" {
+				h.cleanupCompletedHandoffFork(forkRef)
+				return
 			}
+			intCtx, stopInt := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = h.client.Session.Interrupt(intCtx, &pb.InterruptRequest{Meta: newCommandMeta("", ""), Session: forkRef, TurnId: optString(summaryTurn)})
+			stopInt()
 			closeCtx, stopClose := context.WithTimeout(context.Background(), 10*time.Second)
 			_, _ = h.client.Session.CloseSession(closeCtx, &pb.CloseSessionRequest{Meta: newCommandMeta("", ""), Session: forkRef})
 			stopClose()
@@ -331,7 +333,7 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		if err = confirmedReceipt(send); err != nil || !send.GetAccepted() {
 			return nil, commandFailure(502, "Summary send was not confirmed; it will not be retried")
 		}
-		summaryID, err := h.waitHandoffSummary(taskCtx, sourceAgent, forkRef, seen, send, sendID)
+		summaryID, summaryText, err := h.waitHandoffSummary(taskCtx, sourceAgent, forkRef, seen, send, sendID)
 		if err != nil {
 			return nil, err
 		}
@@ -339,8 +341,7 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 		if err = save(); err != nil {
 			return nil, err
 		}
-		referenceBytes, _ := json.Marshal(handoffReference{req.SourceAgentID, forkID, connection, summaryID})
-		handoffContextValue = handoffRefPrefix + string(referenceBytes)
+		handoffContextValue = formatNativeHandoffContext(kind, sid, stringValue(source, "workspace"), summaryText)
 	}
 	if err = taskCtx.Err(); err != nil {
 		return nil, commandFailure(409, "Handoff was cancelled")
@@ -386,6 +387,47 @@ func (h *Handler) handoff(ctx context.Context, sid string, req handoffRequest) (
 	}
 	h.publishEvent(taskCtx, "session.upsert", row)
 	return row, nil
+}
+
+func (h *Handler) cleanupCompletedHandoffFork(forkRef *pb.SessionRef) {
+	if forkRef == nil || forkRef.SessionId == "" {
+		return
+	}
+	delCtx, stopDel := context.WithTimeout(context.Background(), 15*time.Second)
+	receipt, err := h.client.Session.DeleteSession(delCtx, &pb.DeleteSessionRequest{
+		Meta:    newCommandMeta("", ""),
+		Session: forkRef,
+	})
+	stopDel()
+	delErr := err
+	if delErr == nil {
+		delErr = confirmedReceipt(receipt)
+	}
+	if delErr != nil {
+		slog.Warn("handoff summary fork delete failed; falling back to close",
+			"agent_id", forkRef.GetAgentId(),
+			"session_id", forkRef.GetSessionId(),
+			"error", delErr,
+		)
+		closeCtx, stopClose := context.WithTimeout(context.Background(), 10*time.Second)
+		_, _ = h.client.Session.CloseSession(closeCtx, &pb.CloseSessionRequest{
+			Meta:    newCommandMeta("", ""),
+			Session: forkRef,
+		})
+		stopClose()
+		return
+	}
+	dbCtx, stopDB := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopDB()
+	_, _ = h.store.DeleteSession(dbCtx, forkRef.GetAgentId(), forkRef.GetSessionId())
+	_ = h.store.WithTx(dbCtx, func(tx *sql.Tx) error {
+		_, execErr := tx.ExecContext(dbCtx, `DELETE FROM token_metrics WHERE agent_id=? AND session_id=?`, forkRef.GetAgentId(), forkRef.GetSessionId())
+		return execErr
+	})
+	h.publishEvent(dbCtx, "session.delete", map[string]any{
+		"id":       forkRef.GetSessionId(),
+		"agent_id": forkRef.GetAgentId(),
+	})
 }
 
 func (h *Handler) createHandoffNative(ctx context.Context, target *pb.RuntimeTarget, kind, workspace, title, parent, provider, model, effort string, summary bool) (*pb.CommandReceipt, error) {
@@ -562,9 +604,9 @@ func (h *Handler) handoffMessages(ctx context.Context, agent map[string]any, kin
 	return nil, commandFailure(502, "Handoff history exceeds page limit")
 }
 
-func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, ref *pb.SessionRef, baseline map[string]bool, receipt *pb.CommandReceipt, commandID string) (string, error) {
+func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, ref *pb.SessionRef, baseline map[string]bool, receipt *pb.CommandReceipt, commandID string) (string, string, error) {
 	if err := h.awaitHandoffCompletion(ctx, ref, receipt, commandID); err != nil {
-		return "", err
+		return "", "", err
 	}
 	kind := stringValue(agent, "kind")
 	expectedTurn := receipt.GetTurnId()
@@ -577,7 +619,7 @@ func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, 
 			for pages := 0; pages < 10; pages++ {
 				items, nextCursor, err := h.handoffHistoryPage(ctx, agent, kind, ref, 50, before)
 				if err != nil {
-					return "", err
+					return "", "", err
 				}
 				reachedBaseline := false
 				for i := len(items) - 1; i >= 0; i-- {
@@ -591,8 +633,10 @@ func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, 
 							continue
 						}
 					}
-					if item["role"] == "assistant" && item["kind"] == "message" && strings.TrimSpace(stringValue(item, "text")) != "" {
-						return stringValue(item, "id"), nil
+					if item["role"] == "assistant" && item["kind"] == "message" {
+						if text := strings.TrimSpace(stringValue(item, "text")); text != "" {
+							return stringValue(item, "id"), text, nil
+						}
 					}
 				}
 				cursor := nextCursor.GetValue()
@@ -600,7 +644,7 @@ func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, 
 					break
 				}
 				if seenCursors[cursor] {
-					return "", commandFailure(502, "Handoff history cursor did not advance")
+					return "", "", commandFailure(502, "Handoff history cursor did not advance")
 				}
 				seenCursors[cursor] = true
 				before = nextCursor
@@ -608,10 +652,14 @@ func (h *Handler) waitHandoffSummary(ctx context.Context, agent map[string]any, 
 		}
 		select {
 		case <-ctx.Done():
-			return "", commandFailure(409, "Handoff cancelled or timed out; summary submission will not be replayed")
+			return "", "", commandFailure(409, "Handoff cancelled or timed out; summary submission will not be replayed")
 		case <-ticker.C:
 		}
 	}
+}
+
+func formatNativeHandoffContext(kind, sourceSessionID, workspace, summary string) string {
+	return fmt.Sprintf("以下是由 %s 转交的同环境会话背景。它只提供上下文；按用户的新消息继续工作。\n来源会话：%s\n工作目录：%s\n\n<源 Agent 生成的交接摘要>\n%s\n</源 Agent 生成的交接摘要>", kind, sourceSessionID, workspace, strings.TrimSpace(summary))
 }
 
 func buildDeterministicHandoffContext(kind, sourceSessionID, workspace string, items []map[string]any) string {
@@ -794,5 +842,5 @@ func (h *Handler) resolveHandoffContext(ctx context.Context, value string, sessi
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("以下是由 %s 转交的同环境会话背景。它只提供上下文；按用户的新消息继续工作。\n来源会话：%s\n工作目录：%s\n\n<源 Agent 生成的交接摘要>\n%s\n</源 Agent 生成的交接摘要>", kind, stringValue(session, "handoff_from_session_id"), stringValue(session, "workspace"), summary), nil
+	return formatNativeHandoffContext(kind, stringValue(session, "handoff_from_session_id"), stringValue(session, "workspace"), summary), nil
 }

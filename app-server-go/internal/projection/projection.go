@@ -863,6 +863,29 @@ func isPlaceholderTitle(title, id string) bool {
 	return store.IsPlaceholderSessionTitle(title, id)
 }
 
+// canUpgradeProjectedSessionTitleTx matches sessions.canUpgradeSessionTitle:
+// incoming native catalog/event titles may replace placeholders or our own
+// auto-generated (fallback/llm) titles, never a user's manual rename or an
+// already-established Astrorder session title.
+func canUpgradeProjectedSessionTitleTx(ctx context.Context, tx *sql.Tx, agentID, sessionID, existingTitle string) bool {
+	if isPlaceholderTitle(existingTitle, sessionID) {
+		return true
+	}
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, store.SessionTitleKey(agentID, sessionID)).Scan(&raw)
+	if err != nil {
+		return false
+	}
+	var marker struct {
+		Title  string `json:"title"`
+		Source string `json:"source"`
+	}
+	if json.Unmarshal([]byte(raw), &marker) != nil {
+		return false
+	}
+	return marker.Title == existingTitle && (marker.Source == "fallback" || marker.Source == "llm")
+}
+
 func truncateCodepoints(s string, max int) string {
 	runes := []rune(s)
 	if len(runes) > max {
@@ -1461,8 +1484,11 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		}
 	} else {
 		existing := existingRows[0]
-		if isPlaceholderTitle(title, id) && !isPlaceholderTitle(fmt.Sprint(existing["title"]), id) {
-			title = fmt.Sprint(existing["title"])
+		existingTitle := fmt.Sprint(existing["title"])
+		if isPlaceholderTitle(title, id) && !isPlaceholderTitle(existingTitle, id) {
+			title = existingTitle
+		} else if !isPlaceholderTitle(existingTitle, id) && title != existingTitle && !canUpgradeProjectedSessionTitleTx(ctx, tx, agentID, id, existingTitle) {
+			title = existingTitle
 		}
 		workspace := preserveNilPayload(payload, "workspace", existing["workspace"])
 		projectID := preserveNilPayload(payload, "project_id", existing["project_id"])
@@ -2511,6 +2537,22 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 	lastReasoningTokens := getInt("last_reasoning_tokens")
 
 	if model != "" && aid != "" && sid != "" {
+		// Handoff summary forks inherit the parent thread's entire cumulative token
+		// counter in native Codex/Hermes runtimes. Skip persisting token_metrics for
+		// these ephemeral helper forks so historical totals are never double-counted.
+		var sessEphemeral bool
+		var sessTitle string
+		if tx.QueryRowContext(ctx, `SELECT ephemeral, COALESCE(title, '') FROM sessions WHERE agent_id=? AND id=?`, aid, sid).Scan(&sessEphemeral, &sessTitle) == nil &&
+			sessEphemeral && sessTitle == "转交摘要" {
+			return []store.Event{{
+				ID:        fmt.Sprintf("token-usage-%s-%d", sid, time.Now().UnixNano()),
+				Type:      "token.usage",
+				AgentID:   aid,
+				SessionID: sid,
+				Data:      payload,
+			}}, nil
+		}
+
 		var prevOut, prevReason int64
 		_ = tx.QueryRowContext(ctx,
 			`SELECT output_tokens, reasoning_tokens
@@ -2523,11 +2565,8 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 		var prevSpeed float64
 		var rawSpeedPref string
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM workspace_preferences WHERE "key"=?`, speedPrefKey).Scan(&rawSpeedPref); err == nil && rawSpeedPref != "" {
-			var parsed struct {
-				Speed float64 `json:"speed"`
-			}
-			if json.Unmarshal([]byte(rawSpeedPref), &parsed) == nil && parsed.Speed > 0 {
-				prevSpeed = parsed.Speed
+			if parsedSpeed, ok := ParseSessionSpeedPref(rawSpeedPref); ok {
+				prevSpeed = parsedSpeed
 			}
 		}
 
@@ -2567,7 +2606,7 @@ func projectTokenMetricsTx(ctx context.Context, tx *sql.Tx, streamID, agentID st
 			if tps, ok := tracker.ObserveUsage(aid, sid, curGen, explicitDelta, prevGen, hasCum, providerStr, activityTimeFromContext(ctx)); ok {
 				computedSpeed = tps
 				payload["speed"] = tps
-				if encoded, mErr := json.Marshal(map[string]any{"speed": tps}); mErr == nil {
+				if encoded, mErr := json.Marshal(encodeSessionSpeedPref(tps)); mErr == nil {
 					_, _ = tx.ExecContext(ctx, `INSERT INTO workspace_preferences("key",value) VALUES(?,?) ON CONFLICT("key") DO UPDATE SET value=excluded.value`, speedPrefKey, string(encoded))
 				}
 			}

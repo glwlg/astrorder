@@ -181,6 +181,9 @@ func TestHandleGetSessionSwarmAntigravityAndNonAntigravity(t *testing.T) {
 	if err := json.Unmarshal(liveRec.Body.Bytes(), &livePayload); err != nil {
 		t.Fatal(err)
 	}
+	if livePayload["title"] != "Review Team" {
+		t.Fatalf("expected explicit swarm title preserved, got %v", livePayload["title"])
+	}
 	if livePayload["active"] != true {
 		t.Fatalf("expected active=true while owned coordinator is running, got %+v", livePayload)
 	}
@@ -190,5 +193,40 @@ func TestHandleGetSessionSwarmAntigravityAndNonAntigravity(t *testing.T) {
 	}
 	if liveMembers[1].(map[string]any)["name"] != "new-auditor" {
 		t.Fatalf("expected more recently updated new-auditor ahead of old-reviewer, got %+v", liveMembers[1])
+	}
+
+	// 6. When Swarm falls back to the coordinator's native title, prefer Astrorder's stored session list title.
+	_, _ = st.UpdateSession(ctx, "local-antigravity", coordID, map[string]any{"title": "功能迭代"})
+	rt.resp = map[string]any{
+		"supported":              true,
+		"available":              true,
+		"active":                 false,
+		"kind":                   "subagents",
+		"title":                  "UI/UX Review Of Astrorder",
+		"coordinator_session_id": coordID,
+		"current_session_id":     coordID,
+		"is_coordinator":         true,
+		"summary":                map[string]any{"total": 1, "working": 0, "waiting": 0, "stopped": 1, "killed": 0},
+		"members": []any{
+			map[string]any{"name": "coordinator", "is_coordinator": true, "conversation_id": coordID, "title": "UI/UX Review Of Astrorder", "state": "stopped"},
+		},
+		"board":      []any{},
+		"updated_at": "2026-11-22T12:06:00Z",
+	}
+	titleReq := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+coordID+"/swarm?agent_id=local-antigravity", nil)
+	titleReq.Header.Set("Authorization", "Bearer browser-sec")
+	titleRec := httptest.NewRecorder()
+	h.ServeHTTP(titleRec, titleReq)
+	if titleRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", titleRec.Code, titleRec.Body.String())
+	}
+	var titlePayload map[string]any
+	_ = json.Unmarshal(titleRec.Body.Bytes(), &titlePayload)
+	if titlePayload["title"] != "功能迭代" {
+		t.Fatalf("expected fallback swarm title replaced with stored session title, got %v", titlePayload["title"])
+	}
+	titleMembers := titlePayload["members"].([]any)
+	if titleMembers[0].(map[string]any)["title"] != "功能迭代" {
+		t.Fatalf("expected coordinator member title replaced with stored session title, got %+v", titleMembers[0])
 	}
 }

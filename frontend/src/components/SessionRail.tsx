@@ -823,7 +823,7 @@ export function SessionRail({
     : confirmation?.kind === 'batch-delete-sessions'
       ? `确定删除选中的 ${confirmation.count} 个会话吗？\n此操作将永久移除这些会话且无法撤销。`
       : confirmation?.kind === 'delete-session'
-        ? `确定删除会话“${confirmation.session.title || confirmation.session.id}”吗？`
+        ? `确定删除会话“${displaySessionTitle(confirmation.session)}”吗？`
         : ''
 
   const confirmDeletion = async () => {
@@ -1125,7 +1125,7 @@ export function SessionRail({
                     event.dataTransfer.setData('application/x-astrorder-session', JSON.stringify({
                       agent_id: session.agent_id,
                       id: session.id,
-                      title: session.title || '未命名会话',
+                      title: displaySessionTitle(session),
                       key,
                     }))
                     event.dataTransfer.setData('text/plain', key)
@@ -1527,7 +1527,7 @@ export function SessionRail({
                             event.dataTransfer.setData('application/x-astrorder-session', JSON.stringify({
                               agent_id: session.agent_id,
                               id: session.id,
-                              title: session.title || '未命名会话',
+                              title: displaySessionTitle(session),
                               key,
                             }))
                             event.dataTransfer.setData('text/plain', key)

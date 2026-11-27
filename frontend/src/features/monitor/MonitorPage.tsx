@@ -17,7 +17,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { Agent, Command, Message, Session } from '../../domain/types'
 import { EmptyState } from '../../components/EmptyState'
-import { isHiddenRailSession } from '../../components/sessionRailModel'
+import { displaySessionTitle, isHiddenRailSession } from '../../components/sessionRailModel'
 import { useSessionResources } from '../../hooks/useAstrorderData'
 import { selectApprovals, selectCommands, selectMessages, selectSessions, useAstrorderStore } from '../../state/store'
 import { newCommandId, scopeKey } from '../../domain/semantics'
@@ -519,7 +519,7 @@ export const MonitorCard = memo(function MonitorCard({
                   </span>
                 </Tooltip>
                 <div className="monitor-card-title">
-                  <Title order={3} size="h4">{session.title || '未命名会话'}</Title>
+                  <Title order={3} size="h4">{displaySessionTitle(session)}</Title>
                 </div>
               </Group>
               <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -694,7 +694,7 @@ export const MonitorCard = memo(function MonitorCard({
               )}
               <Textarea
                 className="monitor-composer-textarea"
-                aria-label={'发送到 ' + (session.title || '未命名会话')}
+                aria-label={'发送到 ' + displaySessionTitle(session)}
                 placeholder="向此会话发送指令 (Enter 发送)…"
                 variant="unstyled"
                 autosize
@@ -821,8 +821,8 @@ const MonitorListRow = memo(function MonitorListRow({
             </span>
           </Tooltip>
           <div className='monitor-row-title-block'>
-            <span className='monitor-row-title' onClick={handleOpen} title={session.title || '未命名会话'}>
-              {session.title || '未命名会话'}
+            <span className='monitor-row-title' onClick={handleOpen} title={displaySessionTitle(session)}>
+              {displaySessionTitle(session)}
             </span>
             {session.workspace && (
               <span className='monitor-row-path' title={session.workspace}>
@@ -1196,7 +1196,7 @@ export function MonitorPage() {
   const candidates = useMemo(() => {
     const shown = new Set(gridVisibleSessions.map(session => scopeKey(session.agent_id, session.id)))
     const query = search.trim().toLowerCase()
-    return sessions.filter(session => !isCompanionSubagentSession(session) && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
+    return sessions.filter(session => !isCompanionSubagentSession(session) && !shown.has(scopeKey(session.agent_id, session.id)) && (!query || (session.title + ' ' + displaySessionTitle(session) + ' ' + (session.workspace || '') + ' ' + (agents[session.agent_id]?.name || '')).toLowerCase().includes(query)))
   }, [agents, gridVisibleSessions, search, sessions])
 
   const appendSlotOrder = useCallback((keys: string[]) => {
@@ -1802,7 +1802,7 @@ export function MonitorPage() {
                     setSearch('')
                   }}
                 >
-                  <span className="picker-title">{session.title || '未命名会话'}</span>
+                  <span className="picker-title">{displaySessionTitle(session)}</span>
                   <span className="picker-agent-chip">
                     <AgentBrandIcon kind={agent?.kind} size={13} />
                     <span>{agent?.name || session.agent_id}</span>

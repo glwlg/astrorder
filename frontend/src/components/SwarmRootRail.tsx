@@ -16,7 +16,7 @@ import {
 } from '@tabler/icons-react'
 import {  useNavigate, useSearchParams } from 'react-router-dom'
 import type { Agent, Session } from '../domain/types'
-import { sessionActivityStatus } from './sessionRailModel'
+import { displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
 import { AgentBrandIcon } from './AgentBrandIcon'
 import { buildSwarmTopology } from '../domain/swarmTopology'
 
@@ -131,7 +131,7 @@ export function SwarmRootRail({
                         />
                       )}
                       <Text size="sm" fw={isSelected ? 650 : 550} truncate style={{ color: 'var(--astr-text)' }}>
-                        {star.session.title || '主星协同会话'}
+                        {displaySessionTitle(star.session)}
                       </Text>
                     </Group>
                     <Group gap={6} wrap="nowrap">

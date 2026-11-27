@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"astrorder.dev/app-server/internal/store"
 )
 
 // CollectRequest specifies the time window, project scope, and data sources to gather.
@@ -522,7 +524,7 @@ func (h *handler) Collect(ctx context.Context, req CollectRequest) (*DigestBundl
 					assistantNotes = assistantNotes[len(assistantNotes)-2:]
 				}
 
-				title := meta.title
+				title := store.DisplaySessionTitle(meta.title, meta.sessionID, meta.workspace, meta.agentID)
 				if title == "" && len(userGoals) > 0 {
 					title = truncateRunesClean(userGoals[0], 48)
 				}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildProjectGroups, displaySessionTitle, sessionActivityStatus } from './sessionRailModel'
+import { buildProjectGroups, displaySessionTitle, resolveSessionDisplayTitle, sessionActivityStatus } from './sessionRailModel'
 import type { Command, Message, Session, Task } from '../domain/types'
 import { useAstrorderStore } from '../state/store'
 
@@ -293,5 +293,13 @@ describe('session rail hygiene', () => {
     expect(displaySessionTitle(railSession({ id: 'no-ws', title: 'Untitled session', workspace: null }))).toBe('未命名')
     expect(displaySessionTitle(railSession({ id: 'real', title: '排查 Codex 思考强度' }))).toBe('排查 Codex 思考强度')
     expect(displaySessionTitle(railSession({ id: 'hermes-unnamed', agent_id: 'local-hermes-default', title: '新会话', workspace: 'P:/workspace/example-org/ai/astrorder' }))).toBe('未命名')
+  })
+
+  it('prefers live session list title over stale fallback or native title', () => {
+    const live = railSession({ id: 's-1', agent_id: 'ssh-antigravity-wsl', title: '功能迭代' })
+    const map = { 'ssh-antigravity-wsl::s-1': live }
+    expect(resolveSessionDisplayTitle(map, 'ssh-antigravity-wsl', 's-1', { title: 'UI/UX Review Of Astrorder' })).toBe('功能迭代')
+    expect(resolveSessionDisplayTitle({}, 'ssh-antigravity-wsl', 's-missing', { title: 'New Session', workspace: '/home/luwei/workspace/OpsCore' })).toBe('OpsCore')
+    expect(resolveSessionDisplayTitle({}, 'ssh-antigravity-wsl', 's-missing', { title: '独立标题' })).toBe('独立标题')
   })
 })

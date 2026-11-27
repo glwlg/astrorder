@@ -190,10 +190,10 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		if id == "" || event.AgentID == "" || event.SessionID == "" {
 			continue
 		}
-		var sessionTitle, status, agentKind string
+		var sessionTitle, workspace, status, agentKind string
 		var ephemeral bool
-		err := db.QueryRowContext(ctx, `SELECT s.title,s.status,s.ephemeral,a.kind FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.agent_id=? AND s.id=?`,
-			event.AgentID, event.SessionID).Scan(&sessionTitle, &status, &ephemeral, &agentKind)
+		err := db.QueryRowContext(ctx, `SELECT s.title,coalesce(s.workspace,''),s.status,s.ephemeral,a.kind FROM sessions s JOIN agents a ON a.id=s.agent_id WHERE s.agent_id=? AND s.id=?`,
+			event.AgentID, event.SessionID).Scan(&sessionTitle, &workspace, &status, &ephemeral, &agentKind)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -222,7 +222,7 @@ func Events(ctx context.Context, db queryer, events []store.Event) ([]store.Even
 		}
 		sum := sha256.Sum256([]byte(event.AgentID + "\x00" + event.SessionID + "\x00" + id))
 		key := "notice-" + hex.EncodeToString(sum[:])
-		message := label(sessionTitle)
+		message := label(store.DisplaySessionTitle(sessionTitle, event.SessionID, workspace, event.AgentID))
 		if message == "" {
 			message = "会话"
 		}
