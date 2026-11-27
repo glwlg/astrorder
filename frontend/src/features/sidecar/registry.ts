@@ -1,4 +1,8 @@
+import { IconPuzzle } from '@tabler/icons-react'
 import type { ArtifactRef } from '../../domain/artifact'
+import { extensionRegistry } from '../extensions/extensionRegistry'
+import { PluginPanelViewer } from '../extensions/SlotRenderer'
+import { EXTERNAL_PLUGIN_PANEL_VIEWER_ID, parsePluginPanelArtifact } from '../extensions/types'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import type { ArtifactViewer } from './types'
 import { diffViewer } from './viewers/diff'
@@ -26,6 +30,31 @@ import { pdfViewer } from './viewers/pdf'
 import { docxViewer } from './viewers/docx'
 import { sheetViewer } from './viewers/sheet'
 import { pptxViewer } from './viewers/pptx'
+
+const externalPluginPanelViewer: ArtifactViewer = {
+  id: EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+  title: '扩展面板',
+  description: '承载内置及第三方扩展注册的侧边栏工作台面板',
+  icon: IconPuzzle,
+  supports: (artifact: ArtifactRef): number => {
+    const isExtMedia = Boolean(artifact.mediaType?.startsWith('application/x-astrorder-ext.'))
+    const isExtId = artifact.id.startsWith('ext:')
+    if (!isExtMedia && !isExtId) return 0
+    const parsed = parsePluginPanelArtifact(artifact)
+    if (
+      parsed.pluginId &&
+      extensionRegistry.getBuiltin(parsed.pluginId) &&
+      !usePluginSettingsStore.getState().isPluginEnabled(parsed.pluginId)
+    ) {
+      return 0
+    }
+    return isExtMedia ? 95 : 85
+  },
+  component: PluginPanelViewer,
+  capabilities: {
+    canEdit: false,
+  },
+}
 
 const NON_PREVIEWABLE_EXTENSIONS = /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|woff2?|ttf|otf)$/i
 
@@ -62,6 +91,7 @@ class ArtifactViewerRegistry {
     this.register(gitDiffViewer)
     this.register(gitWorktreesViewer)
     this.register(gitlabCIViewer)
+    this.register(externalPluginPanelViewer)
     this.register(sideChatViewer)
     this.register(agentGraphViewer)
   }

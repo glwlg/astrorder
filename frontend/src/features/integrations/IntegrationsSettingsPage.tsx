@@ -30,7 +30,6 @@ import { SIDEBAR_INTEGRATIONS_PLUGIN_ID, usePluginSettingsStore } from '../plugi
 import { IntegrationFormModal } from './IntegrationFormModal'
 import { IntegrationIcon } from './integrationIcons'
 import { useIntegrationsStore } from './integrationStore'
-import { GitLabSettingsSection } from '../gitlab/GitLabSettingsSection'
 import './integrations.css'
 
 export function IntegrationsSettingsPage() {
@@ -344,8 +343,6 @@ export function IntegrationsSettingsPage() {
           ))}
         </Stack>
       )}
-
-      <GitLabSettingsSection />
 
       <IntegrationFormModal
         opened={modalOpened}

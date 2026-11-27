@@ -100,6 +100,9 @@ func (s *Service) skillDelivery(ctx context.Context, source envtarget.Env, sourc
 	if sourceAgent == "astrorder" {
 		return s.officialSkillDelivery(name)
 	}
+	if sourceAgent == "plugin" {
+		return s.pluginSkillDelivery(ctx, name)
+	}
 	if _, official := officialskills.GetOfficialSkill(name); official {
 		return nil, envtarget.Errorf(422, "请从星序技能目录分发官方模块，以使用目标 Agent 的运行配置")
 	}

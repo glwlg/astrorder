@@ -343,6 +343,7 @@ export interface EventNotification {
   session_id: string;
   group_id?: string;
   group_name?: string;
+  target_path?: string;
   created_at: string;
 }
 

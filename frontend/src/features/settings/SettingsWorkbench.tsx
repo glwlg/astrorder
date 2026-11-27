@@ -24,6 +24,11 @@ import {
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../integrations/integrationStore'
+import { useExtensionStore } from '../extensions/extensionStore'
+import {
+  PENDING_PLUGIN_CONFIG_SESSION_KEY,
+  type OpenPluginConfigEventDetail,
+} from '../extensions/types'
 import {
   SettingsModeContext,
   isAdvancedSettingsTab,
@@ -66,12 +71,29 @@ export function normalizeSettingsTab(tab?: string | null): string {
   return VALID_SETTINGS_TABS.has(mapped) ? mapped : 'general'
 }
 
+function forwardPluginConfigOpen(pluginId?: string | null): void {
+  const clean = pluginId?.trim()
+  if (!clean) return
+  try {
+    sessionStorage.setItem(PENDING_PLUGIN_CONFIG_SESSION_KEY, clean)
+  } catch {
+    // ignore storage errors in restricted contexts
+  }
+  window.dispatchEvent(
+    new CustomEvent<OpenPluginConfigEventDetail>('astrorder:open-plugin-config', {
+      detail: { pluginId: clean },
+    }),
+  )
+}
+
 export function SettingsWorkbench({
   tab,
+  pluginId,
   onTabChange,
   onBackToMain,
 }: {
   tab: string
+  pluginId?: string
   onTabChange: (tab: string) => void
   onBackToMain?: () => void
 }) {
@@ -101,6 +123,28 @@ export function SettingsWorkbench({
       writeStoredSettingsMode('advanced')
     }
   }, [normalizedTab, mode])
+
+  useEffect(() => {
+    if (pluginId && normalizedTab === 'plugins') {
+      forwardPluginConfigOpen(pluginId)
+    }
+  }, [pluginId, normalizedTab])
+
+  useEffect(() => {
+    const onOpenSettings = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: string; pluginId?: string }>).detail
+      if (detail?.pluginId) {
+        if (detail.tab) {
+          onTabChange(normalizeSettingsTab(detail.tab))
+        } else {
+          onTabChange('plugins')
+        }
+        forwardPluginConfigOpen(detail.pluginId)
+      }
+    }
+    window.addEventListener('astrorder:open-settings', onOpenSettings)
+    return () => window.removeEventListener('astrorder:open-settings', onOpenSettings)
+  }, [onTabChange])
 
   useEffect(() => {
     if (!integrationsPluginEnabled && normalizedTab === 'integrations') {
@@ -275,27 +319,45 @@ class SettingsErrorBoundary extends Component<
 export function StandaloneSettingsPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const initialTab = normalizeSettingsTab(new URLSearchParams(location.search).get('tab'))
+  const initialSearch = new URLSearchParams(location.search)
+  const initialTab = normalizeSettingsTab(initialSearch.get('tab'))
   const [tab, setTab] = useState<string>(initialTab)
+  const [targetPluginId, setTargetPluginId] = useState<string | undefined>(
+    () => (initialSearch.get('pluginId') || initialSearch.get('plugin') || '').trim() || undefined,
+  )
 
   useEffect(() => {
     document.title = '星序 · 设置'
     void usePluginSettingsStore.getState().hydrate()
     void useIntegrationsStore.getState().hydrate()
+    void useExtensionStore.getState().hydrate()
   }, [])
 
   useEffect(() => {
-    const queryTab = new URLSearchParams(location.search).get('tab')
+    const search = new URLSearchParams(location.search)
+    const queryTab = search.get('tab')
     if (queryTab) {
       setTab(normalizeSettingsTab(queryTab))
+    }
+    const queryPluginId = (search.get('pluginId') || search.get('plugin') || '').trim()
+    if (queryPluginId) {
+      setTargetPluginId(queryPluginId)
+      forwardPluginConfigOpen(queryPluginId)
     }
   }, [location.search])
 
   useEffect(() => {
     const onSwitchTab = (event: Event) => {
-      const detail = (event as CustomEvent<{ tab?: string }>).detail
+      const detail = (event as CustomEvent<{ tab?: string; pluginId?: string }>).detail
       if (detail?.tab) {
         setTab(normalizeSettingsTab(detail.tab))
+      } else if (detail?.pluginId) {
+        setTab('plugins')
+      }
+      if (detail?.pluginId) {
+        const clean = detail.pluginId.trim()
+        setTargetPluginId(clean || undefined)
+        forwardPluginConfigOpen(clean)
       }
     }
     const onNavigateRoute = (event: Event) => {
@@ -334,7 +396,7 @@ export function StandaloneSettingsPage() {
         <div className="settings-modal settings-standalone-window" role="main" aria-label="星序设置窗口">
           <div className="settings-standalone-body">
             <SettingsErrorBoundary resetKey={tab}>
-              <SettingsWorkbench tab={tab} onTabChange={setTab} onBackToMain={handleReturnToChat} />
+              <SettingsWorkbench tab={tab} pluginId={targetPluginId} onTabChange={setTab} onBackToMain={handleReturnToChat} />
             </SettingsErrorBoundary>
           </div>
         </div>

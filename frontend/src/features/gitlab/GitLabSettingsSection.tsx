@@ -47,7 +47,12 @@ const EMPTY_FORM: InstanceFormState = {
   is_default: false,
 }
 
-export function GitLabSettingsSection() {
+export interface GitLabSettingsSectionProps {
+  embedded?: boolean
+  onClose?: () => void
+}
+
+export function GitLabSettingsSection({ embedded = true, onClose: _onClose }: GitLabSettingsSectionProps = {}) {
   const queryClient = useContext(QueryClientContext)
   const [instances, setInstances] = useState<GitLabInstance[]>([])
   const [loading, setLoading] = useState(false)
@@ -211,14 +216,15 @@ export function GitLabSettingsSection() {
   }
 
   return (
-    <div style={{ marginTop: 28 }}>
-      <Paper p="md" withBorder radius="lg" mb="md" style={{ background: 'var(--astr-surface)' }}>
+    <div style={embedded ? undefined : { marginTop: 28 }}>
+      <Paper p={embedded ? 'sm' : 'md'} withBorder radius={embedded ? 'md' : 'lg'} mb="md" style={{ background: 'var(--astr-surface)' }}>
         <Group justify="space-between" align="center" wrap="wrap" gap="sm">
-          <Group gap="sm">
+          <Group gap="sm" wrap="nowrap" align="flex-start" style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
                 width: 38,
                 height: 38,
+                flexShrink: 0,
                 borderRadius: 10,
                 background: 'color-mix(in srgb, #e24329 12%, transparent)',
                 color: '#e24329',
@@ -229,9 +235,9 @@ export function GitLabSettingsSection() {
             >
               <IconBrandGitlab size={22} />
             </div>
-            <div>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <Title order={3} size="h4">GitLab CI / CD 集成</Title>
-              <Text size="xs" c="dimmed" mt={2}>
+              <Text size="xs" c="dimmed" mt={2} style={{ overflowWrap: 'anywhere' }}>
                 支持自建内网 GitLab 与 gitlab.com。配置后，对话底栏自动展示当前仓库 CI 流水线状态，Agent 也可随时查询流水线与失败日志。
               </Text>
             </div>
@@ -393,7 +399,10 @@ export function GitLabSettingsSection() {
             label="实例名称"
             placeholder="例如：公司自建 GitLab"
             value={form.name}
-            onChange={(e) => setForm((prev) => ({ ...prev, name: e.currentTarget.value }))}
+            onChange={(e) => {
+              const nextValue = e.currentTarget.value
+              setForm((prev) => ({ ...prev, name: nextValue }))
+            }}
           />
           <TextInput
             label="GitLab 服务地址"
@@ -401,7 +410,10 @@ export function GitLabSettingsSection() {
             placeholder="https://gitlab.company.com 或 http://10.0.0.10:8080"
             description="支持自建域名、内网 IP 及自定义端口，会自动按仓库 git remote 主机名匹配"
             value={form.base_url}
-            onChange={(e) => setForm((prev) => ({ ...prev, base_url: e.currentTarget.value }))}
+            onChange={(e) => {
+              const nextValue = e.currentTarget.value
+              setForm((prev) => ({ ...prev, base_url: nextValue }))
+            }}
           />
           <PasswordInput
             label="Personal Access Token"
@@ -409,23 +421,35 @@ export function GitLabSettingsSection() {
             placeholder={editing ? '留空保持当前 Token 不变' : 'glpat-xxxxxxxxxxxxxxxxxxxx'}
             description="只读查看流水线与日志需要 read_api 权限；在星序内重试/取消/手动触发任务需要 api 权限"
             value={form.token}
-            onChange={(e) => setForm((prev) => ({ ...prev, token: e.currentTarget.value }))}
+            onChange={(e) => {
+              const nextValue = e.currentTarget.value
+              setForm((prev) => ({ ...prev, token: nextValue }))
+            }}
           />
           <Switch
             label="跳过 TLS 自签名证书校验（内网自建 HTTPS 证书常用）"
             checked={form.insecure_skip_verify}
-            onChange={(e) => setForm((prev) => ({ ...prev, insecure_skip_verify: e.currentTarget.checked }))}
+            onChange={(e) => {
+              const nextChecked = e.currentTarget.checked
+              setForm((prev) => ({ ...prev, insecure_skip_verify: nextChecked }))
+            }}
           />
           <Group gap="lg">
             <Switch
               label="启用此实例"
               checked={form.enabled}
-              onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+              onChange={(e) => {
+                const nextChecked = e.currentTarget.checked
+                setForm((prev) => ({ ...prev, enabled: nextChecked }))
+              }}
             />
             <Switch
               label="设为默认实例"
               checked={form.is_default}
-              onChange={(e) => setForm((prev) => ({ ...prev, is_default: e.currentTarget.checked }))}
+              onChange={(e) => {
+                const nextChecked = e.currentTarget.checked
+                setForm((prev) => ({ ...prev, is_default: nextChecked }))
+              }}
             />
           </Group>
 

@@ -49,6 +49,7 @@ type Options struct {
 	Kernels             *kernelcontrol.Service
 	CodexDesktop        func(context.Context) (map[string]any, error)
 	AgentInstalledProbe func(kind string) bool
+	OnPluginsChanged    func()
 }
 
 type handler struct {

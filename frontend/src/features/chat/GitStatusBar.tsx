@@ -12,11 +12,10 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconBrandGitlab } from '@tabler/icons-react'
 import { CaretUpIcon, CheckIcon, GitBranchIcon, PlusIcon } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useGitStatus } from '../../hooks/useGitStatus'
-import { gitLabStatusMeta, useGitLabPipelines } from '../../hooks/useGitLabCI'
+import { ComposerStatusBarSlots, GitMenuExtensionItems } from '../extensions/SlotRenderer'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { WORKFLOW_GIT_WORKTREE_PLUGIN_ID } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
@@ -78,16 +77,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
   const changedFiles = git.data?.changed_files || 0
   const openGitDiff = useSidecarStore((s) => s.openGitDiff)
   const openWorktrees = useSidecarStore((s) => s.openWorktrees)
-  const openGitLabCI = useSidecarStore((s) => s.openGitLabCI)
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
-  const gitlabViewerEnabled = usePluginSettingsStore((s) => s.isPluginEnabled('gitlab-ci-viewer'))
-  const gitlab = useGitLabPipelines(session, {
-    enabled: gitlabViewerEnabled && !statusUnavailable && !statusLoading && Boolean(branch),
-    limit: 6,
-  })
-  const matchedGitLab = Boolean(gitlabViewerEnabled && !statusUnavailable && gitlab.data?.matched)
-  const latestPipeline = matchedGitLab ? gitlab.data?.latest_pipeline || null : null
-  const latestPipelineMeta = latestPipeline ? gitLabStatusMeta(latestPipeline.status) : null
   const isLinkedWorktree = Boolean(
     session.worktree_root_workspace
     && session.workspace
@@ -264,26 +254,7 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
                   基于当前创建新分支...
                 </Text>
               </Menu.Item>
-              {gitlabViewerEnabled && session.workspace && (
-                <>
-                  <Menu.Divider />
-                  <Menu.Label>CI / CD</Menu.Label>
-                  <Menu.Item
-                    leftSection={<IconBrandGitlab size={16} color="#e24329" />}
-                    onClick={() => openGitLabCI(
-                      session.id,
-                      session.agent_id,
-                      session.workspace || undefined,
-                      session.connection_id || undefined,
-                      latestPipeline?.id,
-                    )}
-                  >
-                    <Text size="xs">
-                      查看 GitLab CI 流水线...
-                    </Text>
-                  </Menu.Item>
-                </>
-              )}
+              <GitMenuExtensionItems session={session} />
               {worktreeEnabled && session.workspace && (
                 <>
                   <Menu.Divider />
@@ -314,42 +285,12 @@ export function GitStatusBar({ session }: GitStatusBarProps) {
             </Menu.Dropdown>
           </Menu>
 
-          {/* GitLab CI 实时流水线状态胶囊（仅当当前仓库匹配到已配置 GitLab 实例时展示） */}
-          {matchedGitLab && (
-            <Tooltip
-              label={
-                latestPipeline
-                  ? `${gitlab.data?.repo?.project_path || 'GitLab'} · #${latestPipeline.id} (${latestPipeline.ref} @ ${latestPipeline.short_sha}) — 点击查看 CI 流水线与日志`
-                  : `${gitlab.data?.repo?.project_path || 'GitLab'} — 点击查看 GitLab CI 流水线`
-              }
-            >
-              <UnstyledButton
-                className={`composer-gitlab-pill${latestPipelineMeta ? ` is-${latestPipelineMeta.tone}` : ''}`}
-                aria-label="查看 GitLab CI 流水线"
-                onClick={() => openGitLabCI(
-                  session.id,
-                  session.agent_id,
-                  session.workspace || undefined,
-                  session.connection_id || undefined,
-                  latestPipeline?.id,
-                )}
-              >
-                <IconBrandGitlab size={13} color="#e24329" aria-hidden="true" />
-                {latestPipeline && latestPipelineMeta ? (
-                  <>
-                    <span
-                      className={`composer-gitlab-dot${latestPipelineMeta.spinning ? ' is-pulsing' : ''}`}
-                      style={{ backgroundColor: latestPipelineMeta.dotColor }}
-                    />
-                    <span className="composer-gitlab-id">#{latestPipeline.id}</span>
-                    <span>{latestPipelineMeta.label}</span>
-                  </>
-                ) : (
-                  <span>GitLab CI</span>
-                )}
-              </UnstyledButton>
-            </Tooltip>
-          )}
+          <ComposerStatusBarSlots
+            session={session}
+            statusUnavailable={statusUnavailable}
+            statusLoading={statusLoading}
+            branch={branch}
+          />
         </div>
 
         {/* 右侧：代码变更数统计（点击在侧边栏展开 git diff 文件浏览器） */}

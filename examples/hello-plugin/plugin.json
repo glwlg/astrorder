@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "id": "hello-plugin",
+  "name": "Hello Extension 示例插件",
+  "version": "0.1.0",
+  "category": "development",
+  "description": "零依赖第三方插件示例：展示对话底栏状态胶囊、右侧沙箱面板、独立设置抽屉、Host API 读取工作区 Git 信息、Agent 扩展命令与 Skill 自动发现。",
+  "author": "Astrorder Examples",
+  "homepage": "https://github.com/glwlg/astrorder",
+  "icon": "sparkles",
+  "permissions": [
+    "workspace:git.read",
+    "storage:kv",
+    "storage:secrets",
+    "agent:capabilities",
+    "ui:slots",
+    "signals:provide"
+  ],
+  "backend": {
+    "type": "process",
+    "command": ["node"],
+    "args": ["server.mjs"],
+    "health": "/health"
+  },
+  "settings": {
+    "mode": "custom_ui",
+    "ui_entry": "ui/settings.html"
+  },
+  "contributes": {
+    "ui_slots": [
+      {
+        "slot": "chat.composer.status_bar",
+        "id": "hello-pill",
+        "renderer": "declarative_pill",
+        "label": "Hello Ext",
+        "poll_endpoint": "/status-pill",
+        "poll_interval_ms": 20000,
+        "requires_workspace": false,
+        "on_click": {
+          "open_panel": "hello-panel"
+        }
+      },
+      {
+        "slot": "chat.git_menu.items",
+        "id": "hello-git-menu",
+        "renderer": "menu_item",
+        "label": "打开 Hello Extension 面板...",
+        "requires_workspace": false,
+        "on_click": {
+          "open_panel": "hello-panel"
+        }
+      },
+      {
+        "slot": "sidecar.welcome_menu",
+        "id": "hello-welcome",
+        "renderer": "welcome_item",
+        "label": "Hello Extension",
+        "badge": "第三方示例",
+        "requires_workspace": false,
+        "on_click": {
+          "open_panel": "hello-panel"
+        }
+      }
+    ],
+    "sidecar_panels": [
+      {
+        "id": "hello-panel",
+        "title": "Hello Extension",
+        "badge_label": "[Hello]",
+        "tab_color": "#7c3aed",
+        "media_type": "application/x-astrorder-ext.hello-plugin.hello-panel",
+        "ui_entry": "ui/panel.html"
+      }
+    ],
+    "agent_capabilities": [
+      {
+        "id": "echo",
+        "cli_alias": ["hello", "echo"],
+        "summary": "回显消息并附带当前工作区 Git 信息与插件配置",
+        "endpoint": "/agent/echo",
+        "requires_caller": true,
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "要回显的自定义消息"
+            }
+          }
+        }
+      }
+    ],
+    "agent_skills": [
+      "skills/hello-ext/SKILL.md"
+    ],
+    "signal_providers": [
+      {
+        "kind": "workspace.failure_signals",
+        "endpoint": "/signals/failures"
+      }
+    ]
+  }
+}

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hello Extension Settings</title>
+  <script src="/api/v1/ext/_sdk/bridge.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --surface: #f8f9fa;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #7c3aed;
+    }
+    [data-theme="dark"] {
+      --bg: #141517;
+      --surface: #1d1f24;
+      --border: #2c2e33;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 4px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; }
+    .hint { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      margin-bottom: 14px;
+    }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    button {
+      padding: 7px 14px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <form id="settings-form">
+    <div class="field">
+      <label for="greeting">底栏状态胶囊显示文字</label>
+      <input id="greeting" type="text" placeholder="Hello Ext" />
+      <div class="hint">通过 Host API 写入隔离 KV 存储（storage:kv），即时更新底栏状态胶囊。</div>
+    </div>
+
+    <div class="field">
+      <label for="api-token">示例 API Token（加密凭据）</label>
+      <input id="api-token" type="password" placeholder="留空表示保持当前凭据不变" />
+      <div class="hint" id="token-hint">尚未配置加密凭据（将通过 storage:secrets 加密保存）。</div>
+    </div>
+
+    <label class="check-row">
+      <input id="emit-signal" type="checkbox" />
+      <span>启用示例失败信号（向 Learning 雷达提供演示信号）</span>
+    </label>
+
+    <div class="actions">
+      <button id="btn-save" type="submit" class="primary">保存配置</button>
+    </div>
+  </form>
+
+  <script>
+    function reportHeight() {
+      window.astrorderPlugin?.notifyResize?.(Math.max(260, document.documentElement.scrollHeight + 16))
+    }
+
+    async function loadSettings() {
+      if (!window.astrorderPlugin) return
+      const ctx = await window.astrorderPlugin.getContext()
+      document.documentElement.setAttribute('data-theme', ctx.theme === 'dark' ? 'dark' : 'light')
+      const resp = await window.astrorderPlugin.fetch('/state')
+      const s = resp.json?.settings || {}
+      document.getElementById('greeting').value = s.greeting || 'Hello Ext'
+      document.getElementById('emit-signal').checked = Boolean(s.emit_demo_signal)
+      document.getElementById('token-hint').textContent = s.api_token_set
+        ? '已配置加密凭据（留空保持不变，输入新值可覆盖）。'
+        : '尚未配置加密凭据（将通过 storage:secrets 加密保存）。'
+      reportHeight()
+    }
+
+    document.getElementById('settings-form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const btn = document.getElementById('btn-save')
+      btn.disabled = true
+      try {
+        const resp = await window.astrorderPlugin.fetch('/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            greeting: document.getElementById('greeting').value,
+            emit_demo_signal: document.getElementById('emit-signal').checked,
+            api_token: document.getElementById('api-token').value,
+          }),
+        })
+        if (!resp.ok) {
+          throw new Error(resp.json?.detail || '保存失败')
+        }
+        document.getElementById('api-token').value = ''
+        window.astrorderPlugin.toast('Hello Extension 配置已保存', 'success')
+        await loadSettings()
+      } catch (err) {
+        window.astrorderPlugin.toast(err && err.message ? err.message : '保存失败', 'error')
+      } finally {
+        btn.disabled = false
+      }
+    })
+
+    loadSettings()
+  </script>
+</body>
+</html>

@@ -611,4 +611,57 @@ describe('CapabilitiesSettingsCard - 星序官方技能与动态分发', () => {
       })
     })
   })
+
+  it('keeps subscribed marketplaces collapsed by default and renders an unclipped search submit button beside the search input', async () => {
+    vi.mocked(api.searchMarketCapabilities).mockResolvedValue({
+      items: [
+        {
+          pkg: 'flowkit-labs/skills@reddit-automation',
+          name: 'reddit-automation',
+          repo: 'flowkit-labs/skills',
+          installs: '1.6M installs',
+          url: 'https://skills.sh/flowkit-labs/skills/reddit-automation',
+        },
+      ],
+    } as never)
+    vi.mocked(api.getCapabilitiesSummary).mockResolvedValue({
+      ...mockSummary,
+      counts: { skills: 3, mcp: 0, plugins: 0, marketplaces: 2 },
+      marketplaces: [
+        { id: 'global::skills.sh', name: 'Vercel Skills', source_type: 'registry', source: 'https://skills.sh' },
+        { id: 'codex::astrorder-local', name: 'astrorder-local', agent: 'codex', source_type: 'local', source: 'C:\\Users\\luwei\\.codex\\astrorder' },
+      ],
+    } as never)
+
+    const { container } = mount()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /能力市场/ })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /能力市场/ }))
+
+    // Subscribed marketplaces live in a collapsed native <details> disclosure so search results get primary space
+    const details = container.querySelector('details.cap-market-sources') as HTMLDetailsElement | null
+    expect(details).not.toBeNull()
+    expect(details?.open).toBe(false)
+
+    // Search button must be a sibling submit button in the search form, NOT squeezed inside Mantine TextInput rightSection
+    const searchInput = screen.getByPlaceholderText(/搜索全网 Agent 技能与能力扩展/)
+    const searchButton = screen.getByRole('button', { name: '搜索全网' })
+    expect(searchButton.getAttribute('type')).toBe('submit')
+    expect(searchButton.closest('.mantine-TextInput-section')).toBeNull()
+
+    // Wait for initial auto-search to settle before submitting custom query
+    await waitFor(() => {
+      expect(screen.getByText('reddit-automation')).toBeInTheDocument()
+      expect(searchButton).not.toBeDisabled()
+    })
+
+    fireEvent.change(searchInput, { target: { value: 'reddit' } })
+    fireEvent.click(searchButton)
+
+    await waitFor(() => {
+      expect(api.searchMarketCapabilities).toHaveBeenCalledWith('reddit')
+    })
+  })
 })

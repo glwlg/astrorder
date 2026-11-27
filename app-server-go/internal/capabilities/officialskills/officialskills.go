@@ -148,14 +148,18 @@ func GetOfficialSkill(name string) (*OfficialSkill, bool) {
 	return nil, false
 }
 
-// RenderOfficialSkill renders template variables inside the skill content.
-func RenderOfficialSkill(skill OfficialSkill, home string) []byte {
-	content := skill.Content
+// RenderSkillContent renders template variables inside any Astrorder skill markdown.
+func RenderSkillContent(content, home string) []byte {
 	callerBash := path.Join(strings.ReplaceAll(home, `\`, "/"), "astrorder-caller.json")
 	callerWin := strings.ReplaceAll(callerBash, "/", `\`)
 	content = strings.ReplaceAll(content, "{{CALLER_CONFIG_PATH}}", callerBash)
 	content = strings.ReplaceAll(content, "{{CALLER_CONFIG_PATH_WIN}}", callerWin)
 	return []byte(content)
+}
+
+// RenderOfficialSkill renders template variables inside the skill content.
+func RenderOfficialSkill(skill OfficialSkill, home string) []byte {
+	return RenderSkillContent(skill.Content, home)
 }
 
 func cloneSkill(skill OfficialSkill) OfficialSkill {

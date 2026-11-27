@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications'
 import { ActionIcon, Group, Tooltip } from '@mantine/core'
 import { IconFolderSearch, IconQuote } from '@tabler/icons-react'
 import { SidecarHeader } from './SidecarHeader'
+import { displaySessionTitle } from '../../components/sessionRailModel'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
 import { SessionDetails } from '../chat/SessionDetails'
 import { artifactViewerRegistry } from './registry'
@@ -23,6 +24,14 @@ import {
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIsOfficeExperience } from '../office/appProfile'
+import { extensionRegistry } from '../extensions/extensionRegistry'
+import { useExtensionStore } from '../extensions/extensionStore'
+import { useWelcomeMenuExtensions } from '../extensions/SlotRenderer'
+import {
+  EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+  parsePluginPanelArtifact,
+  type OpenPluginPanelEventDetail,
+} from '../extensions/types'
 import type { Agent, Approval, Command, Message, Session } from '../../domain/types'
 
 const OFFICE_HIDDEN_VIEWER_IDS = new Set<string>([
@@ -31,7 +40,6 @@ const OFFICE_HIDDEN_VIEWER_IDS = new Set<string>([
   'agent-graph-viewer',
   'git-diff-viewer',
   'git-worktrees-viewer',
-  'gitlab-ci-viewer',
   'diff-viewer',
   'blackboard-viewer',
   'memory-viewer',
@@ -43,16 +51,47 @@ const OFFICE_HIDDEN_MEDIA_TYPES = new Set<string>([
   'application/x-agent-graph',
   'application/x-git-diff',
   'application/x-git-worktrees',
-  'application/x-gitlab-ci',
   'application/x-diff',
   'application/x-blackboard',
   'application/x-memory',
 ])
 
-function isDevOnlySidecarTab(tab: { type?: string; viewerId?: string; artifact?: { mediaType?: string } }): boolean {
+function isDevOnlySidecarTab(tab: {
+  id?: string
+  type?: string
+  viewerId?: string
+  artifact?: { id: string; mediaType?: string; metadata?: Record<string, unknown>; readUrl?: string }
+}): boolean {
   if (tab.type !== 'artifact') return false
   if (tab.viewerId && OFFICE_HIDDEN_VIEWER_IDS.has(tab.viewerId)) return true
   if (tab.artifact?.mediaType && OFFICE_HIDDEN_MEDIA_TYPES.has(tab.artifact.mediaType)) return true
+  if (tab.artifact) {
+    const parsed = parsePluginPanelArtifact({
+      id: tab.artifact.id,
+      mediaType: tab.artifact.mediaType || '',
+      metadata: tab.artifact.metadata,
+      readUrl: tab.artifact.readUrl || '',
+      name: '',
+      kind: 'workspace_file',
+      sessionId: '',
+      agentId: '',
+      writable: false,
+    })
+    const builtinMatch = extensionRegistry.findBuiltinPanel(
+      parsed.pluginId || tab.viewerId,
+      parsed.panelId,
+      tab.artifact.mediaType,
+    )
+    if (builtinMatch) {
+      const reg = extensionRegistry.getBuiltin(builtinMatch.pluginId)
+      if (reg?.welcomeMenuItems?.some((item) => item.hideInOfficeMode)) return true
+    }
+    const pluginId = parsed.pluginId || (tab.viewerId && tab.viewerId !== EXTERNAL_PLUGIN_PANEL_VIEWER_ID ? tab.viewerId : null)
+    if (pluginId) {
+      const extPlugin = useExtensionStore.getState().getById(pluginId)
+      if (extPlugin?.source === 'external' && extPlugin.category !== 'office') return true
+    }
+  }
   return false
 }
 
@@ -98,10 +137,10 @@ export function SidecarHost({
   const blackboardEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
   const memoryEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(MEMORY_VIEWER_PLUGIN_ID))
   const worktreeEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
-  const gitlabCIEnabled = usePluginSettingsStore((s) => s.isPluginEnabled('gitlab-ci-viewer'))
   const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
   const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
   const isOfficeMode = useIsOfficeExperience(session)
+  const welcomeExtensionItems = useWelcomeMenuExtensions(session, isOfficeMode)
 
   const visibleTabs = isOfficeMode ? tabs.filter((t) => !isDevOnlySidecarTab(t)) : tabs
   const activeTab = visibleTabs.find((t) => t.id === activeTabId)
@@ -165,7 +204,7 @@ export function SidecarHost({
   const handleOpenSideChat = () => {
     useSidecarStore
       .getState()
-      .openSideChat(session.id, session.agent_id, session.title || undefined, session.connection_id || undefined)
+      .openSideChat(session.id, session.agent_id, displaySessionTitle(session), session.connection_id || undefined)
   }
 
   const handleOpenBlackboard = () => {
@@ -189,23 +228,52 @@ export function SidecarHost({
     )
   }
 
-  const handleOpenGitLabCI = () => {
-    if (!session.workspace) {
-      notifications.show({ color: 'yellow', message: '该会话没有可确认的工作区目录。' })
-      return
+  useEffect(() => {
+    const onOpenPluginPanel = (event: Event) => {
+      const detail = (event as CustomEvent<OpenPluginPanelEventDetail>).detail
+      if (!detail?.pluginId || !detail?.panelId) return
+      if (detail.session && (detail.session.id !== session.id || detail.session.agent_id !== session.agent_id)) {
+        return
+      }
+      const targetSession = detail.session || session
+      const builtinPanel = extensionRegistry.findBuiltinPanel(detail.pluginId, detail.panelId, detail.mediaType)
+      const extPlugin = useExtensionStore.getState().getById(detail.pluginId)
+      const extPanel = extPlugin?.contributes?.sidecar_panels?.find(
+        (panel) => panel.id === detail.panelId || (detail.mediaType && panel.media_type === detail.mediaType),
+      )
+      useSidecarStore.getState().openPluginPanel(detail.pluginId, detail.panelId, {
+        title: detail.title || builtinPanel?.panel.title || extPanel?.title || extPlugin?.name || detail.panelId,
+        mediaType: detail.mediaType || builtinPanel?.panel.mediaType || extPanel?.media_type,
+        viewerId: builtinPanel ? detail.pluginId : EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+        sessionId: targetSession.id,
+        agentId: targetSession.agent_id,
+        workspacePath: targetSession.workspace || undefined,
+        connectionId: targetSession.connection_id || undefined,
+        params: detail.params,
+      })
     }
-    useSidecarStore.getState().openGitLabCI(
-      session.id,
-      session.agent_id,
-      session.workspace || undefined,
-      session.connection_id || undefined,
-    )
-  }
+    const onInsertComposer = (event: Event) => {
+      if (!isVisible) return
+      const detail = (event as CustomEvent<{ text?: string }>).detail
+      if (!detail?.text) return
+      window.dispatchEvent(
+        new CustomEvent('astrorder:quote-to-composer', {
+          detail: { agentId: session.agent_id, sessionId: session.id, text: detail.text },
+        }),
+      )
+    }
+    window.addEventListener('astrorder:open-plugin-panel', onOpenPluginPanel)
+    window.addEventListener('astrorder:insert-composer', onInsertComposer)
+    return () => {
+      window.removeEventListener('astrorder:open-plugin-panel', onOpenPluginPanel)
+      window.removeEventListener('astrorder:insert-composer', onInsertComposer)
+    }
+  }, [isVisible, session])
 
   const handleOpenAgentGraph = () => {
     useSidecarStore
       .getState()
-      .openAgentGraph(session.id, session.agent_id, session.title || undefined, session.connection_id || undefined)
+      .openAgentGraph(session.id, session.agent_id, displaySessionTitle(session), session.connection_id || undefined)
   }
 
   const handleSaveContent = async (
@@ -270,7 +338,7 @@ export function SidecarHost({
             onOpenBlackboard={!isOfficeMode && blackboardEnabled ? handleOpenBlackboard : undefined}
             onOpenMemory={!isOfficeMode && memoryEnabled ? handleOpenMemory : undefined}
             onOpenWorktrees={!isOfficeMode && worktreeEnabled && session.workspace ? handleOpenWorktrees : undefined}
-            onOpenGitLabCI={!isOfficeMode && gitlabCIEnabled && session.workspace ? handleOpenGitLabCI : undefined}
+            extraItems={welcomeExtensionItems}
             onOpenDigest={isOfficeMode && digestEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/digest' } })) : undefined}
             onOpenMeetings={isOfficeMode && meetingsEnabled ? () => window.dispatchEvent(new CustomEvent('astrorder:navigate', { detail: { to: '/meetings' } })) : undefined}
           />
@@ -320,6 +388,10 @@ export function SidecarHost({
                       message: selected ? `已引用所选片段（${refLabel}）到输入框` : `已引用 ${refLabel} 到输入框`,
                     })
                   }
+                  const isPluginPanelArtifact =
+                    tab.viewerId === EXTERNAL_PLUGIN_PANEL_VIEWER_ID ||
+                    artifact.id.startsWith('ext:') ||
+                    Boolean(artifact.mediaType?.startsWith('application/x-astrorder-ext.'))
                   const toolbarAction = (
                     <Group gap={4} wrap="nowrap">
                       <Tooltip label="引用到输入框追问（选中片段可带代码引用）">
@@ -333,7 +405,7 @@ export function SidecarHost({
                           <IconQuote size={15} />
                         </ActionIcon>
                       </Tooltip>
-                      {artifact.path && artifact.mediaType !== 'application/x-directory' && (
+                      {!isPluginPanelArtifact && artifact.path && artifact.mediaType !== 'application/x-directory' && (
                         <Tooltip label="在文件树中定位">
                           <ActionIcon
                             variant="subtle"

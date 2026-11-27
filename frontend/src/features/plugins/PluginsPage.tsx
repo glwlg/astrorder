@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -28,10 +28,28 @@ import {
   IconChevronUp,
   IconInfoCircle,
   IconMicrophone,
+  IconPackageImport,
+  IconPuzzle,
+  IconRefresh,
+  IconRotateClockwise,
   IconSearch,
+  IconSettings,
+  IconShieldLock,
+  IconTrash,
   IconX,
 } from '@tabler/icons-react'
 import { api, type BrowserEngine, type LocalVoicePluginStatus, type ToolchainItemStatus } from '../../api/client'
+import type { PluginView } from '../../api/extensions'
+import { extensionRegistry, useExtensionRegistryVersion } from '../extensions/extensionRegistry'
+import { useExtensionStore } from '../extensions/extensionStore'
+import { InstallPluginModal } from '../extensions/InstallPluginModal'
+import { PermissionGrantModal } from '../extensions/PermissionGrantModal'
+import { PluginConfigDrawer } from '../extensions/PluginConfigDrawer'
+import {
+  EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+  PENDING_PLUGIN_CONFIG_SESSION_KEY,
+  type OpenPluginConfigEventDetail,
+} from '../extensions/types'
 import { artifactViewerRegistry } from '../sidecar/registry'
 import type { ArtifactViewer, PluginCategory, ViewerConfigOption } from '../sidecar/types'
 import {
@@ -483,11 +501,19 @@ function SystemPluginCard({ descriptor }: { descriptor: SystemPluginDescriptor }
   )
 }
 
-function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
+function PluginCard({
+  viewer,
+  onOpenConfig,
+}: {
+  viewer: ArtifactViewer
+  onOpenConfig: (pluginId: string) => void
+}) {
+  const registryVersion = useExtensionRegistryVersion()
   const isEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(viewer.id))
   const togglePlugin = usePluginSettingsStore((s) => s.togglePlugin)
   const setPluginConfig = usePluginSettingsStore((s) => s.setPluginConfig)
   const pluginConfigMap = usePluginSettingsStore((s) => s.pluginConfigs[viewer.id])
+  const extManifest = useExtensionStore((s) => s.items.find((item) => item.id === viewer.id))
 
   const [expanded, setExpanded] = useState(false)
   const [infoOpened, setInfoOpened] = useState(false)
@@ -495,6 +521,12 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   const [browserEngine, setBrowserEngine] = useState<BrowserEngine>('browser_use')
   const [savingEngine, setSavingEngine] = useState(false)
   const Icon = viewer.icon
+
+  const builtinReg = useMemo(() => {
+    void registryVersion
+    return extensionRegistry.getBuiltin(viewer.id)
+  }, [registryVersion, viewer.id])
+  const hasDrawerConfig = extensionRegistry.hasSettingsDrawer(viewer.id, extManifest)
 
   useEffect(() => {
     if (!isBrowserViewer) return
@@ -596,7 +628,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
         </div>
       </div>
 
-      {(hasOptions || (isEnabled && viewer.settingsAction)) && (
+      {(hasOptions || hasDrawerConfig || (isEnabled && viewer.settingsAction)) && (
         <>
           <div className={`plugins-tile-footer${hasOptions ? ' is-split' : ''}`}>
             {hasOptions && (
@@ -611,7 +643,17 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
                 参数配置 ({optionCount})
               </Button>
             )}
-            {isEnabled && viewer.settingsAction && (
+            {hasDrawerConfig ? (
+              <Button
+                variant="light"
+                size="compact-xs"
+                color="indigo"
+                leftSection={<IconSettings size={13} />}
+                onClick={() => onOpenConfig(viewer.id)}
+              >
+                {builtinReg?.settingsButtonLabel || '配置'}
+              </Button>
+            ) : isEnabled && viewer.settingsAction ? (
               <button
                 type="button"
                 className="st-text-link is-muted"
@@ -619,7 +661,7 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
               >
                 {viewer.settingsAction.label}
               </button>
-            )}
+            ) : null}
           </div>
 
           {hasOptions && (
@@ -796,11 +838,170 @@ function PluginCard({ viewer }: { viewer: ArtifactViewer }) {
   )
 }
 
+const VALID_PLUGIN_CATEGORIES = new Set<PluginCategory>([
+  'agent',
+  'development',
+  'office',
+  'workspace',
+  'diagram',
+  'media',
+  'runtime',
+])
+
+function resolveExtensionCategory(raw?: string): PluginCategory {
+  if (raw && VALID_PLUGIN_CATEGORIES.has(raw as PluginCategory)) {
+    return raw as PluginCategory
+  }
+  return 'workspace'
+}
+
+function getRuntimeStatusBadge(plugin: PluginView): { label: string; color: string } {
+  if (!plugin.enabled) {
+    return { label: '已停用', color: 'gray' }
+  }
+  switch (plugin.runtime_state) {
+    case 'ready':
+    case 'builtin':
+      return { label: '运行中', color: 'teal' }
+    case 'starting':
+      return { label: '启动中', color: 'blue' }
+    case 'error':
+      return { label: '异常', color: 'red' }
+    default:
+      return { label: '已停用', color: 'gray' }
+  }
+}
+
+function ExternalPluginCard({
+  plugin,
+  onToggle,
+  onOpenConfig,
+  onViewPermissions,
+  onRestart,
+  onRequestUninstall,
+}: {
+  plugin: PluginView
+  onToggle: (plugin: PluginView, nextEnabled: boolean) => Promise<void>
+  onOpenConfig: (pluginId: string) => void
+  onViewPermissions: (plugin: PluginView) => void
+  onRestart: (plugin: PluginView) => Promise<void>
+  onRequestUninstall: (plugin: PluginView) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const runtimeBadge = getRuntimeStatusBadge(plugin)
+  const hasSettings = extensionRegistry.hasSettingsDrawer(plugin.id, plugin)
+  const canRestart = plugin.backend_type === 'process' && plugin.enabled
+
+  return (
+    <Card withBorder className="plugins-tile">
+      <div>
+        <div className="plugins-tile-head">
+          <div className="plugins-tile-title-row">
+            <span className={`plugins-tile-icon${plugin.enabled ? '' : ' is-muted'}`} aria-hidden="true">
+              <IconPuzzle size={17} />
+            </span>
+            <Text fw={600} size="sm">
+              {plugin.name}
+            </Text>
+            <Badge size="xs" variant="light" color="indigo">
+              第三方
+            </Badge>
+            {plugin.version && (
+              <Badge size="xs" variant="outline" color="gray">
+                v{plugin.version}
+              </Badge>
+            )}
+            <Tooltip label={plugin.runtime_error || runtimeBadge.label} disabled={!plugin.runtime_error} withArrow>
+              <Badge size="xs" variant="light" color={runtimeBadge.color}>
+                {runtimeBadge.label}
+              </Badge>
+            </Tooltip>
+          </div>
+
+          <Switch
+            checked={plugin.enabled}
+            disabled={busy}
+            size="sm"
+            aria-label={`启用或禁用 ${plugin.name}`}
+            onChange={(e) => {
+              const nextChecked = e.currentTarget.checked
+              setBusy(true)
+              void onToggle(plugin, nextChecked).finally(() => setBusy(false))
+            }}
+          />
+        </div>
+
+        <div className="plugins-tile-desc">
+          {plugin.description || '通过 Astrorder 扩展平台安装的第三方插件。'}
+        </div>
+
+        {plugin.runtime_error && (
+          <div className="plugins-tile-error" role="alert">
+            {plugin.runtime_error}
+          </div>
+        )}
+      </div>
+
+      <div className="plugins-tile-footer is-split">
+        <div className="plugins-tile-actions">
+          {hasSettings && (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="indigo"
+              leftSection={<IconSettings size={13} />}
+              onClick={() => onOpenConfig(plugin.id)}
+            >
+              配置
+            </Button>
+          )}
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            leftSection={<IconShieldLock size={13} />}
+            onClick={() => onViewPermissions(plugin)}
+          >
+            权限{plugin.permissions && plugin.permissions.length > 0 ? ` (${plugin.permissions.length})` : ''}
+          </Button>
+          {canRestart && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="gray"
+              loading={restarting}
+              leftSection={<IconRotateClockwise size={13} />}
+              onClick={() => {
+                setRestarting(true)
+                void onRestart(plugin).finally(() => setRestarting(false))
+              }}
+            >
+              重启
+            </Button>
+          )}
+        </div>
+
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          color="red"
+          leftSection={<IconTrash size={13} />}
+          onClick={() => onRequestUninstall(plugin)}
+        >
+          卸载
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
 interface CatalogEntry {
   id: string
   category: PluginCategory
   searchText: string
   isToggleable: boolean
+  isEnabled?: boolean
   fullWidth?: boolean
   render: () => React.ReactNode
 }
@@ -816,7 +1017,9 @@ function CategorySection({
 }) {
   if (entries.length === 0) return null
   const toggleable = entries.filter((entry) => entry.isToggleable)
-  const enabledCount = toggleable.filter((entry) => enabledPlugins[entry.id] !== false).length
+  const enabledCount = toggleable.filter((entry) =>
+    entry.isEnabled !== undefined ? entry.isEnabled : enabledPlugins[entry.id] !== false,
+  ).length
 
   return (
     <section className="plugins-category-section" aria-label={meta.label}>
@@ -839,19 +1042,57 @@ function CategorySection({
 }
 
 export function PluginsPage() {
-  const viewers = useMemo(() => artifactViewerRegistry.getAllViewers(), [])
+  const viewers = useMemo(
+    () =>
+      artifactViewerRegistry
+        .getAllViewers()
+        .filter(
+          (viewer) =>
+            viewer.id !== EXTERNAL_PLUGIN_PANEL_VIEWER_ID &&
+            !(viewer as ArtifactViewer & { hiddenFromCatalog?: boolean }).hiddenFromCatalog,
+        ),
+    [],
+  )
   const hydrate = usePluginSettingsStore((s) => s.hydrate)
   const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const extensionItems = useExtensionStore((s) => s.items)
+  const extensionsLoading = useExtensionStore((s) => s.loading)
+  const hydrateExtensions = useExtensionStore((s) => s.hydrate)
+  const refreshExtensions = useExtensionStore((s) => s.refresh)
+  const setExtensionEnabled = useExtensionStore((s) => s.setEnabled)
+  const restartExtension = useExtensionStore((s) => s.restart)
+  const uninstallExtension = useExtensionStore((s) => s.uninstall)
   const { mode, setMode, managedByWorkbench } = useSettingsMode()
   const isBasicMode = managedByWorkbench && mode === 'basic'
 
   const [activeTab, setActiveTab] = useState<PluginTabId>('all')
   const [query, setQuery] = useState('')
   const [localToolchain, setLocalToolchain] = useState<Record<string, ToolchainItemStatus>>({})
+  const [configPluginId, setConfigPluginId] = useState<string | null>(() => {
+    try {
+      const pending = sessionStorage.getItem(PENDING_PLUGIN_CONFIG_SESSION_KEY)
+      if (pending) {
+        sessionStorage.removeItem(PENDING_PLUGIN_CONFIG_SESSION_KEY)
+        return pending
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return null
+  })
+  const [installModalOpened, setInstallModalOpened] = useState(false)
+  const [permissionModal, setPermissionModal] = useState<{
+    plugin: PluginView
+    mode: 'grant' | 'view'
+    pendingPermissions?: string[]
+  } | null>(null)
+  const [permissionGranting, setPermissionGranting] = useState(false)
+  const [uninstallTarget, setUninstallTarget] = useState<PluginView | null>(null)
+  const [uninstalling, setUninstalling] = useState(false)
   const tablistRef = useRef<HTMLDivElement | null>(null)
   const panelRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const refreshLocalToolchain = () => {
+  const refreshLocalToolchain = useCallback(() => {
     if (typeof api.getToolchainStatus !== 'function') return
     void api.getToolchainStatus('local')
       .then((report) => {
@@ -862,12 +1103,130 @@ export function PluginsPage() {
         setLocalToolchain(mapped)
       })
       .catch(() => {})
-  }
+  }, [])
 
   useEffect(() => {
     void hydrate()
+    void hydrateExtensions()
     refreshLocalToolchain()
-  }, [hydrate])
+  }, [hydrate, hydrateExtensions, refreshLocalToolchain])
+
+  useEffect(() => {
+    const onOpenConfig = (event: Event) => {
+      const detail = (event as CustomEvent<OpenPluginConfigEventDetail>).detail
+      if (detail?.pluginId) {
+        try {
+          sessionStorage.removeItem(PENDING_PLUGIN_CONFIG_SESSION_KEY)
+        } catch {
+          // ignore
+        }
+        setConfigPluginId(detail.pluginId)
+      }
+    }
+    window.addEventListener('astrorder:open-plugin-config', onOpenConfig)
+    return () => window.removeEventListener('astrorder:open-plugin-config', onOpenConfig)
+  }, [])
+
+  const handleToggleExternal = useCallback(async (plugin: PluginView, nextEnabled: boolean) => {
+    try {
+      const res = await setExtensionEnabled(plugin.id, nextEnabled)
+      if (res.requires_permission_grant) {
+        setPermissionModal({
+          plugin: res.item || plugin,
+          mode: 'grant',
+          pendingPermissions:
+            res.pending_permissions && res.pending_permissions.length > 0
+              ? res.pending_permissions
+              : plugin.pending_permissions && plugin.pending_permissions.length > 0
+                ? plugin.pending_permissions
+                : plugin.permissions || [],
+        })
+        return
+      }
+      notifications.show({
+        color: 'teal',
+        message: nextEnabled ? `已启用扩展「${plugin.name}」` : `已停用扩展「${plugin.name}」`,
+      })
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : `更新扩展「${plugin.name}」状态失败`,
+      })
+    }
+  }, [setExtensionEnabled])
+
+  const handleConfirmPermissionGrant = async (grantedPermissions: string[]) => {
+    if (!permissionModal || permissionGranting) return
+    const target = permissionModal.plugin
+    setPermissionGranting(true)
+    try {
+      const res = await setExtensionEnabled(target.id, true, grantedPermissions)
+      if (res.requires_permission_grant) {
+        setPermissionModal({
+          plugin: res.item || target,
+          mode: 'grant',
+          pendingPermissions: res.pending_permissions || grantedPermissions,
+        })
+        return
+      }
+      setPermissionModal(null)
+      notifications.show({
+        color: 'teal',
+        message: `已授权并启用扩展「${target.name}」`,
+      })
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : `启用扩展「${target.name}」失败`,
+      })
+    } finally {
+      setPermissionGranting(false)
+    }
+  }
+
+  const handleRestartExternal = useCallback(async (plugin: PluginView) => {
+    try {
+      await restartExtension(plugin.id)
+      notifications.show({
+        color: 'teal',
+        message: `已重启扩展「${plugin.name}」`,
+      })
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : `重启扩展「${plugin.name}」失败`,
+      })
+    }
+  }, [restartExtension])
+
+  const handleConfirmUninstall = async () => {
+    if (!uninstallTarget || uninstalling) return
+    const target = uninstallTarget
+    setUninstalling(true)
+    try {
+      await uninstallExtension(target.id)
+      if (configPluginId === target.id) {
+        setConfigPluginId(null)
+      }
+      setUninstallTarget(null)
+      notifications.show({
+        color: 'teal',
+        message: `已卸载扩展「${target.name}」`,
+      })
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : `卸载扩展「${target.name}」失败`,
+      })
+    } finally {
+      setUninstalling(false)
+    }
+  }
+
+  const externalPlugins = useMemo(
+    () => extensionItems.filter((item) => item.source === 'external'),
+    [extensionItems],
+  )
 
   const catalogEntries = useMemo<CatalogEntry[]>(() => {
     const entries: CatalogEntry[] = [
@@ -943,11 +1302,35 @@ export function PluginsPage() {
           ...(viewer.extensions || []),
         ].join(' ').toLowerCase(),
         isToggleable: true,
-        render: () => <PluginCard viewer={viewer} />,
+        render: () => <PluginCard viewer={viewer} onOpenConfig={(id) => setConfigPluginId(id)} />,
+      })),
+      ...externalPlugins.map((plugin) => ({
+        id: plugin.id,
+        category: resolveExtensionCategory(plugin.category),
+        searchText: [
+          plugin.id,
+          plugin.name,
+          plugin.description || '',
+          plugin.author || '',
+          plugin.category || '',
+          '第三方 外部扩展 external',
+        ].join(' ').toLowerCase(),
+        isToggleable: true,
+        isEnabled: plugin.enabled,
+        render: () => (
+          <ExternalPluginCard
+            plugin={plugin}
+            onToggle={handleToggleExternal}
+            onOpenConfig={(id) => setConfigPluginId(id)}
+            onViewPermissions={(target) => setPermissionModal({ plugin: target, mode: 'view' })}
+            onRestart={handleRestartExternal}
+            onRequestUninstall={(target) => setUninstallTarget(target)}
+          />
+        ),
       })),
     ]
     return entries
-  }, [viewers, localToolchain])
+  }, [viewers, localToolchain, externalPlugins, refreshLocalToolchain, handleToggleExternal, handleRestartExternal])
 
   const normalizedQuery = query.trim().toLowerCase()
   const visibleCatalogEntries = useMemo(() => {
@@ -1050,13 +1433,22 @@ export function PluginsPage() {
     if (targetId) selectTab(targetId, true)
   }
 
-  const allToggleableIds = [
+  const builtinToggleableIds = [
     ...BUILTIN_AGENT_PLUGINS.map((p) => p.id),
     ...BUILTIN_SYSTEM_PLUGINS.map((p) => p.id),
     VOICE_INPUT_PLUGIN_ID,
     ...viewers.map((v) => v.id),
   ]
-  const enabledCount = allToggleableIds.filter((id) => enabledPlugins[id] !== false).length
+  const totalToggleableCount = builtinToggleableIds.length + externalPlugins.length
+  const enabledCount =
+    builtinToggleableIds.filter((id) => enabledPlugins[id] !== false).length +
+    externalPlugins.filter((plugin) => plugin.enabled).length
+
+  const handleRefreshAll = () => {
+    void hydrate(true)
+    void refreshExtensions()
+    refreshLocalToolchain()
+  }
 
   return (
     <div className="route-page plugins-page">
@@ -1088,9 +1480,32 @@ export function PluginsPage() {
             style={{ width: 220 }}
           />
           {!isBasicMode && (
-            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-              已启用 {enabledCount} / {allToggleableIds.length}
-            </Text>
+            <>
+              <Button
+                size="xs"
+                variant="light"
+                color="indigo"
+                leftSection={<IconPackageImport size={14} />}
+                onClick={() => setInstallModalOpened(true)}
+              >
+                安装外部插件
+              </Button>
+              <Tooltip label="刷新插件列表" withArrow>
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  aria-label="刷新插件列表"
+                  loading={extensionsLoading}
+                  onClick={handleRefreshAll}
+                >
+                  <IconRefresh size={15} />
+                </ActionIcon>
+              </Tooltip>
+              <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                已启用 {enabledCount} / {totalToggleableCount}
+              </Text>
+            </>
           )}
         </div>
       </div>
@@ -1180,6 +1595,64 @@ export function PluginsPage() {
           )
         })}
       </div>
+
+      <PluginConfigDrawer
+        opened={Boolean(configPluginId)}
+        pluginId={configPluginId}
+        onClose={() => setConfigPluginId(null)}
+      />
+
+      <InstallPluginModal
+        opened={installModalOpened}
+        onClose={() => setInstallModalOpened(false)}
+        onInstalled={(plugin, requestEnable) => {
+          if (requestEnable) {
+            void handleToggleExternal(plugin, true)
+          }
+        }}
+      />
+
+      <PermissionGrantModal
+        opened={Boolean(permissionModal)}
+        plugin={permissionModal?.plugin || null}
+        mode={permissionModal?.mode || 'grant'}
+        pendingPermissions={permissionModal?.pendingPermissions}
+        loading={permissionGranting}
+        onConfirm={(perms) => {
+          void handleConfirmPermissionGrant(perms)
+        }}
+        onClose={() => setPermissionModal(null)}
+      />
+
+      <Modal
+        opened={Boolean(uninstallTarget)}
+        onClose={() => setUninstallTarget(null)}
+        size="sm"
+        radius="lg"
+        centered
+        title="确认卸载外部插件"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed" style={{ lineHeight: 1.6 }}>
+            确定要卸载第三方扩展「{uninstallTarget?.name}」吗？卸载后会停止其后台进程，并移除该扩展的安装目录、权限记录及保存的凭据。
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button size="xs" variant="default" onClick={() => setUninstallTarget(null)}>
+              取消
+            </Button>
+            <Button
+              size="xs"
+              color="red"
+              loading={uninstalling}
+              onClick={() => {
+                void handleConfirmUninstall()
+              }}
+            >
+              确认卸载
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </div>
   )
 }

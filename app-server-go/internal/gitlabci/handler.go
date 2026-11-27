@@ -78,8 +78,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, failure.Status, failure.Detail)
 		return
 	}
+	s.serveRoutes(w, r, strings.TrimRight(r.URL.Path, "/"))
+}
 
-	clean := strings.TrimRight(r.URL.Path, "/")
+// serveRoutes dispatches /api/v1/gitlab/* routes after authentication has already been verified.
+func (s *Service) serveRoutes(w http.ResponseWriter, r *http.Request, clean string) {
 	rest := strings.TrimPrefix(clean, BasePath+"/")
 	parts := strings.Split(rest, "/")
 

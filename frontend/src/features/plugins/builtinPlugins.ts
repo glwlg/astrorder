@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import {
   IconArchive,
   IconChartBar,
+  IconCompass,
   IconGitBranch,
   IconHistory,
   IconId,
@@ -49,6 +50,7 @@ export const WORKSPACE_GROUPS_PLUGIN_ID = 'workspace-groups'
 export const WORKSPACE_MONITOR_PLUGIN_ID = 'workspace-monitor'
 export const WORKSPACE_DIGEST_PLUGIN_ID = 'workspace-digest'
 export const WORKSPACE_MEETINGS_PLUGIN_ID = 'workspace-meetings'
+export const WORKSPACE_LEARNING_RADAR_PLUGIN_ID = 'workspace-learning-radar'
 
 // 内置 Sidecar 查看器插件 ID 常量
 export const MEMORY_VIEWER_PLUGIN_ID = 'memory-viewer'
@@ -220,5 +222,15 @@ export const BUILTIN_SYSTEM_PLUGINS: SystemPluginDescriptor[] = [
     badgeLabel: '办公工作台',
     routeAction: { to: '/meetings', label: '打开会议' },
     searchKeywords: ['meeting', 'minutes', 'audio', 'action', 'r2t2', 'model', '会议', '纪要', '录音', '总结模型', '行动项', '待办', '办公'],
+  },
+  {
+    id: WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
+    title: '成长雷达（Bot 驱动主动学习）',
+    description: '每周定时或手动派发成长导师 Bot 扫描你的真实会话、Git 改动与 CI 失败痕迹，提炼 AI 代写黑盒与高频卡点，提供代码伴学、间隔复习与移动端竖滑刷卡信息流',
+    category: 'workspace',
+    icon: IconCompass,
+    badgeLabel: '成长工作台',
+    routeAction: { to: '/learning', label: '打开成长雷达' },
+    searchKeywords: ['learning', 'radar', 'mentor', 'study', 'review', 'flashcard', '成长', '雷达', '学习', '复习', '导师', '刷卡'],
   },
 ]

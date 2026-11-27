@@ -54,6 +54,7 @@ type Skill struct {
 	Category        string   `json:"category,omitempty"`
 	Content         string   `json:"content,omitempty"`
 	DisplayName     string   `json:"display_name,omitempty"`
+	PluginID        string   `json:"plugin_id,omitempty"`
 	Name            string   `json:"name"`
 	Path            string   `json:"path"`
 	Scope           string   `json:"scope"`
@@ -576,15 +577,22 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 		dir := path.Dir(hit.Path)
 		name, description := parseFrontMatter(hit.Head, path.Base(dir))
 		managedOfficial := false
-		if _, official := officialskills.GetOfficialSkill(name); official {
-			if raw, err := sn.env.Read(ctx, path.Join(dir, officialManifestFile)); err == nil {
-				var manifest officialManifest
-				managedOfficial = json.Unmarshal(raw, &manifest) == nil && manifest.Owner == "astrorder-capabilities" && manifest.Version == 1 && manifest.Skill == name && manifest.Agent == root.agent && manifest.Files["SKILL.md"] != ""
+		managedPluginID := ""
+		if raw, err := sn.env.Read(ctx, path.Join(dir, officialManifestFile)); err == nil {
+			var manifest officialManifest
+			if json.Unmarshal(raw, &manifest) == nil && manifest.Owner == officialManifestOwner && manifest.Version == officialManifestVersion && manifest.Skill == name && manifest.Agent == root.agent && manifest.Files["SKILL.md"] != "" {
+				if _, official := officialskills.GetOfficialSkill(name); official && manifest.PluginID == "" {
+					managedOfficial = true
+				} else if strings.TrimSpace(manifest.PluginID) != "" {
+					managedPluginID = strings.TrimSpace(manifest.PluginID)
+				}
 			}
 		}
 		identity := name
 		if managedOfficial {
 			identity = "official::" + name
+		} else if managedPluginID != "" {
+			identity = "plugin::" + managedPluginID + "::" + name
 		}
 		agent, source, sourceURL := root.agent, root.agent+"-native", ""
 		agentList := []string{agent}
@@ -608,6 +616,9 @@ func (sn *snapshot) discoverSkills(ctx context.Context) ([]Skill, error) {
 		byName[identity] = &Skill{Name: name, Path: hit.Path, Scope: "global", Agents: agentList, Agent: agent, Source: source, SourceURL: sourceURL, Description: description}
 		if managedOfficial {
 			byName[identity].Source = "astrorder-installed"
+		} else if managedPluginID != "" {
+			byName[identity].Source = "astrorder-plugin-installed"
+			byName[identity].PluginID = managedPluginID
 		}
 		order = append(order, identity)
 	}
@@ -712,6 +723,44 @@ func (s *Service) Summary(ctx context.Context, targetID, agentFilter string) (*S
 		}
 		skills = kept
 		skills = append(skills, Skill{Name: builtin.Name, Scope: builtin.Scope, Source: builtin.Source, Category: builtin.Category, Agent: builtin.Agent, Agents: []string{}, InstalledAgents: installed, Content: builtin.Content, Description: builtin.Description, DisplayName: builtin.DisplayName})
+	}
+	for _, ps := range s.pluginSkills(ctx) {
+		name := strings.TrimSpace(ps.Name)
+		if name == "" {
+			continue
+		}
+		pluginID := strings.TrimSpace(ps.PluginID)
+		installed := []string{}
+		kept := skills[:0]
+		for _, skill := range skills {
+			if skill.Name == name && skill.Source == "astrorder-plugin-installed" && (pluginID == "" || skill.PluginID == pluginID) {
+				for _, a := range skill.Agents {
+					if !contains(installed, a) {
+						installed = append(installed, a)
+					}
+				}
+				continue
+			}
+			kept = append(kept, skill)
+		}
+		skills = kept
+		displayName := strings.TrimSpace(ps.DisplayName)
+		if displayName == "" {
+			displayName = name
+		}
+		skills = append(skills, Skill{
+			Name:            name,
+			DisplayName:     displayName,
+			Description:     strings.TrimSpace(ps.Description),
+			Content:         ps.Content,
+			PluginID:        pluginID,
+			Scope:           "plugin",
+			Source:          "plugin",
+			Category:        "plugin",
+			Agent:           "all",
+			Agents:          []string{},
+			InstalledAgents: installed,
+		})
 	}
 	target := env.Target()
 	return &Summary{

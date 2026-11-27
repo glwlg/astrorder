@@ -12,7 +12,6 @@ export const gitlabCIViewer: ArtifactViewer = {
   badgeLabel: '[GitLab CI]',
   tabColor: '#e24329',
   icon: IconBrandGitlab,
-  settingsAction: { tab: 'integrations', label: '配置 GitLab 实例' },
   supports: (artifact: ArtifactRef): number => {
     if (artifact.mediaType === 'application/x-gitlab-ci' || artifact.id.startsWith('gitlabci:')) {
       return 100

@@ -8,7 +8,17 @@ import { DynamicIslandToastHost } from './components/DynamicIslandToastHost'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './app/App.tsx'
+import { bootstrapBuiltinExtensions } from './features/extensions/bootstrapBuiltins'
+import { extensionRegistry } from './features/extensions/extensionRegistry'
+import { useExtensionStore } from './features/extensions/extensionStore'
+import {
+  EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+  PENDING_PLUGIN_CONFIG_SESSION_KEY,
+  type OpenPluginConfigEventDetail,
+  type OpenPluginPanelEventDetail,
+} from './features/extensions/types'
 import { installGlobalNativeHoldBlocker } from './features/mobile/mobileGestures'
+import { useSidecarStore } from './features/sidecar/sidecarStore'
 import './index.css'
 import './workspaceVisuals.css'
 import './brightWorkbench.css'
@@ -20,6 +30,7 @@ import { registerSW } from 'virtual:pwa-register'
 
 applyThemePalette(readStoredThemePalette(), { persistLocal: false })
 installGlobalNativeHoldBlocker()
+bootstrapBuiltinExtensions()
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
@@ -29,6 +40,42 @@ if (typeof window !== 'undefined') {
     ) {
       applyThemePalette(readStoredThemePalette(), { persistLocal: false })
     }
+  })
+
+  window.addEventListener('astrorder:open-settings', (event) => {
+    const detail = (event as CustomEvent<{ tab?: string; pluginId?: string }>).detail
+    const pluginId = detail?.pluginId?.trim()
+    if (!pluginId) return
+    try {
+      sessionStorage.setItem(PENDING_PLUGIN_CONFIG_SESSION_KEY, pluginId)
+    } catch {
+      // ignore storage errors in private contexts
+    }
+    window.dispatchEvent(
+      new CustomEvent<OpenPluginConfigEventDetail>('astrorder:open-plugin-config', {
+        detail: { pluginId },
+      }),
+    )
+  })
+
+  window.addEventListener('astrorder:open-plugin-panel', (event) => {
+    const detail = (event as CustomEvent<OpenPluginPanelEventDetail>).detail
+    if (!detail?.pluginId || !detail?.panelId || !detail.session) return
+    const builtinPanel = extensionRegistry.findBuiltinPanel(detail.pluginId, detail.panelId, detail.mediaType)
+    const extPlugin = useExtensionStore.getState().getById(detail.pluginId)
+    const extPanel = extPlugin?.contributes?.sidecar_panels?.find(
+      (panel) => panel.id === detail.panelId || (detail.mediaType && panel.media_type === detail.mediaType),
+    )
+    useSidecarStore.getState().openPluginPanel(detail.pluginId, detail.panelId, {
+      title: detail.title || builtinPanel?.panel.title || extPanel?.title || extPlugin?.name || detail.panelId,
+      mediaType: detail.mediaType || builtinPanel?.panel.mediaType || extPanel?.media_type,
+      viewerId: builtinPanel ? detail.pluginId : EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
+      sessionId: detail.session.id,
+      agentId: detail.session.agent_id,
+      workspacePath: detail.session.workspace || undefined,
+      connectionId: detail.session.connection_id || undefined,
+      params: detail.params,
+    })
   })
 }
 

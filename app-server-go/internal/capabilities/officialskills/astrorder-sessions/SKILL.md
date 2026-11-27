@@ -126,24 +126,40 @@ Discover and invoke registered Bots (each Bot owns its dedicated workspace, `AGE
   ```
 Give the Bot a concise, self-contained brief and attach key reference files when helpful so it does not have to crawl external projects by default; Astrorder also includes optional caller context pointers so the Bot can still inspect or ask back if it decides more detail is needed. Follow up with `astrorder-agent sessions read --key <BOT_JOB_SESSION_KEY>` until the Bot finishes.
 
-### 9. GitLab CI Status & Logs (Self-Hosted & Cloud)
-Query GitLab CI pipelines, job stages, and failure logs directly from any session without manually managing tokens or curl commands. Astrorder automatically detects the GitLab instance and project path from the current session workspace's `.git/config` and `HEAD`:
+### 9. Extensions & Third-Party Plugins (`ext.*`)
+Astrorder hosts built-in and third-party plugins (such as CI/CD tools, issue trackers, or internal integrations) without hardcoding vendor commands into core skills. Discover enabled plugin capabilities first, then invoke them with caller workspace context automatically attached:
 
-- List recent CI pipelines (highlights pipeline matching current HEAD / branch):
+- List all capabilities exposed by currently enabled plugins (includes `plugin_id`, `capability_id`, `summary`, and `input_schema`):
   ```bash
-  astrorder-agent gitlab pipelines [--ref <BRANCH>] [--limit 10]
+  astrorder-agent ext list
   ```
-- Inspect detailed stages and jobs of the latest pipeline (or a specific `--pipeline-id`):
+- Invoke any enabled plugin capability:
   ```bash
-  astrorder-agent gitlab status [--pipeline-id <ID>]
+  astrorder-agent ext call <PLUGIN_ID> <CAPABILITY_ID> [--param key=value ...] [--json '<JSON_OBJECT>']
   ```
-- Read the ANSI-cleaned tail of a failed/running job log:
-  ```bash
-  astrorder-agent gitlab log --job-id <JOB_ID> [--tail 200]
-  ```
-Optional override flags: `--project <GROUP/REPO>`, `--instance <ID_OR_NAME>`, `--workspace <PATH>`.
+When a plugin provides its own skill (e.g. `astrorder-gitlab-ci`), load that skill for plugin-specific workflows and parameter details.
 
-### 10. Other Capabilities via the Same CLI
+### 10. Learning Radar (Bot-Driven Blind-Spot Discovery & Mastery)
+Interact with Astrorder Learning Radar (`成长雷达`) to inspect active blind spots, ingest Mentor Bot scan results, or archive mastered topics after a study session:
+
+- View pending blind spots and due spaced-repetition reviews:
+  ```bash
+  astrorder-agent learning status [--status open|learning|review_due|mastered]
+  ```
+- Submit structured scan results from the Mentor Bot:
+  ```bash
+  astrorder-agent learning ingest --run-id <RUN_ID> --file <RESULT.json>
+  ```
+- Mark a topic mastered / save takeaways & local Markdown note path:
+  ```bash
+  astrorder-agent learning update --topic-id <TOPIC_ID> --status mastered --notes "<SUMMARY>" --notes-file "<NOTE_PATH>"
+  ```
+- Trigger a manual Mentor Bot scan:
+  ```bash
+  astrorder-agent learning scan [--days 7]
+  ```
+
+### 11. Other Capabilities via the Same CLI
 Blackboard, swarm coordination, workspace discovery and the monitor room are separate skills, but every one of them calls this same executable with a UTF-8 JSON file:
 
 ```bash

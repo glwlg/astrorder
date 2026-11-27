@@ -81,14 +81,26 @@ Close a tab or collapse the sidecar:
 {"collapse": true}
 ```
 
-## GitLab CI (`gitlab.*`)
+## Extensions (`ext.*`)
 
-Inspect CI pipelines, stage/job status, and job logs for self-hosted or cloud GitLab repositories configured in Astrorder Settings (workspace remote & HEAD commit are auto-detected from the calling session):
+Discover and invoke capabilities exposed by any enabled Astrorder built-in or third-party plugin (caller session workspace and SSH connection are automatically attached):
 
 ```bash
-astrorder-agent gitlab pipelines [--ref <BRANCH>] [--limit 10]
-astrorder-agent gitlab status [--pipeline-id <ID>]
-astrorder-agent gitlab log --job-id <JOB_ID> [--tail 200]
+astrorder-agent ext list
+astrorder-agent ext call <PLUGIN_ID> <CAPABILITY_ID> [--param key=value ...] [--json '<JSON_OBJECT>']
+```
+
+Always check `astrorder-agent ext list` (or the plugin's own installed skill) before assuming a plugin ID or capability name.
+
+## Learning Radar (`learning.*`)
+
+Inspect blind spots, submit Mentor Bot scan JSON results, or update mastery status & study notes:
+
+```bash
+astrorder-agent learning status [--status open|review_due|mastered]
+astrorder-agent learning ingest --run-id <RUN_ID> --file <RESULT.json>
+astrorder-agent learning update --topic-id <TOPIC_ID> --status mastered --notes "<SUMMARY>" --notes-file "<NOTE_PATH>"
+astrorder-agent learning scan [--days 7]
 ```
 
 ## Rules

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -17,6 +18,30 @@ type Opener interface {
 	Open(context.Context, string) (envtarget.Env, error)
 }
 
+// PluginSkill describes a SKILL.md entry contributed by an enabled Astrorder extension/plugin.
+type PluginSkill struct {
+	PluginID    string
+	Name        string
+	DisplayName string
+	Description string
+	Content     string
+}
+
+// PluginSkillProvider supplies skills exposed by currently enabled plugins.
+type PluginSkillProvider interface {
+	ListPluginSkills(ctx context.Context) []PluginSkill
+}
+
+// PluginSkillProviderFunc adapts a plain function to PluginSkillProvider.
+type PluginSkillProviderFunc func(ctx context.Context) []PluginSkill
+
+func (f PluginSkillProviderFunc) ListPluginSkills(ctx context.Context) []PluginSkill {
+	if f == nil {
+		return nil
+	}
+	return f(ctx)
+}
+
 type Service struct {
 	Targets Opener
 	HTTP    *http.Client
@@ -25,10 +50,55 @@ type Service struct {
 	}
 	CLIBinary    func(context.Context, envtarget.Env) (string, []byte, error)
 	CLITransport func(context.Context, envtarget.Env) ([]byte, error)
+	PluginSkills PluginSkillProvider
+	Logger       *slog.Logger
 
-	locks          sync.Map
-	dispatchJobsMu sync.RWMutex
-	dispatchJobs   []*DispatchJob
+	pluginSkillsMu  sync.RWMutex
+	autoSyncMu      sync.Mutex
+	autoSyncRunning bool
+	autoSyncPending bool
+	locks           sync.Map
+	dispatchJobsMu  sync.RWMutex
+	dispatchJobs    []*DispatchJob
+}
+
+// SetPluginSkillProvider configures the optional provider for enabled extension SKILL.md entries.
+func (s *Service) SetPluginSkillProvider(provider PluginSkillProvider) {
+	if s == nil {
+		return
+	}
+	s.pluginSkillsMu.Lock()
+	s.PluginSkills = provider
+	s.pluginSkillsMu.Unlock()
+}
+
+func (s *Service) pluginSkills(ctx context.Context) []PluginSkill {
+	if s == nil {
+		return nil
+	}
+	s.pluginSkillsMu.RLock()
+	provider := s.PluginSkills
+	s.pluginSkillsMu.RUnlock()
+	if provider == nil {
+		return nil
+	}
+	return provider.ListPluginSkills(ctx)
+}
+
+// SetPluginSkillProvider exposes plugin skill wiring on the HTTP handler wrapper as well.
+func (h *handler) SetPluginSkillProvider(provider PluginSkillProvider) {
+	if h == nil || h.svc == nil {
+		return
+	}
+	h.svc.SetPluginSkillProvider(provider)
+}
+
+// TriggerAutoSync exposes non-blocking skill/CLI sync on the HTTP handler wrapper.
+func (h *handler) TriggerAutoSync(ctx context.Context) {
+	if h == nil || h.svc == nil {
+		return
+	}
+	h.svc.TriggerAutoSync(ctx)
 }
 
 func New(targets Opener) *Service {

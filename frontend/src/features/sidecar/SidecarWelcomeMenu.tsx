@@ -1,10 +1,18 @@
+import type { ReactNode } from 'react'
 import { Text, UnstyledButton } from '@mantine/core'
-import { IconBrandGitlab } from '@tabler/icons-react'
 import {
   BrainIcon, BrowserIcon, ChalkboardSimpleIcon, ChatsCircleIcon, DatabaseIcon, FolderSimpleIcon, GitBranchIcon, GraphIcon, MicrophoneIcon, NotebookIcon, SparkleIcon, TerminalWindowIcon,
 } from '../../components/workbenchIcons'
 import type { Session } from '../../domain/types'
 import { useShortcutStore } from '../shortcuts/shortcuts'
+
+export interface SidecarWelcomeExtraItem {
+  id: string
+  icon: ReactNode
+  label: string
+  shortcut?: string
+  onClick: () => void
+}
 
 interface SidecarWelcomeMenuProps {
   session: Session
@@ -18,9 +26,9 @@ interface SidecarWelcomeMenuProps {
   onOpenBlackboard?: () => void
   onOpenMemory?: () => void
   onOpenWorktrees?: () => void
-  onOpenGitLabCI?: () => void
   onOpenDigest?: () => void
   onOpenMeetings?: () => void
+  extraItems?: SidecarWelcomeExtraItem[]
 }
 
 export function SidecarWelcomeMenu({
@@ -35,15 +43,16 @@ export function SidecarWelcomeMenu({
   onOpenBlackboard,
   onOpenMemory,
   onOpenWorktrees,
-  onOpenGitLabCI,
   onOpenDigest,
   onOpenMeetings,
+  extraItems,
 }: SidecarWelcomeMenuProps) {
   const bindings = useShortcutStore(state => state.bindings)
-  const menuItems = [
+  const menuItems: Array<{ id: string; icon: ReactNode; label: string; shortcut?: string; onClick: () => void }> = [
     ...(onOpenMeetings
       ? [
           {
+            id: 'meetings',
             icon: <MicrophoneIcon size={20} weight="duotone" color="#0ea5e9" />,
             label: '会议纪要',
             shortcut: '办公',
@@ -54,6 +63,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenDigest
       ? [
           {
+            id: 'digest',
             icon: <NotebookIcon size={20} weight="duotone" color="#6366f1" />,
             label: '工作复盘',
             shortcut: '办公',
@@ -64,6 +74,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenBlackboard
       ? [
           {
+            id: 'blackboard',
             icon: <ChalkboardSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '黑板',
             shortcut: bindings.blackboard || '未设置',
@@ -74,6 +85,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenMemory
       ? [
           {
+            id: 'memory',
             icon: <BrainIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '知识记忆',
             shortcut: bindings.memory || '未设置',
@@ -84,6 +96,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenFileTree
       ? [
           {
+            id: 'filetree',
             icon: <FolderSimpleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '文件',
             shortcut: bindings.fileTree || '未设置',
@@ -94,6 +107,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenWorktrees
       ? [
           {
+            id: 'worktrees',
             icon: <GitBranchIcon size={20} weight="duotone" color="#0ea5e9" />,
             label: 'Worktree 工作区',
             shortcut: '并行分支',
@@ -101,19 +115,11 @@ export function SidecarWelcomeMenu({
           },
         ]
       : []),
-    ...(onOpenGitLabCI
-      ? [
-          {
-            icon: <IconBrandGitlab size={20} color="#e24329" />,
-            label: 'GitLab CI 流水线',
-            shortcut: 'CI / CD',
-            onClick: onOpenGitLabCI,
-          },
-        ]
-      : []),
+    ...(extraItems || []),
     ...(onOpenSideChat
       ? [
           {
+            id: 'sidechat',
             icon: <ChatsCircleIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '侧边聊天',
             shortcut: bindings.sideChat || '未设置',
@@ -124,6 +130,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenAgentGraph
       ? [
           {
+            id: 'agentgraph',
             icon: <GraphIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '决策与轨迹',
             shortcut: bindings.agentGraph || '未设置',
@@ -134,6 +141,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenBrowser
       ? [
           {
+            id: 'browser',
             icon: <BrowserIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '浏览器',
             shortcut: bindings.browser || '未设置',
@@ -144,6 +152,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenTerminal
       ? [
           {
+            id: 'terminal',
             icon: <TerminalWindowIcon size={20} weight="duotone" color="var(--astr-blue)" />,
             label: '终端',
             shortcut: bindings.terminal || '未设置',
@@ -154,6 +163,7 @@ export function SidecarWelcomeMenu({
     ...(onOpenDatabase
       ? [
           {
+            id: 'database',
             icon: <DatabaseIcon size={20} weight="duotone" color="#0f766e" />,
             label: '数据库',
             shortcut: '工作台',
@@ -182,7 +192,7 @@ export function SidecarWelcomeMenu({
           {menuItems.length > 0 ? (
             menuItems.map((item) => (
               <UnstyledButton
-                key={item.label}
+                key={item.id}
                 onClick={item.onClick}
                 className="sidecar-welcome-item"
               >

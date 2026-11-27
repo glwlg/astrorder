@@ -64,6 +64,7 @@ type officialManifest struct {
 	Version    int               `json:"version"`
 	Skill      string            `json:"skill"`
 	Agent      string            `json:"agent"`
+	PluginID   string            `json:"plugin_id,omitempty"`
 	Files      map[string]string `json:"files"`
 }
 
@@ -108,6 +109,54 @@ func (s *Service) officialSkillDelivery(name string) (func(context.Context, envt
 			message = "技能文件与目标 CLI 已分发并回读核验；请在目标 Agent 中加载"
 		}
 		return folder, message, nil
+	}, nil
+}
+
+func (s *Service) pluginSkillDelivery(ctx context.Context, name string) (func(context.Context, envtarget.Env, string) (string, string, error), error) {
+	var chosen *PluginSkill
+	for _, ps := range s.pluginSkills(ctx) {
+		if strings.TrimSpace(ps.Name) == name {
+			cp := ps
+			chosen = &cp
+			break
+		}
+	}
+	if chosen == nil {
+		return nil, envtarget.Errorf(404, "当前已启用的插件中没有技能 %s", name)
+	}
+	if _, official := officialskills.GetOfficialSkill(chosen.Name); official {
+		return nil, envtarget.Errorf(409, "插件技能名称 %s 与星序官方技能冲突", chosen.Name)
+	}
+	return func(ctx context.Context, dest envtarget.Env, agent string) (string, string, error) {
+		if err := s.prepareDispatchedCLI(ctx, dest, agent); err != nil {
+			return "", "", err
+		}
+		p, err := dest.Paths(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		home := skillHome(p, agent)
+		if home == "" {
+			return "", "", envtarget.Errorf(422, "尚未接入此 Agent 的技能目录：%s", agent)
+		}
+		folder := path.Join(home, "skills", chosen.Name)
+		defer s.lock(dest.Target().ID + "|skills-dispatch|" + home + "/skills")()
+		if err := checkOfficialTarget(ctx, dest, home, folder); err != nil {
+			return "", "", err
+		}
+		files := map[string][]byte{"SKILL.md": officialskills.RenderSkillContent(chosen.Content, home)}
+		binName, binary, err := verifiedDestinationCLI(ctx, dest, home, agent)
+		if err != nil {
+			if errors.Is(err, errOfficialCLIStale) {
+				return "", "", envtarget.Errorf(422, "%s", err.Error())
+			}
+			return "", "", err
+		}
+		files["scripts/"+binName] = binary
+		if err := writeManagedOfficialFiles(ctx, dest, folder, agent, chosen.Name, chosen.PluginID, files); err != nil {
+			return "", "", err
+		}
+		return folder, "插件技能与目标 CLI 已分发并回读核验；请在目标 Agent 中加载", nil
 	}, nil
 }
 
@@ -294,7 +343,11 @@ func checkOfficialTarget(ctx context.Context, dest envtarget.Env, home, target s
 	return nil
 }
 
-func writeOfficialFiles(ctx context.Context, dest envtarget.Env, folder, agent, name string, files map[string][]byte, verify ...func() error) (resultErr error) {
+func writeOfficialFiles(ctx context.Context, dest envtarget.Env, folder, agent, name string, files map[string][]byte, verify ...func() error) error {
+	return writeManagedOfficialFiles(ctx, dest, folder, agent, name, "", files, verify...)
+}
+
+func writeManagedOfficialFiles(ctx context.Context, dest envtarget.Env, folder, agent, name, pluginID string, files map[string][]byte, verify ...func() error) (resultErr error) {
 	manifestPath := path.Join(folder, officialManifestFile)
 	if err := checkOfficialTarget(ctx, dest, path.Dir(path.Dir(folder)), manifestPath); err != nil {
 		return err
@@ -306,7 +359,7 @@ func writeOfficialFiles(ctx context.Context, dest envtarget.Env, folder, agent, 
 	}
 	var old officialManifest
 	if hasManifest {
-		if json.Unmarshal(oldRaw, &old) != nil || old.Owner != officialManifestOwner || old.Version != officialManifestVersion || old.Skill != name || old.Agent != agent {
+		if json.Unmarshal(oldRaw, &old) != nil || old.Owner != officialManifestOwner || old.Version != officialManifestVersion || old.Skill != name || old.Agent != agent || old.PluginID != pluginID {
 			return envtarget.Errorf(409, "目标技能清单无效或绑定冲突，已保留原文件")
 		}
 	}
@@ -356,7 +409,7 @@ func writeOfficialFiles(ctx context.Context, dest envtarget.Env, folder, agent, 
 		}
 	}
 	backups[officialManifestFile] = backup{oldRaw, hasManifest}
-	managed := officialManifest{Owner: officialManifestOwner, Version: officialManifestVersion, Skill: name, Agent: agent, Files: map[string]string{}}
+	managed := officialManifest{Owner: officialManifestOwner, Version: officialManifestVersion, Skill: name, Agent: agent, PluginID: pluginID, Files: map[string]string{}}
 	// Every official module is bound to the destination caller, not only the
 	// session module. The binding was verified before any file was written.
 	caller, err := dest.Read(ctx, path.Join(path.Dir(path.Dir(folder)), agentskill.CallerFile))

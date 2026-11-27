@@ -28,7 +28,26 @@
 .plugins-page-search {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plugins-tile-error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--astr-red, #fa5252) 10%, transparent);
+  color: var(--astr-red, #e03131);
+  font-size: 11.5px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.plugins-tile-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .plugins-page-search .mantine-TextInput-input {

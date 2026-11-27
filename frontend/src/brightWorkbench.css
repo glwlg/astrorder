@@ -521,6 +521,24 @@ body { font-family: var(--astr-session-font); font-size: 14px; }
 .composer-gitlab-dot.is-pulsing { animation: composer-gitlab-pulse 1.6s ease-in-out infinite; }
 @keyframes composer-gitlab-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.84); } }
 .composer-gitlab-id { color: var(--astr-muted); font-family: var(--astr-mono-font, ui-monospace, monospace); font-size: 11px; }
+.composer-gitlab-pill-wrap { display: inline-flex; align-items: center; }
+.composer-gitlab-menu-anchor { position: fixed; inline-size: 0; block-size: 0; pointer-events: none; }
+.composer-gitlab-context-menu { margin: 0; padding: 4px; inset: auto; min-inline-size: 204px; border: 1px solid var(--astr-border); border-radius: 10px; background: var(--astr-surface); color: var(--astr-text); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); position-area: block-start span-inline-end; position-try-fallbacks: flip-block, flip-inline; }
+.composer-gitlab-context-menu[data-open='true'] { display: block; position: fixed; z-index: 1200; }
+@supports not selector(:popover-open) {
+  .composer-gitlab-context-menu:not([data-open='true']) { display: none; }
+}
+@supports not (position-area: block-start) {
+  .composer-gitlab-context-menu { position: fixed; inset: auto; margin: 0; }
+}
+.composer-gitlab-context-list { display: flex; flex-direction: column; gap: 2px; }
+.composer-gitlab-context-item { display: flex; align-items: center; gap: 8px; width: 100%; min-block-size: 30px; padding: 5px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--astr-text); font: 450 12px/1.4 var(--astr-session-font); text-align: left; cursor: pointer; white-space: nowrap; }
+@media (hover: hover) {
+  .composer-gitlab-context-item:hover:not(:disabled) { background: var(--astr-surface-muted); }
+}
+.composer-gitlab-context-item:focus-visible { outline: 2px solid var(--astr-accent, var(--astr-blue, #4f46e5)); outline-offset: -2px; }
+.composer-gitlab-context-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.composer-gitlab-context-sep { height: 1px; margin: 3px 6px; border-top: 1px solid var(--astr-border); }
 .chat-column .composer-input textarea { min-height: 52px; padding: 7px 2px; color: var(--astr-text); font: 400 14px/1.65 var(--astr-session-font); }
 .chat-column .composer-input textarea::placeholder { color: var(--astr-muted); opacity: 1; }
 .chat-column .composer-row { gap: 7px; min-height: 36px; padding-top: 8px; border-top: 1px solid color-mix(in oklab, var(--astr-border) 65%, transparent); }

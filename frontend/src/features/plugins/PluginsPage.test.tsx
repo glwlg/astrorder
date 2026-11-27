@@ -10,6 +10,10 @@ import {
 } from './builtinPlugins'
 import { usePluginSettingsStore } from './pluginSettingsStore'
 import { api, type LocalVoicePluginStatus } from '../../api/client'
+import { extensionsApi, type PluginView } from '../../api/extensions'
+import { extensionRegistry } from '../extensions/extensionRegistry'
+import { useExtensionStore } from '../extensions/extensionStore'
+import { PENDING_PLUGIN_CONFIG_SESSION_KEY } from '../extensions/types'
 
 const disabledStatus: LocalVoicePluginStatus = {
   id: 'r2t2-local-voice', name: 'R2T2 本地流式听写', enabled: false, state: 'disabled',
@@ -21,7 +25,10 @@ afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   usePluginSettingsStore.getState().reset()
+  useExtensionStore.getState().reset()
+  extensionRegistry.clear()
 })
 
 describe('PluginsPage Component', () => {
@@ -238,5 +245,110 @@ describe('PluginsPage Component', () => {
     await waitFor(() => expect(updateSpy).toHaveBeenCalledWith({
       configs: { [CODE_CHECKPOINTS_PLUGIN_ID]: { maxAutoSnapshots: 15 } },
     }))
+  })
+
+  it('opens PluginConfigDrawer directly from card button and astrorder:open-plugin-config event', async () => {
+    vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue(disabledStatus)
+    vi.spyOn(api, 'getPluginSettings').mockResolvedValue({ enabled: {}, configs: {} })
+    vi.spyOn(api, 'getBrowserEngine').mockResolvedValue({ engine: 'browser_use' })
+    vi.spyOn(extensionsApi, 'listExtensions').mockResolvedValue({ items: [] })
+
+    extensionRegistry.registerBuiltin({
+      pluginId: 'gitlab-ci-viewer',
+      settingsTitle: 'GitLab CI 实例配置',
+      settingsButtonLabel: '配置实例',
+      settingsComponent: () => <div>GitLab 自定义抽屉内容</div>,
+    })
+
+    render(<MantineProvider><PluginsPage /></MantineProvider>)
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索插件' }), { target: { value: 'gitlab' } })
+    const cfgBtn = await screen.findByRole('button', { name: '配置实例' })
+    fireEvent.click(cfgBtn)
+    expect(await screen.findByText('GitLab 自定义抽屉内容')).toBeInTheDocument()
+
+    // Also verifies sessionStorage handoff & window event opening
+    cleanup()
+    sessionStorage.setItem(PENDING_PLUGIN_CONFIG_SESSION_KEY, 'gitlab-ci-viewer')
+    render(<MantineProvider><PluginsPage /></MantineProvider>)
+    expect(await screen.findByText('GitLab 自定义抽屉内容')).toBeInTheDocument()
+    expect(sessionStorage.getItem(PENDING_PLUGIN_CONFIG_SESSION_KEY)).toBeNull()
+  })
+
+  it('renders external plugin card, enforces permission grant on enable, and supports install & uninstall', async () => {
+    vi.spyOn(api, 'getLocalVoicePlugin').mockResolvedValue(disabledStatus)
+    vi.spyOn(api, 'getPluginSettings').mockResolvedValue({ enabled: {}, configs: {} })
+    vi.spyOn(api, 'getBrowserEngine').mockResolvedValue({ engine: 'browser_use' })
+
+    const extPlugin: PluginView = {
+      id: 'acme.hello-plugin',
+      name: 'Acme Hello 扩展',
+      version: '1.2.0',
+      category: 'development',
+      description: '示例第三方进程插件',
+      author: 'Acme',
+      source: 'external',
+      enabled: false,
+      permissions: ['workspace:git.read', 'storage:secrets'],
+      granted_permissions: [],
+      pending_permissions: ['workspace:git.read', 'storage:secrets'],
+      permissions_granted: false,
+      runtime_state: 'stopped',
+      backend_type: 'process',
+      settings: { mode: 'schema', schema: [] },
+      contributes: {},
+    }
+
+    vi.spyOn(extensionsApi, 'listExtensions').mockResolvedValue({ items: [extPlugin] })
+    const enableSpy = vi
+      .spyOn(extensionsApi, 'setExtensionEnabled')
+      .mockResolvedValueOnce({
+        requires_permission_grant: true,
+        pending_permissions: ['workspace:git.read', 'storage:secrets'],
+        item: extPlugin,
+      })
+      .mockResolvedValueOnce({
+        item: {
+          ...extPlugin,
+          enabled: true,
+          granted_permissions: ['workspace:git.read', 'storage:secrets'],
+          pending_permissions: [],
+          permissions_granted: true,
+          runtime_state: 'ready',
+        },
+      })
+    const uninstallSpy = vi.spyOn(extensionsApi, 'uninstallExtension').mockResolvedValue({
+      ok: true,
+      id: extPlugin.id,
+    })
+
+    render(<MantineProvider><PluginsPage /></MantineProvider>)
+
+    expect(await screen.findByText('Acme Hello 扩展')).toBeInTheDocument()
+    expect(screen.getByText('第三方')).toBeInTheDocument()
+
+    // Toggle ON -> hits 409 requires_permission_grant -> opens PermissionGrantModal
+    const toggle = screen.getByRole('switch', { name: '启用或禁用 Acme Hello 扩展' })
+    fireEvent.click(toggle)
+
+    expect(await screen.findByText('扩展权限授权确认')).toBeInTheDocument()
+    expect(screen.getByText('读取工作区 Git 信息')).toBeInTheDocument()
+    expect(screen.getByText('加密凭据存储')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '授权并启用' }))
+    await waitFor(() =>
+      expect(enableSpy).toHaveBeenNthCalledWith(2, 'acme.hello-plugin', true, [
+        'workspace:git.read',
+        'storage:secrets',
+      ]),
+    )
+    expect(await screen.findByText('运行中')).toBeInTheDocument()
+
+    // Uninstall flow with confirmation dialog
+    fireEvent.click(screen.getByRole('button', { name: '卸载' }))
+    expect(await screen.findByText('确认卸载外部插件')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认卸载' }))
+    await waitFor(() => expect(uninstallSpy).toHaveBeenCalledWith('acme.hello-plugin'))
+    await waitFor(() => expect(screen.queryByText('Acme Hello 扩展')).toBeNull())
   })
 })

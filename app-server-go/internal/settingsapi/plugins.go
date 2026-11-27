@@ -150,6 +150,9 @@ func (h *handler) setPluginSettings(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, "Preference storage is unavailable")
 			return
 		}
+		if h.OnPluginsChanged != nil {
+			go h.OnPluginsChanged()
+		}
 	}
 	if configChanged {
 		if err := h.Store.SetPreference(r.Context(), prefPluginsConfig, current.Configs, true); err != nil {

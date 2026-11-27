@@ -649,7 +649,7 @@ export function CapabilitiesSettingsCard() {
   const openSkillDispatchModal = (skillsToDispatch: SkillItem[], preselectMissingOnly = false) => {
     const drafts: DispatchDraftItem[] = skillsToDispatch.map((sk) => ({
       item_id: sk.name,
-      source_agent: isOfficialSkill(sk) ? 'astrorder' : (sk.agent || 'all'),
+      source_agent: isOfficialSkill(sk) ? 'astrorder' : sk.source === 'plugin' ? 'plugin' : (sk.agent || 'all'),
       label: getSkillDisplayTitle(sk),
       installedAgents: getSkillInstalledAgents(sk),
       raw: sk,
@@ -1761,113 +1761,168 @@ export function CapabilitiesSettingsCard() {
 
         {/* ===================== TAB 4: 全网能力市场 ===================== */}
         {activeTab === 'marketplaces' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, overflow: 'hidden' }}>
-            <div style={{ marginBottom: 16 }}>
-              <Group justify="space-between" mb="xs">
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--cap-text-primary)' }}>
-                  已接入的能力订阅源 (Marketplaces)
-                </h3>
-                <Button size="xs" color="indigo" leftSection={<IconPlus size={14} />} onClick={handleOpenAddMarket}>
-                  添加订阅源
-                </Button>
-              </Group>
+          <div className="cap-market-pane">
+            <details className="cap-market-sources">
+              <summary className="cap-market-sources-summary">
+                <span className="cap-market-sources-title">已接入的能力订阅源 (Marketplaces)</span>
+                <span className="cap-tab-count">{filteredMarketplaces.length}</span>
+                {filteredMarketplaces.length > 0 && (
+                  <span className="cap-market-sources-preview">
+                    {filteredMarketplaces
+                      .slice(0, 4)
+                      .map((m) => m.name)
+                      .join(' · ')}
+                    {filteredMarketplaces.length > 4 ? ` 等 ${filteredMarketplaces.length} 个` : ''}
+                  </span>
+                )}
+                <span className="cap-market-sources-hint">
+                  <span className="cap-market-hint-expand">展开管理</span>
+                  <span className="cap-market-hint-collapse">收起</span>
+                </span>
+              </summary>
 
-              <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-                {filteredMarketplaces.map((m) => (
-                  <Card key={m.id} withBorder radius="md" p="sm" style={{ background: 'var(--cap-card-bg)' }}>
-                    <Group justify="space-between">
-                      <Group gap={4}>
-                        <Text fw={700} size="xs">{m.name}</Text>
-                        {m.agent && m.agent !== 'all' && <Badge size="xs" color="gray">{m.agent}</Badge>}
-                      </Group>
-                      <Badge size="xs" color="pink">{m.source_type}</Badge>
+              <div className="cap-market-sources-body">
+                <Group justify="space-between" mb="xs">
+                  <Text size="xs" c="dimmed">
+                    管理当前节点已订阅的本地目录、Git 仓库与全网技能源
+                  </Text>
+                  <Button size="compact-xs" color="indigo" leftSection={<IconPlus size={13} />} onClick={handleOpenAddMarket}>
+                    添加订阅源
+                  </Button>
+                </Group>
+
+                {filteredMarketplaces.length > 0 ? (
+                  <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="xs">
+                    {filteredMarketplaces.map((m) => (
+                      <Card key={m.id} withBorder radius="md" p="xs" style={{ background: 'var(--cap-card-bg)' }}>
+                        <Group justify="space-between" gap={6} wrap="nowrap">
+                          <Group gap={4} wrap="nowrap" style={{ minWidth: 0 }}>
+                            <Text fw={700} size="xs" truncate>{m.name}</Text>
+                            {m.agent && m.agent !== 'all' && <Badge size="xs" color="gray" style={{ flexShrink: 0 }}>{m.agent}</Badge>}
+                          </Group>
+                          <Badge size="xs" color="pink" style={{ flexShrink: 0 }}>{m.source_type}</Badge>
+                        </Group>
+                        <Text size="xs" c="dimmed" mt={4} lineClamp={1} title={m.source}>{m.source}</Text>
+                        <Group justify="flex-end" mt={6} gap={4}>
+                          <Button size="compact-xs" variant="subtle" color="teal" onClick={() => void handlePullMarket(m)}>Pull 同步</Button>
+                          {m.id !== 'global::skills.sh' && (
+                            <Button size="compact-xs" variant="subtle" color="red" onClick={() => void handleDeleteMarket(m)}>删除</Button>
+                          )}
+                        </Group>
+                      </Card>
+                    ))}
+                  </SimpleGrid>
+                ) : (
+                  <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--cap-text-muted)', fontSize: 12 }}>
+                    当前节点尚未接入能力订阅源
+                  </div>
+                )}
+              </div>
+            </details>
+
+            <div className="cap-market-search-section">
+              <form
+                className="cap-market-search-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void handleMarketSearch()
+                }}
+              >
+                <TextInput
+                  className="cap-market-search-input"
+                  aria-label="搜索全网 Agent 技能与能力扩展"
+                  placeholder="搜索全网 Agent 技能与能力扩展（如: react, github, video, docker）..."
+                  value={marketQuery}
+                  onChange={(e) => setMarketQuery(e.currentTarget.value)}
+                  leftSection={<IconSearch size={16} />}
+                  rightSection={
+                    marketQuery ? (
+                      <button
+                        type="button"
+                        className="cap-market-clear-btn"
+                        aria-label="清空搜索关键词"
+                        onClick={() => setMarketQuery('')}
+                      >
+                        <IconX size={14} />
+                      </button>
+                    ) : null
+                  }
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  color="indigo"
+                  className="cap-market-search-submit"
+                  loading={searchingMarket}
+                  leftSection={<IconSearch size={14} />}
+                >
+                  搜索全网
+                </Button>
+              </form>
+
+              <Group gap="xs" className="cap-market-hot-tags">
+                <Text size="xs" fw={600} c="dimmed">热门推荐:</Text>
+                {['github', 'react', 'docker', 'video', 'python', 'pdf', 'browser'].map((tag) => (
+                  <Badge
+                    key={tag}
+                    size="xs"
+                    variant="light"
+                    color="indigo"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setMarketQuery(tag)
+                      void handleMarketSearch(tag)
+                    }}
+                  >
+                    #{tag}
+                  </Badge>
+                ))}
+                {!searchingMarket && marketResults.length > 0 && (
+                  <Text size="xs" c="dimmed" style={{ marginLeft: 'auto' }}>
+                    共 {marketResults.length} 项技能
+                  </Text>
+                )}
+              </Group>
+            </div>
+
+            <div className="cap-market-results">
+              {searchingMarket && (
+                <div style={{ textAlign: 'center', padding: 48, color: 'var(--cap-text-secondary)', fontSize: 13 }}>
+                  正在检索全网能力市场...
+                </div>
+              )}
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+                {marketResults.map((item) => (
+                  <Card key={item.pkg} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
+                    <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={700} size="sm" truncate>{item.name || item.pkg}</Text>
+                        <Text size="xs" c="dimmed" mt={2} truncate>{item.repo}</Text>
+                      </div>
+                      <Badge size="xs" color="gray" style={{ flexShrink: 0 }}>{item.installs}</Badge>
                     </Group>
-                    <Text size="xs" c="dimmed" mt={4} lineClamp={1} title={m.source}>{m.source}</Text>
-                    <Group justify="flex-end" mt="xs" gap={4}>
-                      <Button size="compact-xs" variant="subtle" color="teal" onClick={() => void handlePullMarket(m)}>Pull 同步</Button>
-                      {m.id !== 'global::skills.sh' && (
-                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => void handleDeleteMarket(m)}>删除</Button>
-                      )}
+                    <Group justify="space-between" mt="md">
+                      <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--cap-cyan)' }}>
+                        查看主页 ↗
+                      </a>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color="indigo"
+                        leftSection={<IconDownload size={14} />}
+                        onClick={() => { setCustomPackage(item.pkg); setInstallTargets([selectedTargetId]); setInstallModalOpen(true) }}
+                      >
+                        跨端分发安装
+                      </Button>
                     </Group>
                   </Card>
                 ))}
               </SimpleGrid>
-            </div>
-
-            <Group gap="xs" mb="xs">
-              <Text size="xs" fw={600} c="dimmed">热门推荐:</Text>
-              {['github', 'react', 'docker', 'video', 'python', 'pdf', 'browser'].map((tag) => (
-                <Badge
-                  key={tag}
-                  size="xs"
-                  variant="light"
-                  color="indigo"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    setMarketQuery(tag)
-                    void handleMarketSearch(tag)
-                  }}
-                >
-                  #{tag}
-                </Badge>
-              ))}
-            </Group>
-
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ marginBottom: 12 }}>
-                <TextInput
-                  placeholder="搜索全网 Agent 技能与能力扩展（如: react, github, video, docker）..."
-                  value={marketQuery}
-                  onChange={(e) => setMarketQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && void handleMarketSearch()}
-                  leftSection={<IconSearch size={16} />}
-                  rightSection={
-                    <Button size="xs" color="indigo" loading={searchingMarket} onClick={() => void handleMarketSearch()}>
-                      搜索全网
-                    </Button>
-                  }
-                />
-              </div>
-
-              <ScrollArea style={{ flex: 1 }}>
-                {searchingMarket && (
-                  <div style={{ textAlign: 'center', padding: 48, color: 'var(--cap-text-secondary)', fontSize: 13 }}>
-                    正在检索全网能力市场...
-                  </div>
-                )}
-                <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
-                  {marketResults.map((item) => (
-                    <Card key={item.pkg} withBorder radius="md" p="md" style={{ background: 'var(--cap-card-bg)' }}>
-                      <Group justify="space-between" align="flex-start">
-                        <div>
-                          <Text fw={700} size="sm">{item.name || item.pkg}</Text>
-                          <Text size="xs" c="dimmed" mt={2}>{item.repo}</Text>
-                        </div>
-                        <Badge size="xs" color="gray">{item.installs}</Badge>
-                      </Group>
-                      <Group justify="space-between" mt="md">
-                        <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--cap-cyan)' }}>
-                          查看主页 ↗
-                        </a>
-                        <Button
-                          size="xs"
-                          variant="light"
-                          color="indigo"
-                          leftSection={<IconDownload size={14} />}
-                          onClick={() => { setCustomPackage(item.pkg); setInstallTargets([selectedTargetId]); setInstallModalOpen(true) }}
-                        >
-                          跨端分发安装
-                        </Button>
-                      </Group>
-                    </Card>
-                  ))}
-                </SimpleGrid>
-                {marketResults.length === 0 && !searchingMarket && (
-                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--cap-text-muted)', fontSize: 13 }}>
-                    输入关键词搜索全球社区技能包
-                  </div>
-                )}
-              </ScrollArea>
+              {marketResults.length === 0 && !searchingMarket && (
+                <div style={{ textAlign: 'center', padding: 48, color: 'var(--cap-text-muted)', fontSize: 13 }}>
+                  输入关键词搜索全球社区技能包
+                </div>
+              )}
             </div>
           </div>
         )}

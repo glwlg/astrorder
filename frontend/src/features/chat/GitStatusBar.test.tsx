@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Session } from '../../domain/types'
 import userEvent from '@testing-library/user-event'
+import { bootstrapBuiltinExtensions } from '../extensions/bootstrapBuiltins'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { GitStatusBar } from './GitStatusBar'
 
@@ -18,6 +19,7 @@ function renderStatus(value: Session = session) {
 }
 
 beforeEach(() => {
+  bootstrapBuiltinExtensions()
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -136,4 +138,33 @@ it('shows live GitLab CI pill for matched repos and opens the GitLab CI viewer o
   const state = useSidecarStore.getState()
   expect(state.isOpen).toBe(true)
   expect(state.tabs.some((tab) => tab.viewerId === 'gitlab-ci-viewer' && tab.artifact?.readUrl === '?pipeline_id=402')).toBe(true)
+})
+
+it('renders extension-registered Git menu items and opens plugin panel via Sidecar', async () => {
+  useSidecarStore.getState().resetSessionSidecar()
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+    const raw = String(url)
+    if (raw.includes('/api/v1/gitlab/pipelines')) {
+      return new Response(JSON.stringify({ configured: false, matched: false, pipelines: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ branch: 'main', branches: ['main'], changed_files: 0 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }))
+
+  const user = userEvent.setup()
+  renderStatus()
+  await waitFor(() => expect(screen.getByRole('button', { name: '切换或创建 Git 分支' })).toBeEnabled())
+  await user.click(screen.getByRole('button', { name: '切换或创建 Git 分支' }))
+
+  const menuItem = await screen.findByRole('menuitem', { name: /查看 GitLab CI 流水线/ })
+  await user.click(menuItem)
+
+  const state = useSidecarStore.getState()
+  expect(state.isOpen).toBe(true)
+  expect(state.tabs.some((tab) => tab.id === 'ext:gitlab-ci-viewer:ci-panel:s1' && tab.viewerId === 'gitlab-ci-viewer')).toBe(true)
 })

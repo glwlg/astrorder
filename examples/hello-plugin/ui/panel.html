@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hello Extension Panel</title>
+  <script src="/api/v1/ext/_sdk/bridge.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --surface: #f8f9fa;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #7c3aed;
+    }
+    [data-theme="dark"] {
+      --bg: #141517;
+      --surface: #1d1f24;
+      --border: #2c2e33;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    h1 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(124, 58, 237, 0.14);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    input[type="text"] {
+      flex: 1;
+      min-width: 180px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 12px;
+    }
+    button {
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    pre {
+      margin: 8px 0 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      overflow: auto;
+      font-size: 12px;
+      max-height: 220px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>
+      <span id="title">Hello Extension</span>
+      <span class="badge">Sandboxed iframe</span>
+    </h1>
+    <div class="muted" id="ctx-line">正在连接 Astrorder Host Bridge…</div>
+    <div class="row">
+      <button id="btn-refresh" type="button">刷新状态</button>
+      <button id="btn-quote" type="button">引用工作区摘要到输入框</button>
+      <button id="btn-toast" type="button">发送 Host Toast</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>工作区 Git 信息（经由 Host API 授权获取）</strong>
+    <pre id="state-out">加载中…</pre>
+  </div>
+
+  <div class="card">
+    <strong>测试插件端点（POST /agent/echo）</strong>
+    <div class="row">
+      <input id="echo-input" type="text" placeholder="输入要回显的消息…" value="Hello Astrorder!" />
+      <button id="btn-echo" class="primary" type="button">发送回显</button>
+    </div>
+    <pre id="echo-out">点击「发送回显」调用插件后端</pre>
+  </div>
+
+  <script>
+    let currentCtx = {}
+    let lastState = null
+
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light')
+    }
+
+    async function loadState() {
+      const stateOut = document.getElementById('state-out')
+      stateOut.textContent = '读取中…'
+      try {
+        const q = new URLSearchParams()
+        if (currentCtx.workspace) q.set('workspace', currentCtx.workspace)
+        if (currentCtx.connectionId) q.set('connection_id', currentCtx.connectionId)
+        if (currentCtx.sessionId) q.set('session_id', currentCtx.sessionId)
+        const resp = await window.astrorderPlugin.fetch('/state' + (q.toString() ? '?' + q.toString() : ''))
+        lastState = resp.json || resp.text
+        if (resp.json?.settings?.greeting) {
+          document.getElementById('title').textContent = resp.json.settings.greeting
+        }
+        stateOut.textContent = JSON.stringify(lastState, null, 2)
+      } catch (err) {
+        stateOut.textContent = '读取失败: ' + (err && err.message ? err.message : String(err))
+      }
+    }
+
+    async function init() {
+      if (!window.astrorderPlugin) {
+        document.getElementById('ctx-line').textContent = '未检测到 bridge.js（请在 Astrorder 侧边栏中打开）'
+        return
+      }
+      currentCtx = await window.astrorderPlugin.getContext()
+      applyTheme(currentCtx.theme)
+      document.getElementById('ctx-line').textContent =
+        `会话: ${currentCtx.sessionId || '-'} · 工作区: ${currentCtx.workspace || '未绑定'}`
+      if (typeof window.astrorderPlugin.onContextChange === 'function') {
+        window.astrorderPlugin.onContextChange((next) => {
+          currentCtx = { ...currentCtx, ...next }
+          applyTheme(currentCtx.theme)
+          loadState()
+        })
+      }
+      await loadState()
+    }
+
+    document.getElementById('btn-refresh').addEventListener('click', () => loadState())
+    document.getElementById('btn-toast').addEventListener('click', () => {
+      window.astrorderPlugin?.toast('来自第三方插件 Hello Extension 的通知！', 'info')
+    })
+    document.getElementById('btn-quote').addEventListener('click', () => {
+      const repo = lastState?.git?.project_path || currentCtx.workspace || '当前工作区'
+      const branch = lastState?.git?.branch ? ` (${lastState.git.branch})` : ''
+      window.astrorderPlugin?.insertToComposer(`来自 Hello Extension 的工作区上下文：${repo}${branch}\n`)
+      window.astrorderPlugin?.toast('已插入到对话输入框', 'success')
+    })
+    document.getElementById('btn-echo').addEventListener('click', async () => {
+      const out = document.getElementById('echo-out')
+      const message = document.getElementById('echo-input').value
+      out.textContent = '请求中…'
+      try {
+        const resp = await window.astrorderPlugin.fetch('/agent/echo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            workspace: currentCtx.workspace || '',
+            connection_id: currentCtx.connectionId || '',
+            session_id: currentCtx.sessionId || '',
+          }),
+        })
+        out.textContent = JSON.stringify(resp.json || resp.text, null, 2)
+      } catch (err) {
+        out.textContent = '调用失败: ' + (err && err.message ? err.message : String(err))
+      }
+    })
+
+    init()
+  </script>
+</body>
+</html>

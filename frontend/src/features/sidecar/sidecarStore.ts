@@ -48,6 +48,17 @@ export interface SessionSidecarMemory {
   isOpen: boolean
 }
 
+export interface OpenPluginPanelOptions {
+  title?: string
+  mediaType?: string
+  viewerId?: string
+  sessionId: string
+  agentId: string
+  workspacePath?: string
+  connectionId?: string
+  params?: Record<string, unknown>
+}
+
 export interface SidecarState {
   isOpen: boolean
   activeTabId: string
@@ -77,7 +88,7 @@ export interface SidecarState {
   openAgentGraph: (sessionId: string, agentId: string, workspaceName?: string, connectionId?: string) => void
   openGitDiff: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, baseBranch?: string) => void
   openWorktrees: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string) => void
-  openGitLabCI: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, pipelineId?: number) => void
+  openPluginPanel: (pluginId: string, panelId: string, opts: OpenPluginPanelOptions) => void
   openBrowser: (sessionId: string, agentId: string, initialUrl?: string, connectionId?: string) => void
   openDatabaseWorkbench: (mediaType: string, viewerId: string, sessionId?: string, agentId?: string, connectionId?: string) => void
   openBlackboard: (sessionId?: string, agentId?: string, connectionId?: string) => void
@@ -480,19 +491,42 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
     }
   },
 
-  openGitLabCI: (sessionId: string, agentId: string, workspacePath?: string, connectionId?: string, pipelineId?: number) => {
-    const tabId = `gitlabci:${sessionId || workspacePath || 'repo'}`
-    const readUrl = pipelineId && pipelineId > 0 ? `?pipeline_id=${pipelineId}` : ''
+  openPluginPanel: (pluginId: string, panelId: string, opts: OpenPluginPanelOptions) => {
+    const tabId = `ext:${pluginId}:${panelId}:${opts.sessionId || opts.workspacePath || 'panel'}`
+    const query = new URLSearchParams()
+    if (opts.params) {
+      for (const [key, value] of Object.entries(opts.params)) {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          if (value !== '') {
+            query.set(key, String(value))
+          }
+        }
+      }
+    }
+    const readUrl = query.toString() ? `?${query.toString()}` : ''
+    const title = opts.title || panelId
+    const mediaType = opts.mediaType || `application/x-astrorder-ext.${pluginId}.${panelId}`
+    const viewerId = opts.viewerId || 'external-plugin-panel'
     const { tabs, activeSessionKey, sessionMemories } = get()
     const existingIndex = tabs.findIndex((t) => t.id === tabId)
     if (existingIndex >= 0) {
       const updated = tabs.map((tab, idx) => idx === existingIndex && tab.artifact ? {
         ...tab,
+        title: opts.title || tab.title,
+        viewerId: opts.viewerId || tab.viewerId || viewerId,
         artifact: {
           ...tab.artifact,
-          path: workspacePath || tab.artifact.path,
-          connectionId: connectionId ?? tab.artifact.connectionId,
+          name: opts.title || tab.artifact.name,
+          mediaType: opts.mediaType || tab.artifact.mediaType,
+          path: opts.workspacePath || tab.artifact.path,
+          connectionId: opts.connectionId ?? tab.artifact.connectionId,
           readUrl: readUrl || tab.artifact.readUrl,
+          metadata: {
+            ...tab.artifact.metadata,
+            pluginId,
+            panelId,
+            params: opts.params ? { ...(tab.artifact.metadata?.params as Record<string, unknown> | undefined), ...opts.params } : tab.artifact.metadata?.params,
+          },
         },
       } : tab)
       set({
@@ -501,24 +535,29 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         tabs: updated,
       })
     } else {
-      const ciArtifact: ArtifactRef = {
+      const panelArtifact: ArtifactRef = {
         id: tabId,
-        name: 'GitLab CI',
+        name: title,
         kind: 'workspace_file',
-        mediaType: 'application/x-gitlab-ci',
+        mediaType,
         readUrl,
         writable: false,
-        path: workspacePath,
-        sessionId,
-        agentId,
-        connectionId,
+        path: opts.workspacePath,
+        sessionId: opts.sessionId,
+        agentId: opts.agentId,
+        connectionId: opts.connectionId,
+        metadata: {
+          pluginId,
+          panelId,
+          params: opts.params || {},
+        },
       }
       const newTab: SidecarTab = {
         id: tabId,
         type: 'artifact',
-        title: 'GitLab CI',
-        artifact: ciArtifact,
-        viewerId: 'gitlab-ci-viewer',
+        title,
+        artifact: panelArtifact,
+        viewerId,
         closable: true,
       }
       set({
