@@ -72,7 +72,8 @@ type Options struct {
 }
 
 type Handler struct {
-	options Options
+	options   Options
+	worktrees worktreeLookupCache
 }
 
 func NewHandler(options Options) http.Handler {
@@ -160,6 +161,12 @@ func (h *Handler) tree(response http.ResponseWriter, request *http.Request) erro
 		workspace = ""
 	}
 	resolved, err := h.resolve(request.Context(), workspace, query.Get("session_id"), connectionID)
+	if err != nil && isWorkspaceOutOfScopeError(err) {
+		if wtResolved, ok := h.resolveLinkedWorktreeScope(request.Context(), workspace, query.Get("session_id"), connectionID); ok {
+			resolved = wtResolved
+			err = nil
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -214,23 +221,106 @@ func (h *Handler) stage(response http.ResponseWriter, request *http.Request) err
 		return &targetfs.Error{Status: 400, Code: "invalid_paths", Detail: "At least one and at most 100 paths are required"}
 	}
 	resolved, err := h.resolve(request.Context(), fileParent(targetfs.CleanPath(payload.Paths[0])), payload.SessionID, payload.ConnectionID)
+	if err != nil && isWorkspaceOutOfScopeError(err) {
+		if wtResolved, ok := h.resolveLinkedWorktreeScope(request.Context(), fileParent(targetfs.CleanPath(payload.Paths[0])), payload.SessionID, payload.ConnectionID); ok {
+			resolved = wtResolved
+			err = nil
+		}
+	}
+	if err != nil && isMissingPathOrWorkspaceError(err) {
+		if strings.TrimSpace(payload.SessionID) != "" {
+			if sessionResolved, sErr := h.resolve(request.Context(), "", payload.SessionID, payload.ConnectionID); sErr == nil {
+				resolved = sessionResolved
+				err = nil
+			}
+		}
+	}
 	if err != nil {
+		// Even without session_id (or if primary parent dir does not exist), allow staging if
+		// every requested path resolves cleanly through a linked Git worktree.
+		if isMissingPathOrWorkspaceError(err) {
+			staged := make([]string, 0, len(payload.Paths))
+			for _, rawPath := range payload.Paths {
+				clean := targetfs.CleanPath(rawPath)
+				match, found := h.resolveWorktreeFallback(request.Context(), clean, "", payload.SessionID, payload.ConnectionID)
+				if !found {
+					return err
+				}
+				dest := ""
+				if match.Kind != "local" {
+					dest = h.options.StagingRoot
+				}
+				wtRes, wtErr := match.FileSystem.Stage(request.Context(), targetfs.StageRequest{
+					Paths:       []string{match.ResolvedPath},
+					Destination: dest,
+				})
+				if wtErr != nil {
+					return wtErr
+				}
+				staged = append(staged, wtRes.Paths...)
+			}
+			copyToClipboard := payload.CopyToClipboard == nil || *payload.CopyToClipboard
+			clipboardSet := false
+			if copyToClipboard && len(staged) > 0 {
+				if h.options.Clipboard == nil {
+					return &targetfs.Error{Status: 503, Code: "clipboard_unavailable", Detail: "File clipboard is unavailable"}
+				}
+				if clipErr := h.options.Clipboard.SetFiles(request.Context(), staged); clipErr != nil {
+					return &targetfs.Error{Status: 500, Code: "clipboard_failed", Detail: "Failed to copy files to clipboard", Err: clipErr}
+				}
+				clipboardSet = true
+			}
+			writeJSON(response, http.StatusOK, map[string]any{"ok": true, "local_paths": staged, "clipboard_set": clipboardSet})
+			return nil
+		}
 		return err
 	}
-	paths := make([]string, len(payload.Paths))
-	for index, path := range payload.Paths {
-		paths[index] = targetfs.CleanPath(path)
-	}
-	stagedResult, err := resolved.FileSystem.Stage(request.Context(), targetfs.StageRequest{Paths: paths, Destination: func() string {
+	destination := func() string {
 		if resolved.Kind == "local" {
 			return ""
 		}
 		return h.options.StagingRoot
-	}()})
-	if err != nil {
+	}()
+	staged := make([]string, 0, len(payload.Paths))
+	var batchPrimary []string
+	flushPrimary := func() error {
+		if len(batchPrimary) == 0 {
+			return nil
+		}
+		res, sErr := resolved.FileSystem.Stage(request.Context(), targetfs.StageRequest{Paths: batchPrimary, Destination: destination})
+		if sErr != nil {
+			return sErr
+		}
+		staged = append(staged, res.Paths...)
+		batchPrimary = batchPrimary[:0]
+		return nil
+	}
+	for _, rawPath := range payload.Paths {
+		clean := targetfs.CleanPath(rawPath)
+		if info, statErr := resolved.FileSystem.Stat(request.Context(), clean); statErr == nil && !info.IsDir {
+			batchPrimary = append(batchPrimary, clean)
+			continue
+		} else if statErr != nil && targetfs.IsNotFound(statErr) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), clean, "", payload.SessionID, payload.ConnectionID); found {
+				if err := flushPrimary(); err != nil {
+					return err
+				}
+				wtRes, wtErr := match.FileSystem.Stage(request.Context(), targetfs.StageRequest{
+					Paths:       []string{match.ResolvedPath},
+					Destination: destination,
+				})
+				if wtErr != nil {
+					return wtErr
+				}
+				staged = append(staged, wtRes.Paths...)
+				continue
+			}
+		}
+		batchPrimary = append(batchPrimary, clean)
+	}
+	if err := flushPrimary(); err != nil {
 		return err
 	}
-	staged := stagedResult.Paths
 	copyToClipboard := payload.CopyToClipboard == nil || *payload.CopyToClipboard
 	clipboardSet := false
 	if copyToClipboard && len(staged) > 0 {
@@ -285,24 +375,39 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 		return &targetfs.Error{Status: 400, Code: "invalid_file_path", Detail: "Invalid file path"}
 	}
 	resolved, err := h.resolve(request.Context(), payload.Workspace, payload.SessionID, payload.ConnectionID)
+	if err != nil && isWorkspaceOutOfScopeError(err) {
+		if wtResolved, ok := h.resolveLinkedWorktreeScope(request.Context(), payload.Workspace, payload.SessionID, payload.ConnectionID); ok {
+			resolved = wtResolved
+			err = nil
+		}
+	}
 	if err != nil {
 		return err
 	}
 	existing := make([]string, 0)
+	resolvedMap := make(map[string]string)
 	for _, raw := range payload.Paths {
 		if raw == "" || len(raw) > 1024 || strings.ContainsRune(raw, 0) {
 			return &targetfs.Error{Status: 400, Code: "invalid_file_path", Detail: "Invalid file path"}
 		}
 		candidate := targetfs.CleanPath(raw)
-		if !filepath.IsAbs(candidate) {
-			candidate = filepath.Join(resolved.Workspace, candidate)
+		if !filepath.IsAbs(candidate) && !strings.HasPrefix(candidate, "/") {
+			candidate = joinTargetPath(resolved.Workspace, candidate)
 		}
 		info, statErr := resolved.FileSystem.Stat(request.Context(), candidate)
 		if statErr == nil && !info.IsDir {
 			existing = append(existing, raw)
 			continue
 		}
-		if statErr != nil && (targetfs.IsNotFound(statErr) || targetfs.IsForbidden(statErr)) {
+		if statErr != nil && targetfs.IsNotFound(statErr) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), candidate, resolved.Workspace, payload.SessionID, payload.ConnectionID); found {
+				existing = append(existing, raw)
+				resolvedMap[raw] = match.ResolvedPath
+				continue
+			}
+			continue
+		}
+		if statErr != nil && targetfs.IsForbidden(statErr) {
 			continue
 		}
 		if statErr != nil {
@@ -310,7 +415,11 @@ func (h *Handler) exists(response http.ResponseWriter, request *http.Request) er
 		}
 		return &targetfs.Error{Status: 400, Code: "invalid_file_path", Detail: "Invalid file path"}
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"existing": existing})
+	respBody := map[string]any{"existing": existing}
+	if len(resolvedMap) > 0 {
+		respBody["resolved_paths"] = resolvedMap
+	}
+	writeJSON(response, http.StatusOK, respBody)
 	return nil
 }
 
@@ -417,20 +526,53 @@ func parseSingleByteRange(header string, totalSize int64) (start, end int64, ok 
 
 func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error {
 	query := request.URL.Query()
-	path := targetfs.CleanPath(query.Get("path"))
-	if path == "" {
+	reqPath := targetfs.CleanPath(query.Get("path"))
+	if reqPath == "" {
 		return &targetfs.Error{Status: 422, Code: "path_required", Detail: "path is required"}
 	}
-	resolved, err := h.resolve(request.Context(), fileParent(path), query.Get("session_id"), query.Get("connection_id"))
-	if err != nil {
-		return err
+	sessionID := query.Get("session_id")
+	connectionID := query.Get("connection_id")
+	resolved, err := h.resolve(request.Context(), fileParent(reqPath), sessionID, connectionID)
+	if err != nil && isWorkspaceOutOfScopeError(err) {
+		if wtResolved, ok := h.resolveLinkedWorktreeScope(request.Context(), fileParent(reqPath), sessionID, connectionID); ok {
+			resolved = wtResolved
+			err = nil
+		}
 	}
+	var targetFS targetfs.FileSystem
+	targetPath := reqPath
+	if err != nil {
+		if isMissingPathOrWorkspaceError(err) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), reqPath, "", sessionID, connectionID); found {
+				targetFS = match.FileSystem
+				targetPath = match.ResolvedPath
+				setWorktreeHeaders(response, match)
+				err = nil
+			}
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		targetFS = resolved.FileSystem
+		// Check primary path first; if missing (404), fall back to linked Git worktrees of the same repo.
+		if primaryInfo, statErr := targetFS.Stat(request.Context(), targetPath); statErr != nil && targetfs.IsNotFound(statErr) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), targetPath, "", sessionID, connectionID); found {
+				targetFS = match.FileSystem
+				targetPath = match.ResolvedPath
+				setWorktreeHeaders(response, match)
+			}
+		} else if statErr == nil && primaryInfo.IsDir {
+			return &targetfs.Error{Status: 404, Code: "file_not_found", Detail: "File was not found"}
+		}
+	}
+
 	download := parseBool(query.Get("download"))
 	rangeHeader := strings.TrimSpace(request.Header.Get("Range"))
 
 	// Fast HEAD path for remote/non-seekable targets or any target to avoid opening body needlessly.
 	if request.Method == http.MethodHead {
-		info, statErr := resolved.FileSystem.Stat(request.Context(), path)
+		info, statErr := targetFS.Stat(request.Context(), targetPath)
 		if statErr != nil {
 			return statErr
 		}
@@ -450,8 +592,8 @@ func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error
 
 	// Remote/Range-capable path when the client asks for a byte range (video streaming/seeking & iOS Safari).
 	if rangeHeader != "" {
-		if rangeReader, supportsRange := resolved.FileSystem.(targetfs.RangeReader); supportsRange {
-			info, statErr := resolved.FileSystem.Stat(request.Context(), path)
+		if rangeReader, supportsRange := targetFS.(targetfs.RangeReader); supportsRange {
+			info, statErr := targetFS.Stat(request.Context(), targetPath)
 			if statErr != nil {
 				return statErr
 			}
@@ -467,12 +609,12 @@ func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error
 			}
 			if ok {
 				chunkLen := end - start + 1
-				result, rangeErr := rangeReader.ReadRange(request.Context(), path, start, chunkLen)
+				result, rangeErr := rangeReader.ReadRange(request.Context(), targetPath, start, chunkLen)
 				if rangeErr != nil {
 					var targetErr *targetfs.Error
 					// Backward compatibility when an older remote helper does not implement read_range yet.
 					if errors.As(rangeErr, &targetErr) && targetErr.Code == "unsupported_action" {
-						full, fullErr := resolved.FileSystem.Read(request.Context(), path)
+						full, fullErr := targetFS.Read(request.Context(), targetPath)
 						if fullErr != nil {
 							return fullErr
 						}
@@ -510,7 +652,7 @@ func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error
 		}
 	}
 
-	result, err := resolved.FileSystem.Read(request.Context(), path)
+	result, err := targetFS.Read(request.Context(), targetPath)
 	if err != nil {
 		return err
 	}
@@ -533,23 +675,46 @@ func (h *Handler) raw(response http.ResponseWriter, request *http.Request) error
 
 func (h *Handler) open(response http.ResponseWriter, request *http.Request) error {
 	var payload struct {
-		Path   string `json:"path"`
-		Action string `json:"action"`
+		Path      string `json:"path"`
+		Action    string `json:"action"`
+		SessionID string `json:"session_id,omitempty"`
 	}
 	if err := decodeJSON(response, request, &payload); err != nil {
 		return err
 	}
-	path := targetfs.CleanPath(payload.Path)
-	if path == "" {
+	reqPath := targetfs.CleanPath(payload.Path)
+	if reqPath == "" {
 		return &targetfs.Error{Status: 400, Code: "path_required", Detail: "Path is required"}
 	}
-	resolved, err := h.resolve(request.Context(), fileParent(path), "", targetfs.LocalConnectionID)
-	if err != nil {
-		return err
+	resolved, err := h.resolve(request.Context(), fileParent(reqPath), payload.SessionID, targetfs.LocalConnectionID)
+	if err != nil && isWorkspaceOutOfScopeError(err) {
+		if wtResolved, ok := h.resolveLinkedWorktreeScope(request.Context(), fileParent(reqPath), payload.SessionID, targetfs.LocalConnectionID); ok {
+			resolved = wtResolved
+			err = nil
+		}
 	}
-	info, err := resolved.FileSystem.Stat(request.Context(), path)
+	var info targetfs.Info
 	if err != nil {
-		return err
+		if isMissingPathOrWorkspaceError(err) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), reqPath, "", payload.SessionID, targetfs.LocalConnectionID); found {
+				info = match.Info
+				err = nil
+			}
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		info, err = resolved.FileSystem.Stat(request.Context(), reqPath)
+		if err != nil && targetfs.IsNotFound(err) {
+			if match, found := h.resolveWorktreeFallback(request.Context(), reqPath, "", payload.SessionID, targetfs.LocalConnectionID); found {
+				info = match.Info
+				err = nil
+			}
+		}
+		if err != nil {
+			return err
+		}
 	}
 	action := payload.Action
 	if action == "" {

@@ -591,9 +591,10 @@
     line-height: 1.3;
   }
 
-  /* Inline Context Bars (Goal / Task summaries inside stage) */
+  /* Inline Context Bars (Goal / Task / Worktree summaries inside stage) */
   .m-session-stage > .m-goal-summary,
-  .m-session-stage > .m-task-summary {
+  .m-session-stage > .m-task-summary,
+  .m-session-stage > .m-worktree-summary {
     width: auto;
     margin: 6px 12px 0;
   }

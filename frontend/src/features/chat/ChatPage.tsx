@@ -1,7 +1,9 @@
 import {
+  IconGitBranch,
   IconGitFork,
   IconSearch,
   IconSparkles,
+  IconX,
 } from '@tabler/icons-react'
 import { ClockCounterClockwiseIcon, ShieldCheckIcon, SidebarSimpleIcon, SlidersHorizontalIcon, SquaresFourIcon } from '../../components/workbenchIcons'
 import { ActionIcon, Button, Drawer, Group, Modal, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
@@ -20,7 +22,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ImageLightbox } from '../../components/ImageLightbox'
 import { SessionStatusLabel } from '../../components/Status'
 import { WelcomeView } from './WelcomeView'
-import { sessionActivityStatus } from '../../components/sessionRailModel'
+import { displaySessionTitle, sessionActivityStatus } from '../../components/sessionRailModel'
 import { AgentKindBadge } from '../../components/SessionRuntimeFacts'
 import { agentKindLabel } from '../../components/AgentBrandIcon'
 import { isDisconnectedSessionRoute, selectApprovals, selectCommands, selectOutbox, selectSessions, selectTasks, useAstrorderStore } from '../../state/store'
@@ -67,6 +69,7 @@ import { useShortcutHandlers } from '../shortcuts/shortcuts'
 import { SessionBreadcrumb } from './SessionBreadcrumb'
 import { WorkspaceChangesPanel } from './WorkspaceChangesPanel'
 import { SessionCheckpointsPanel } from './SessionCheckpointsPanel'
+import { sameWorktreePath, useSessionActiveWorktree } from './useSessionActiveWorktree'
 
 
 const NO_COMMANDS: Command[] = []
@@ -519,6 +522,11 @@ function ChatPageBody() {
   const mobileTaskSheet = useMediaQuery('(max-width: 767px)')
   const resources = useSessionResources(selected, true)
   const messages = resources.visibleMessages
+  const activeWorktreeState = useSessionActiveWorktree({
+    session: selected,
+    messages,
+    enabled: !isOfficeMode,
+  })
   const commands = useAstrorderStore(useShallow((state) => selected ? selectCommands(state, selected.agent_id, selected.id) : NO_COMMANDS))
   const outbox = useAstrorderStore(useShallow((state) => selected ? selectOutbox(state, selected.agent_id, selected.id) : NO_OUTBOX))
   const approvals = useAstrorderStore(useShallow((state) => selected ? selectApprovals(state, selected.agent_id, selected.id) : NO_APPROVALS))
@@ -888,11 +896,74 @@ function ChatPageBody() {
       >
         <section className="chat-column">
           <SessionRuntimeBar key={scopeKey(selected.agent_id, selected.id)} commands={commands} tasks={runtimeTasks} backgroundError={background.error} onTaskOpen={(task) => { setTaskSelection({ id: task.id, agent_id: task.agent_id, session_id: task.session_id }); openTaskDetails() }} />
+          {!isOfficeMode && activeWorktreeState.activeWorktree && (
+            <div className="chat-worktree-banner is-active" role="status">
+              <div className="chat-worktree-banner-info">
+                <IconGitBranch size={14} className="chat-worktree-banner-icon" aria-hidden="true" />
+                <span className="chat-worktree-banner-text" title={activeWorktreeState.activeWorktree.path}>
+                  当前工作区视图已切换至 Worktree：<code>{activeWorktreeState.activeWorktree.path}</code>
+                  {activeWorktreeState.activeWorktree.branch && (
+                    <span className="chat-worktree-banner-branch">({activeWorktreeState.activeWorktree.branch})</span>
+                  )}
+                </span>
+              </div>
+              <div className="chat-worktree-banner-actions">
+                {activeWorktreeState.detectedWorktree && !sameWorktreePath(activeWorktreeState.detectedWorktree.path, activeWorktreeState.activeWorktree.path) && (
+                  <button
+                    type="button"
+                    className="chat-worktree-banner-btn is-primary"
+                    onClick={() => activeWorktreeState.switchToWorktree(activeWorktreeState.detectedWorktree!.path)}
+                  >
+                    切至最新 Worktree
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chat-worktree-banner-btn"
+                  onClick={activeWorktreeState.resetToMain}
+                >
+                  切回主工作区
+                </button>
+              </div>
+            </div>
+          )}
+          {!isOfficeMode && !activeWorktreeState.activeWorktree && activeWorktreeState.detectedWorktree && !activeWorktreeState.bannerDismissed && (
+            <div className="chat-worktree-banner" role="status">
+              <div className="chat-worktree-banner-info">
+                <IconGitBranch size={14} className="chat-worktree-banner-icon" aria-hidden="true" />
+                <span className="chat-worktree-banner-text" title={activeWorktreeState.detectedWorktree.path}>
+                  检测到 Agent 正在 Worktree <code>{activeWorktreeState.detectedWorktree.path}</code>
+                  {activeWorktreeState.detectedWorktree.branch && (
+                    <span className="chat-worktree-banner-branch">({activeWorktreeState.detectedWorktree.branch})</span>
+                  )}
+                  {' '}中工作
+                </span>
+              </div>
+              <div className="chat-worktree-banner-actions">
+                <button
+                  type="button"
+                  className="chat-worktree-banner-btn is-primary"
+                  onClick={() => activeWorktreeState.switchToWorktree(activeWorktreeState.detectedWorktree!.path)}
+                >
+                  切换至此 Worktree 视图
+                </button>
+                <button
+                  type="button"
+                  className="chat-worktree-banner-dismiss"
+                  aria-label="暂时忽略 Worktree 切换提示"
+                  title="暂时忽略"
+                  onClick={activeWorktreeState.dismissBanner}
+                >
+                  <IconX size={13} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
           <PerfProfiler id="Transcript">
           <Transcript
             activityBreaks={resources.activityBreaks}
             key={`transcript:${scopeKey(selected.agent_id, selected.id)}`}
-            session={selected}
+            session={activeWorktreeState.effectiveSession ?? selected}
             messages={messages}
             outbox={outbox}
             approvals={approvals}
@@ -971,7 +1042,7 @@ function ChatPageBody() {
             <div style={{ display: sidecarOpen ? 'block' : 'none', height: '100%' }}>
               <ErrorBoundary fallbackTitle="侧边栏加载异常">
                 <SidecarHost
-                  session={selected}
+                  session={activeWorktreeState.effectiveSession ?? selected}
                   agent={agent}
                   commands={commands}
                   messages={messages}
@@ -996,7 +1067,7 @@ function ChatPageBody() {
                   onClose={() => setDetailsPinned(false)}
                   handoffLink={handoffPeer ? {
                     label: `${handoffPeer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}`,
-                    title: handoffPeer.session.title,
+                    title: displaySessionTitle(handoffPeer.session),
                     onOpen: () => navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`),
                   } : null}
                 />
@@ -1006,7 +1077,7 @@ function ChatPageBody() {
       </div>
       {changesOpened && (
         <WorkspaceChangesPanel
-          session={selected}
+          session={activeWorktreeState.effectiveSession ?? selected}
           agent={agent}
           messages={messages}
           swarm={sessionSwarm.data}
@@ -1037,7 +1108,7 @@ function ChatPageBody() {
         onApproval={(approval, action) => void handleApproval(approval, action)}
         handoffLink={handoffPeer ? {
           label: `${handoffPeer.direction === 'from' ? '转交自' : '已转交至'} ${agentKindLabel(agents[handoffPeer.session.agent_id]?.kind)}`,
-          title: handoffPeer.session.title,
+          title: displaySessionTitle(handoffPeer.session),
           onOpen: () => {
             closeDetails()
             navigate(`/chat/${encodeURIComponent(handoffPeer.session.id)}?agent_id=${encodeURIComponent(handoffPeer.session.agent_id)}`)
@@ -1068,7 +1139,7 @@ function ChatPageBody() {
         onIndexChange={(nextIndex) => setGallery(g => g ? { ...g, index: nextIndex } : null)}
         onClose={() => setGallery(null)}
       />
-      {selected && <QuickOpen session={selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
+      {selected && <QuickOpen session={activeWorktreeState.effectiveSession ?? selected} opened={quickOpenOpened} onClose={() => setQuickOpenOpened(false)} />}
 
       {/* 从任意回复分叉 / 新建交接分支弹窗 */}
       <Modal

@@ -379,6 +379,163 @@
 .file-hover-btn.is-primary {
   color: var(--astr-indigo, #7540bd);
 }
+.file-hover-worktree-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-indigo, #6366f1) 18%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-indigo, #6366f1) 6%, var(--astr-surface));
+  font-size: 11px;
+  color: var(--astr-text);
+}
+.file-hover-worktree-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+.file-hover-worktree-meta > svg {
+  flex: none;
+  color: var(--astr-indigo, #6366f1);
+}
+.file-hover-worktree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--astr-muted);
+}
+.file-hover-worktree-label code {
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 10.5px;
+  color: var(--astr-text);
+  background: color-mix(in oklab, var(--astr-surface-muted) 88%, transparent);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.file-hover-worktree-branch {
+  color: var(--astr-indigo, #6366f1);
+  font-weight: 560;
+}
+.file-hover-worktree-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo, #6366f1) 24%, var(--astr-border));
+  background: var(--astr-surface);
+  color: var(--astr-text);
+  font-size: 10.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.file-hover-worktree-copy:hover {
+  background: color-mix(in oklab, var(--astr-indigo, #6366f1) 9%, var(--astr-surface));
+  border-color: color-mix(in oklab, var(--astr-indigo, #6366f1) 42%, var(--astr-border));
+}
+.chat-worktree-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid color-mix(in oklab, var(--astr-indigo, #6366f1) 20%, var(--astr-border));
+  background: color-mix(in oklab, var(--astr-indigo, #6366f1) 5.5%, var(--astr-surface));
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--astr-text);
+}
+.chat-worktree-banner.is-active {
+  background: color-mix(in oklab, var(--astr-indigo, #6366f1) 9%, var(--astr-surface));
+  border-bottom-color: color-mix(in oklab, var(--astr-indigo, #6366f1) 30%, var(--astr-border));
+}
+.chat-worktree-banner-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+.chat-worktree-banner-icon {
+  flex: none;
+  color: var(--astr-indigo, #6366f1);
+}
+.chat-worktree-banner-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--astr-text);
+}
+.chat-worktree-banner-text code {
+  font-family: var(--astr-session-mono-font, ui-monospace, Consolas, monospace);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--astr-surface-muted) 86%, transparent);
+  color: var(--astr-text);
+}
+.chat-worktree-banner-branch {
+  margin-left: 4px;
+  color: var(--astr-indigo, #6366f1);
+  font-weight: 600;
+}
+.chat-worktree-banner-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-worktree-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--astr-indigo, #6366f1) 32%, var(--astr-border));
+  background: var(--astr-surface);
+  color: var(--astr-text);
+  font-size: 11.5px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.chat-worktree-banner-btn:hover {
+  background: color-mix(in oklab, var(--astr-indigo, #6366f1) 10%, var(--astr-surface));
+  border-color: color-mix(in oklab, var(--astr-indigo, #6366f1) 48%, var(--astr-border));
+}
+.chat-worktree-banner-btn.is-primary {
+  background: var(--astr-indigo, #6366f1);
+  border-color: transparent;
+  color: #fff;
+}
+.chat-worktree-banner-btn.is-primary:hover {
+  filter: brightness(1.06);
+}
+.chat-worktree-banner-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--astr-muted);
+  cursor: pointer;
+}
+.chat-worktree-banner-dismiss:hover {
+  background: color-mix(in oklab, var(--astr-surface-muted) 90%, transparent);
+  color: var(--astr-text);
+}
 .file-hover-body {
   flex: 1;
   min-height: 0;

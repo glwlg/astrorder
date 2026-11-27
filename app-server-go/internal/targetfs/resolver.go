@@ -39,6 +39,9 @@ type ResolveRequest struct {
 	Workspace    string
 	SessionID    string
 	ConnectionID string
+	// ExtraRoots holds verified internal-only roots (such as registered linked Git
+	// worktrees of the session repository) appended to OptionalRoots.
+	ExtraRoots []string
 }
 
 type Resolved struct {
@@ -103,6 +106,11 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		if r.options.AllowTempDirs {
 			optionalRoots = append(optionalRoots, localTempRoots()...)
 		}
+		for _, extra := range request.ExtraRoots {
+			if cleaned := cleanInputPath(extra); cleaned != "" {
+				optionalRoots = append(optionalRoots, cleaned)
+			}
+		}
 		filesystem, err := NewLocal(LocalOptions{Workspace: workspace, AllowedRoots: r.options.AllowedRoots, OptionalRoots: optionalRoots})
 		if err != nil {
 			return Resolved{}, err
@@ -132,6 +140,11 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 		}
 		if r.options.AllowTempDirs {
 			optionalRoots = append(optionalRoots, remoteTempRoots()...)
+		}
+		for _, extra := range request.ExtraRoots {
+			if cleaned := cleanInputPath(extra); cleaned != "" {
+				optionalRoots = append(optionalRoots, cleaned)
+			}
 		}
 		filesystem, err := NewRemote(RemoteOptions{Workspace: workspace, AllowedRoots: []string{workspace}, OptionalRoots: optionalRoots, Command: command, StageRoots: r.options.LocalStageRoots})
 		if err != nil {
@@ -179,6 +192,11 @@ func (r *Resolver) Resolve(ctx context.Context, request ResolveRequest) (Resolve
 	}
 	if r.options.AllowTempDirs {
 		optionalRoots = append(optionalRoots, remoteTempRoots()...)
+	}
+	for _, extra := range request.ExtraRoots {
+		if cleaned := cleanInputPath(extra); cleaned != "" {
+			optionalRoots = append(optionalRoots, cleaned)
+		}
 	}
 	sshConfig := SSHConfig{
 		Binary: r.options.SSHBinary, Host: mapString(settings, "host"), Alias: mapString(settings, "ssh_config_alias"),

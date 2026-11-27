@@ -10,6 +10,7 @@ import {
   IconFileCode,
   IconFileDescription,
   IconFiles,
+  IconGitBranch,
   IconLoader2,
   IconMovie,
   IconPhoto,
@@ -35,6 +36,20 @@ interface CacheEntry {
   binary?: boolean
   truncatedBytes?: boolean
   error?: string
+  resolvedPath?: string
+  worktreePath?: string
+  worktreeBranch?: string
+}
+
+function decodeWorktreeHeader(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined
+  try {
+    const decoded = decodeURIComponent(raw.replace(/\+/g, ' ')).trim()
+    return decoded || undefined
+  } catch {
+    const fallback = raw.trim()
+    return fallback || undefined
+  }
 }
 
 const PREVIEW_CACHE_MAX = 40
@@ -184,8 +199,8 @@ export function FileLinkHoverPreview({
   target: FileHoverTarget | null
   onMouseEnter: () => void
   onMouseLeave: () => void
-  onCopyFile?: () => Promise<boolean> | void
-  onOpen: () => void
+  onCopyFile?: (resolvedPath?: string) => Promise<boolean> | void
+  onOpen: (resolvedPath?: string) => void
   onClose: () => void
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
@@ -202,6 +217,9 @@ export function FileLinkHoverPreview({
     binary?: boolean
     truncatedBytes?: boolean
     error?: string
+    resolvedPath?: string
+    worktreePath?: string
+    worktreeBranch?: string
   }>({ loading: false })
   const [copied, setCopied] = useState(false)
   const [copiedPath, setCopiedPath] = useState(false)
@@ -226,6 +244,9 @@ export function FileLinkHoverPreview({
         binary: cached.binary,
         truncatedBytes: cached.truncatedBytes,
         error: cached.error,
+        resolvedPath: cached.resolvedPath,
+        worktreePath: cached.worktreePath,
+        worktreeBranch: cached.worktreeBranch,
       })
       return
     }
@@ -237,6 +258,9 @@ export function FileLinkHoverPreview({
     void authenticatedApiFetch(target.readUrl, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`无法读取文件 (${res.status})`)
+        const resolvedPath = decodeWorktreeHeader(res.headers?.get?.('X-Astrorder-Resolved-Path'))
+        const worktreePath = decodeWorktreeHeader(res.headers?.get?.('X-Astrorder-Worktree-Path'))
+        const worktreeBranch = decodeWorktreeHeader(res.headers?.get?.('X-Astrorder-Worktree-Branch'))
         const { bytes, truncated } = await readCappedBytes(res, MAX_PREVIEW_BYTES)
         const decoded = decodePreviewBytes(bytes)
         const entry: CacheEntry = {
@@ -244,6 +268,9 @@ export function FileLinkHoverPreview({
           text: decoded.text,
           binary: decoded.binary,
           truncatedBytes: truncated,
+          resolvedPath,
+          worktreePath,
+          worktreeBranch,
         }
         setCachedPreview(target.readUrl, entry)
         if (active) {
@@ -252,6 +279,9 @@ export function FileLinkHoverPreview({
             text: entry.text,
             binary: entry.binary,
             truncatedBytes: entry.truncatedBytes,
+            resolvedPath: entry.resolvedPath,
+            worktreePath: entry.worktreePath,
+            worktreeBranch: entry.worktreeBranch,
           })
         }
       })
@@ -358,7 +388,8 @@ export function FileLinkHoverPreview({
       ? `L${target.line}-${target.endLine}`
       : `L${target.line}`
     : ''
-  const parentDir = shortParentPath(target.path)
+  const effectivePath = state.resolvedPath || target.path
+  const parentDir = shortParentPath(effectivePath)
   const HeadIcon = target.isImage
     ? IconPhoto
     : target.isVideo
@@ -378,8 +409,8 @@ export function FileLinkHoverPreview({
   }
 
   const handleCopyPath = () => {
-    if (!target.path) return
-    void navigator.clipboard?.writeText(target.path)
+    if (!effectivePath) return
+    void navigator.clipboard?.writeText(effectivePath)
     setCopiedPath(true)
     setTimeout(() => setCopiedPath(false), 1400)
   }
@@ -388,7 +419,7 @@ export function FileLinkHoverPreview({
     if (!onCopyFile || copyingFile) return
     setCopyingFile(true)
     try {
-      const ok = await onCopyFile()
+      const ok = await onCopyFile(state.resolvedPath)
       if (ok !== false) {
         setCopiedFile(true)
         setTimeout(() => setCopiedFile(false), 1600)
@@ -415,7 +446,7 @@ export function FileLinkHoverPreview({
       onMouseLeave={onMouseLeave}
     >
       <header className="file-hover-head">
-        <div className="file-hover-ident" title={target.path}>
+        <div className="file-hover-ident" title={effectivePath}>
           <HeadIcon size={14} aria-hidden="true" />
           <strong className="file-hover-name">{target.displayName}</strong>
           {lineBadge && <span className="file-hover-line-badge">{lineBadge}</span>}
@@ -469,7 +500,7 @@ export function FileLinkHoverPreview({
             className="file-hover-btn is-primary"
             onClick={() => {
               onClose()
-              onOpen()
+              onOpen(state.resolvedPath)
             }}
             aria-label="在侧边栏打开文件"
           >
@@ -478,6 +509,28 @@ export function FileLinkHoverPreview({
           </button>
         </div>
       </header>
+
+      {state.worktreePath && (
+        <div className="file-hover-worktree-bar" title={effectivePath}>
+          <div className="file-hover-worktree-meta">
+            <IconGitBranch size={12} aria-hidden="true" />
+            <span className="file-hover-worktree-label">
+              来自 Worktree: <code>{state.worktreePath}</code>
+              {state.worktreeBranch && <span className="file-hover-worktree-branch"> ({state.worktreeBranch})</span>}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="file-hover-worktree-copy"
+            onClick={handleCopyPath}
+            aria-label="复制 Worktree 真实路径"
+            title={`复制真实路径：${effectivePath}`}
+          >
+            {copiedPath ? <IconCheck size={11} /> : <IconCopy size={11} />}
+            <span>{copiedPath ? '已复制' : '复制真实路径'}</span>
+          </button>
+        </div>
+      )}
 
       <div className="file-hover-body">
         {target.isImage ? (
@@ -488,19 +541,19 @@ export function FileLinkHoverPreview({
               className="file-hover-img"
               onClick={() => {
                 onClose()
-                onOpen()
+                onOpen(state.resolvedPath)
               }}
             />
           </div>
         ) : target.isVideo ? (
           <div className="file-hover-empty">
             <p>视频文件 · 点击在侧边栏播放器中流式观看（支持倍速、画中画与进度拖拽）</p>
-            <small>{target.path}</small>
+            <small>{effectivePath}</small>
           </div>
         ) : target.isNonPreviewable || state.binary ? (
           <div className="file-hover-empty">
             <p>该文件为二进制或非纯文本格式，无法直接悬浮预览。</p>
-            <small>{target.path}</small>
+            <small>{effectivePath}</small>
           </div>
         ) : state.loading ? (
           <div className="file-hover-empty">正在读取文件内容…</div>
@@ -548,7 +601,7 @@ export function FileLinkHoverPreview({
             className="file-hover-more"
             onClick={() => {
               onClose()
-              onOpen()
+              onOpen(state.resolvedPath)
             }}
           >
             在侧边栏查看完整文件 →

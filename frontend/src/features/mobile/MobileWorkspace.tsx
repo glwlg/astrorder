@@ -3,7 +3,7 @@ import { Button, Group, Menu, Modal, TextInput, useComputedColorScheme, useManti
 import { MobileTaskNotices } from './MobileTaskNotices'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock, IconInbox, IconHistory } from '@tabler/icons-react'
+import { IconSun, IconMoon, IconDeviceDesktop, IconRefresh, IconPlayerPlay, IconInfoCircle, IconNotes, IconPlayerStop, IconSend, IconMessageCircle, IconCheck, IconX, IconMicrophone, IconPlus, IconDotsVertical, IconCpu, IconLoader2, IconPlugConnected, IconCloudDataConnection, IconFilter, IconTransfer, IconEdit, IconCopy, IconTrash, IconChalkboard, IconWorld, IconUsers, IconUsersGroup, IconSwitchHorizontal, IconClock, IconInbox, IconHistory, IconCompass, IconGitBranch } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useReducedMotion } from '@mantine/hooks'
@@ -46,6 +46,7 @@ import {
   type ModelChoiceGroup,
 } from '../chat/antigravityModels'
 import { usePersistentDraft } from '../chat/draftStorage'
+import { useSessionActiveWorktree } from '../chat/useSessionActiveWorktree'
 import { removeUnsentMessage, restoreUnsentDraft, sendErrorMessage } from '../chat/sendFailure'
 import { DraftShelfControl } from '../chat/DraftShelfControl'
 import { queueBlockReason } from '../chat/queueBlockReason'
@@ -88,6 +89,7 @@ import {
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useAccentColor } from '../../themeAccent'
@@ -115,6 +117,7 @@ import { ActionInboxView } from '../inbox/ActionInboxView'
 import { useActionInbox } from '../inbox/useActionInbox'
 import { KernelManagementPanel } from './KernelManagementPanel'
 import { MobileAccountsPanel } from './MobileAccountsPanel'
+import { MobileLearningFeed } from './learning/MobileLearningFeed'
 import { useMobileVisualViewport } from './useMobileVisualViewport'
 import { AgyQuotaRefreshProvider, sessionAccountTarget } from '../agentAccounts/AgyQuotaRefreshProvider'
 import './mobile.css'
@@ -225,8 +228,9 @@ export function MobileWorkspace() {
   const route = new URLSearchParams(location.search)
   const groupMatch = location.pathname.match(/^(?:\/mobile)?\/groups(?:\/([^/]+))?$/)
   const isGroupRoute = Boolean(groupMatch)
+  const isLearningRoute = location.pathname === '/learning' || location.pathname.startsWith('/mobile/learning')
   const routeGroupId = groupMatch?.[1] ? decodeURIComponent(groupMatch[1]) : ''
-  const routeId = !isGroupRoute ? location.pathname.match(/\/chat\/([^/]+)$/)?.[1] : undefined
+  const routeId = !isGroupRoute && !isLearningRoute ? location.pathname.match(/\/chat\/([^/]+)$/)?.[1] : undefined
   const sessionId = routeId ? decodeURIComponent(routeId) : ''
   const agentId = route.get('agent_id')
   const disconnectedRoute = useAstrorderStore(state =>
@@ -316,12 +320,12 @@ export function MobileWorkspace() {
     setSheet(null)
   }
   useEffect(() => {
-    if (isGroupRoute) return
+    if (isGroupRoute || isLearningRoute) return
     if (routeId && !disconnectedRoute) return
     const next = sessions[0]
     if (next) navigate(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`, { replace: true })
     else if (disconnectedRoute) navigate('/mobile', { replace: true })
-  }, [isGroupRoute, routeId, disconnectedRoute, sessions, navigate])
+  }, [isGroupRoute, isLearningRoute, routeId, disconnectedRoute, sessions, navigate])
   const resources = useSessionResources(selected, true)
   const sessionModel = useSessionModel(selected)
   const userIdle = useUserIdle()
@@ -348,6 +352,12 @@ export function MobileWorkspace() {
   const modelReadOnly = readOnly || sessionModel.data?.model_read_only === true
   const reasoningReadOnly = modelReadOnly || sessionModel.data?.reasoning_read_only === true
   const messages = resources.visibleMessages
+  const activeWorktreeState = useSessionActiveWorktree({
+    session: selected,
+    messages,
+    enabled: !isOfficeMode && !isGroupRoute && !isLearningRoute,
+  })
+  const viewSession = activeWorktreeState.effectiveSession ?? selected
   const tasks = useAstrorderStore(useShallow(state => selected ? selectTasks(state, selected.agent_id, selected.id) : []))
   const commands = useAstrorderStore(useShallow(state => selected ? selectCommands(state, selected.agent_id, selected.id) : []))
   const goal = selectSessionGoal(tasks)
@@ -386,17 +396,17 @@ export function MobileWorkspace() {
     openWorkbench()
   }
   const openFile = (path: string) => {
-    if (!selected) return
+    if (!viewSession) return
     if (hasActiveDatabaseTool() && isSqlFilePath(path)) {
-      useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
-      void openSqlFileInDatabaseTool({ path, session: selected })
+      useSidecarStore.getState().switchSession(`${viewSession.agent_id}:${viewSession.id}`)
+      void openSqlFileInDatabaseTool({ path, session: viewSession })
       openWorkbench()
       return
     }
-    const artifact = resolveArtifactFromPath(path, selected)
+    const artifact = resolveArtifactFromPath(path, viewSession)
     const viewer = artifactViewerRegistry.findViewer(artifact)
     if (!viewer) { notify('该文件暂不支持在工作区中打开', 'yellow'); return }
-    useSidecarStore.getState().switchSession(`${selected.agent_id}:${selected.id}`)
+    useSidecarStore.getState().switchSession(`${viewSession.agent_id}:${viewSession.id}`)
     useSidecarStore.getState().openArtifact(artifact, viewer.id)
     openWorkbench()
   }
@@ -410,6 +420,7 @@ export function MobileWorkspace() {
   const voicePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(VOICE_INPUT_PLUGIN_ID))
   const worktreePluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKFLOW_GIT_WORKTREE_PLUGIN_ID))
   const groupsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_GROUPS_PLUGIN_ID))
+  const learningPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
   const agentAccountsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
   const analyticsGatewayPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID))
   const blackboardPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(BLACKBOARD_VIEWER_PLUGIN_ID))
@@ -1143,7 +1154,7 @@ export function MobileWorkspace() {
   }
   const handleWorkspaceTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     const point = event.touches[0]
-    if (!point || sheet || workbenchOpened) return
+    if (!point || sheet || workbenchOpened || isLearningRoute) return
     if (!startsAtSessionDrawerEdge(point.clientX)) { edgeTouch.current = null; return }
     edgeTouch.current = { x: point.clientX, y: point.clientY }
   }
@@ -1237,7 +1248,12 @@ export function MobileWorkspace() {
     {addProjectOpened && <AddProjectModal opened={addProjectOpened} onClose={() => setAddProjectOpened(false)} agents={agents} />}
     {createOpened && <NewSessionDialog agents={agents} project={createProject} initialAgentId={agentFilter !== 'all' ? agentFilter : undefined} onClose={() => setCreateOpened(false)} onCreated={session => { setSearch(''); select(session) }} />}
     {createGroupOpened && <CreateBotGroupDialog agents={agents} opened={createGroupOpened} onClose={() => setCreateGroupOpened(false)} onCreated={created => { upsertGroupInCache(created); setCreateGroupOpened(false); setGroupSearch(''); selectGroup(created) }} />}
-    <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label={isGroupRoute ? '打开群聊列表' : '打开会话列表'} onClick={() => openDrawer()}>{isGroupRoute ? <IconUsers size={21} /> : <IconMessageCircle size={21} />}</button>{isGroupRoute ? <button type="button" className="m-brand-home-btn is-project" onClick={() => openDrawer('groups')} aria-label={selectedGroup ? `当前群聊 ${selectedGroup.name}，打开群聊列表` : '群聊列表'} title={selectedGroup?.name || '群聊'}><strong>{selectedGroup ? selectedGroup.name : '群聊'}</strong></button> : <button type="button" className={`m-brand-home-btn${headerProjectName ? ' is-project' : ''}`} onClick={() => openDrawer('sessions')} aria-label={headerProjectName ? `当前项目 ${headerProjectName}，打开会话列表` : '星序导航'} title={headerProjectName || undefined}>{headerProjectName ? <strong>{headerProjectName}</strong> : <><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></>}</button>}<span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+    {!(isLearningRoute && learningPluginEnabled) && <header className="m-header"><div className="m-brand"><button className="m-session-nav" aria-label={isGroupRoute ? '打开群聊列表' : '打开会话列表'} onClick={() => openDrawer()}>{isGroupRoute ? <IconUsers size={21} /> : <IconMessageCircle size={21} />}</button>{isGroupRoute ? <button type="button" className="m-brand-home-btn is-project" onClick={() => openDrawer('groups')} aria-label={selectedGroup ? `当前群聊 ${selectedGroup.name}，打开群聊列表` : '群聊列表'} title={selectedGroup?.name || '群聊'}><strong>{selectedGroup ? selectedGroup.name : '群聊'}</strong></button> : <button type="button" className={`m-brand-home-btn${headerProjectName ? ' is-project' : ''}`} onClick={() => openDrawer('sessions')} aria-label={headerProjectName ? `当前项目 ${headerProjectName}，打开会话列表` : '星序导航'} title={headerProjectName || undefined}>{headerProjectName ? <strong>{headerProjectName}</strong> : <><BrandMark className="m-brand-mark" size={24} alt="" /><strong>星序</strong></>}</button>}<span className={`m-dot ${connection === 'connected' ? 'online' : ''}`} aria-label={connection === 'connected' ? '已连接' : '连接中'} /></div><div className="m-header-actions">
+      {learningPluginEnabled && (
+        <button className="m-learning-trigger" aria-label="成长雷达知识流" onClick={() => navigate('/mobile/learning')}>
+          <IconCompass size={20} />
+        </button>
+      )}
       <button className="m-inbox-trigger" aria-label={inboxTotalCount > 0 ? `待办收件箱，${inboxTotalCount} 项待处理` : '待办收件箱'} onClick={() => setSheet('inbox')}>
         <IconInbox size={20} />
         {inboxTotalCount > 0 && <span className={`m-inbox-badge${inboxUrgentCount > 0 ? ' is-urgent' : ''}`} aria-hidden="true">{inboxTotalCount > 99 ? '99+' : inboxTotalCount}</span>}
@@ -1264,7 +1280,7 @@ export function MobileWorkspace() {
           <NotificationPermissionMenuItems />
         </Menu.Dropdown>
       </Menu>
-    </div></header>
+    </div></header>}
     {isGroupRoute ? (
       <main className="m-main m-groups-main">
         <GroupsPage groupId={routeGroupId || undefined} routePrefix="/mobile" surface="mobile" onGroupUpdated={upsertGroupInCache} />
@@ -1335,7 +1351,29 @@ export function MobileWorkspace() {
       </div>
       {goal && <button className={`m-goal-summary is-${goal.tone}`} aria-label="目标管理" title={goalSupported ? '管理原生目标' : '查看原生目标'} onClick={() => setSheet('goal')}><IconNotes size={15} /><span>{`${goal.label} · ${goal.title}`}</span></button>}
       {!!visibleTasks.length && <button className="m-task-summary" aria-label="任务与子代理" onClick={() => setSheet('tasks')}>任务与子代理 · {activeTasks.length} 项活动 / {visibleTasks.length} 项记录</button>}
-      <MobileTranscript session={selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loading={resources.messages.isLoading || resources.messages.isPending || (resources.messages.isFetching && messages.length === 0)} historyResolved={resources.messages.isSuccess || messages.length > 0} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={selected?.workspace} connectionId={selected?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={!isOfficeMode ? sessionCheckpoints.items : []} onOpenCheckpoint={!isOfficeMode ? (cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') } : undefined} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
+      {!isOfficeMode && activeWorktreeState.activeWorktree && (
+        <button
+          type="button"
+          className="m-worktree-summary is-active"
+          aria-label="切回主工作区视图"
+          onClick={activeWorktreeState.resetToMain}
+        >
+          <IconGitBranch size={15} aria-hidden="true" />
+          <span>Worktree 视图：{activeWorktreeState.activeWorktree.path.split(/[\\/]/).filter(Boolean).pop() || activeWorktreeState.activeWorktree.path}{activeWorktreeState.activeWorktree.branch ? ` (${activeWorktreeState.activeWorktree.branch})` : ''} · 切回主工作区</span>
+        </button>
+      )}
+      {!isOfficeMode && !activeWorktreeState.activeWorktree && activeWorktreeState.detectedWorktree && !activeWorktreeState.bannerDismissed && (
+        <button
+          type="button"
+          className="m-worktree-summary"
+          aria-label="切换至 Worktree 视图"
+          onClick={() => activeWorktreeState.switchToWorktree(activeWorktreeState.detectedWorktree!.path)}
+        >
+          <IconGitBranch size={15} aria-hidden="true" />
+          <span>Agent 在 Worktree {activeWorktreeState.detectedWorktree.path.split(/[\\/]/).filter(Boolean).pop() || activeWorktreeState.detectedWorktree.path} 中工作 · 点此切换视图</span>
+        </button>
+      )}
+      <MobileTranscript session={viewSession ?? selected} activityBreaks={resources.activityBreaks} readOnly={readOnly} messages={messages} commands={commands} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} busy={busy || liveActive} loading={resources.messages.isLoading || resources.messages.isPending || (resources.messages.isFetching && messages.length === 0)} historyResolved={resources.messages.isSuccess || messages.length > 0} loadOlder={() => resources.messages.fetchNextPage()} hasOlder={!!resources.messages.hasNextPage} loadingOlder={resources.messages.isFetchingNextPage} onMessageAction={anchor => setMessageAction({ ...anchor, sessionKey: key })} onImage={openImagePreview} onVideo={openVideoPreview} onFile={openFile} onSqlOpen={openSqlSnippet} workspace={(viewSession ?? selected)?.workspace} connectionId={(viewSession ?? selected)?.connection_id} onSwipe={switchSession} onSwipePreview={setSessionDrag} checkpoints={!isOfficeMode ? sessionCheckpoints.items : []} onOpenCheckpoint={!isOfficeMode ? (cp: SessionCheckpoint) => { setFocusedCheckpointId(cp.id); setSheet('checkpoints') } : undefined} highlightMessageId={new URLSearchParams(location.search).get('message_id')} />
     </MobileSessionDeck> : <div className="m-empty">从左上角选择会话，或新建会话</div>}</main>
     <section ref={composer} className="m-composer-float">
       {selected && <SessionConnectionNotice key={`connection:${key}`} session={selected} error={(resources.messages.error || resources.commands.error || resources.tasks.error) ? messageError(resources.messages.error || resources.commands.error || resources.tasks.error) : undefined} onRetry={() => Promise.all([resources.messages.refetch(), resources.commands.refetch(), resources.tasks.refetch()])} />}
@@ -1519,7 +1557,7 @@ export function MobileWorkspace() {
       {sheet === 'task' && task && <div className="m-sheet-body m-task-panel"><TaskDetails key={`${key}:${task.id}`} task={task} canStop={Boolean(task.target_id && resolveTaskTarget(task) && resolveTaskTarget(task)?.control_state !== 'readonly' && !readOnly && agents[task.agent_id]?.capabilities.includes('stop') && ['pending', 'running', 'waiting_approval'].includes(task.status))} onStop={item => void handleStopTask(item)} onOpenSession={(sid, aid) => { const child = sessions.find(session => session.id === sid && session.agent_id === aid); if (child) select(child); else notify('子会话尚未同步，请刷新后重试', 'red') }} onJumpToLatest={() => { const viewport = document.querySelector('.m-task-panel .task-log-scroll [data-radix-scroll-area-viewport]'); if (viewport) viewport.scrollTop = viewport.scrollHeight }} onClose={() => setSheet('tasks')} /></div>}
       {sheet === 'models' && <div className="m-sheet-body m-model-panel">{selected && <ApprovalModeControl key={key} session={selected} variant="panel" disabled={readOnly} agentKind={agents[selected.agent_id]?.kind} />}{sessionModel.data?.detail && <p>{sessionModel.data.detail}</p>}{mobileEffortOptions.length > 0 && <div className="m-effort-row">{mobileEffortOptions.map(item => <button key={item.value} aria-pressed={activeMobileEffort === item.value} aria-label={`思考强度 ${item.label}`} disabled={(isAntigravity ? modelReadOnly : reasoningReadOnly) || modelLoading} onClick={() => void selectMobileEffort(item.value)}>{item.label}</button>)}</div>}<input className="m-search" aria-label="搜索模型" placeholder="搜索模型或提供商" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />{modelLoading && <p>正在处理原生模型请求…</p>}<div className="m-model-list">{groupedModelChoices.filter(choice => { const q = modelSearch.trim().toLowerCase(); return !q || choice.label.toLowerCase().includes(q) || choice.baseModel.toLowerCase().includes(q) }).map(choice => { const selectedChoice = modelSelection ? modelSelection.key === choice.key : activeMobileModelGroup?.key === choice.key; return <button className="m-model-choice" aria-pressed={selectedChoice} key={choice.key} disabled={modelReadOnly || modelLoading} onClick={() => selectMobileModelGroup(choice)}><IconCpu size={17} /><span>{choice.label}</span>{selectedChoice && <IconCheck size={17} />}</button> })}</div>{!modelLoading && !groupedModelChoices.length && <p>原生运行时未返回可用模型。</p>}{modelSelection && (() => { const resolved = resolveGroupVariant(modelSelection, activeMobileEffort); const resolvedEff = isAntigravity && modelSelection.isGrouped ? effortLabelOf(parseAntigravityModelId(resolved.model).effort) : null; return <div className="m-model-confirm"><small>{resolvedEff ? `${modelSelection.label} · ${resolvedEff}` : modelSelection.label}</small><button aria-label="确认切换模型" disabled={modelReadOnly || modelLoading} onClick={() => void chooseModel(resolved.provider, resolved.model)}>{modelLoading ? '切换中…' : '确认切换模型'}</button></div> })()}</div>}
     </section></div>}
-    {workbenchMounted && selected && <MobileWorkbench session={selected} agent={agents[selected.agent_id]} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} opened={workbenchOpened} onClose={closeWorkbench} />}
+    {workbenchMounted && selected && <MobileWorkbench session={viewSession ?? selected} agent={agents[selected.agent_id]} commands={commands} messages={messages} approvals={approvals} onApproval={(approval, action) => void handleApproval(approval, action)} opened={workbenchOpened} onClose={closeWorkbench} />}
     <MobileImageLightbox
       images={imageGallery?.images ?? null}
       index={imageGallery?.index ?? 0}
@@ -1603,6 +1641,24 @@ export function MobileWorkspace() {
         </Group>
       </form>
     </Modal>
+    {isLearningRoute && learningPluginEnabled && (
+      <MobileLearningFeed
+        onClose={() => {
+          const next = sessions[0]
+          if (next) navigate(`/mobile/chat/${encodeURIComponent(next.id)}?agent_id=${encodeURIComponent(next.agent_id)}`)
+          else navigate('/mobile')
+        }}
+        onOpenSession={(aid, sid) => {
+          const target = useAstrorderStore.getState().sessions[scopeKey(aid, sid)]
+            || sessions.find(s => s.agent_id === aid && s.id === sid)
+          if (target) {
+            select(target)
+          } else {
+            navigate(`/mobile/chat/${encodeURIComponent(sid)}?agent_id=${encodeURIComponent(aid)}`)
+          }
+        }}
+      />
+    )}
     {queueLift && <div className="m-queue-ghost" data-zone={queueLift.zone || undefined} style={{ left: queueLift.x, top: queueLift.y }}>{queueLift.text}</div>}
     <BackgroundTasks />
   </div></AgyQuotaRefreshProvider>

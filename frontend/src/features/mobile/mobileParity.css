@@ -1,7 +1,8 @@
 /* Mobile parity overrides for shared desktop panels (runtime, tasks, goal, workbench/sidecar).
  * Kept unlayered so scoped mobile rules out-specify unlayered desktop stylesheets. */
 .mobile-workspace .m-goal-summary,
-.mobile-workspace .m-task-summary {
+.mobile-workspace .m-task-summary,
+.mobile-workspace .m-worktree-summary {
   flex: none;
   display: flex;
   align-items: center;
@@ -18,11 +19,28 @@
   text-align: left;
 }
 
-.mobile-workspace .m-goal-summary span {
+.mobile-workspace .m-goal-summary span,
+.mobile-workspace .m-worktree-summary span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mobile-workspace .m-worktree-summary {
+  border-color: color-mix(in srgb, var(--m-primary) 26%, var(--m-border));
+  background: color-mix(in srgb, var(--m-primary) 5%, var(--m-surface));
+}
+
+.mobile-workspace .m-worktree-summary > svg {
+  flex: none;
+  color: var(--m-primary);
+}
+
+.mobile-workspace .m-worktree-summary.is-active {
+  border-color: color-mix(in srgb, var(--m-primary) 42%, var(--m-border));
+  background: color-mix(in srgb, var(--m-primary) 10%, var(--m-surface));
+  font-weight: 560;
 }
 
 .mobile-workspace .m-goal-summary.is-active {

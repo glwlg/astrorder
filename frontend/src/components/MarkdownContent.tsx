@@ -1021,11 +1021,17 @@ export const MarkdownContent = memo(function MarkdownContent({
           target={hoverTarget}
           onMouseEnter={clearHoverTimers}
           onMouseLeave={scheduleHoverClose}
-          onCopyFile={currentSession ? () => copyFilesToClipboard([hoverTarget.path], {
+          onCopyFile={currentSession ? (resolvedPath) => copyFilesToClipboard([resolvedPath || hoverTarget.path], {
             sessionId: currentSession.id,
             connectionId: currentSession.connection_id || null,
           }) : undefined}
-          onOpen={() => hoverTarget.onOpen()}
+          onOpen={(resolvedPath) => {
+            if (resolvedPath) {
+              void handleOpenLocalFile(resolvedPath, hoverTarget.line, hoverTarget.endLine)
+              return
+            }
+            hoverTarget.onOpen()
+          }}
           onClose={closeHoverNow}
         />
       )}
