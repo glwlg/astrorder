@@ -496,9 +496,44 @@ var ExtendedCapabilities = []Capability{
 			"caller":        "required caller identity {agent_id, connection_id, profile_name, runtime, session_id}",
 		},
 	},
+	{
+		ID:      "learning.status",
+		Summary: "Inspect Astrorder Learning Radar topics, due spaced-repetition reviews, mastery stats, and weekly scan schedule.",
+		Input: map[string]any{
+			"status": "optional status filter: open, learning, review_due, mastered, snoozed, dismissed",
+		},
+	},
+	{
+		ID:      "learning.ingest",
+		Summary: "Submit structured knowledge-gap cards discovered by the Learning Mentor Bot, completing a scan run with deduplication against mastered/dismissed topics.",
+		Input: map[string]any{
+			"run_id":  "optional scan run ID being completed",
+			"summary": "optional brief Chinese summary of this scan",
+			"topics":  "required array of structured topic objects {title, category, priority, estimated_minutes, project_name, workspace, why_now, key_points, quiz_questions, evidence}",
+		},
+	},
+	{
+		ID:      "learning.update",
+		Summary: "Update a Learning Radar topic's mastery status, personal study notes, or linked local Markdown note file path.",
+		Input: map[string]any{
+			"topic_id":        "required learning topic ID",
+			"status":          "optional status: open | learning | review_due | mastered | snoozed | dismissed",
+			"study_notes":     "optional concise personal takeaways",
+			"notes_file_path": "optional path to saved Markdown study note in the Mentor Bot workspace",
+			"snooze_days":     "optional days to snooze when status is snoozed (default 14)",
+		},
+	},
+	{
+		ID:      "learning.scan",
+		Summary: "Dispatch the bound Learning Mentor Bot to run a manual blind-spot discovery scan over recent work evidence.",
+		Input: map[string]any{
+			"lookback_days": "optional lookback window in days (7, 14, or 30)",
+			"bot_id":        "optional Mentor Bot ID or slug override",
+		},
+	},
 }
 
-// AllCapabilities contains all 51 agent capabilities (MCP, standard HTTP, and extended HTTP capabilities).
+// AllCapabilities contains all 55 agent capabilities (MCP, standard HTTP, and extended HTTP capabilities).
 var AllCapabilities = append(append([]Capability{}, Capabilities...), ExtendedCapabilities...)
 
 // KnownPlugins lists the 13 built-in plugins for plugins.list and plugins.configure.

@@ -68,6 +68,11 @@ func TestCompatibleCommandGrammar(t *testing.T) {
 		{"gitlab status default", []string{"gitlab", "status"}, "gitlab.pipeline", map[string]any{"caller": expectedCaller}},
 		{"gitlab status pipeline", []string{"gitlab", "status", "--pipeline-id", "301", "--project", "team/app"}, "gitlab.pipeline", map[string]any{"pipeline_id": json.Number("301"), "project": "team/app", "caller": expectedCaller}},
 		{"gitlab log", []string{"gitlab", "log", "--job-id", "77", "--tail", "120"}, "gitlab.job_log", map[string]any{"job_id": json.Number("77"), "tail": json.Number("120"), "caller": expectedCaller}},
+		{"learning status", []string{"learning", "status", "--status", "open"}, "learning.status", map[string]any{"status": "open"}},
+		{"learning update", []string{"learning", "update", "--topic-id", "lt-1", "--status", "mastered", "--notes", "已掌握", "--notes-file", "notes/a.md"}, "learning.update", map[string]any{"topic_id": "lt-1", "status": "mastered", "study_notes": "已掌握", "notes_file_path": "notes/a.md"}},
+		{"learning scan", []string{"learning", "scan", "--days", "14"}, "learning.scan", map[string]any{"lookback_days": json.Number("14")}},
+		{"ext list", []string{"ext", "list"}, "ext.list", map[string]any{}},
+		{"ext call json and flags", []string{"ext", "call", "com.acme.ci", "status", "--json", `{"limit":5}`, "--workspace", "/repo", "--project", "acme/app", "-p", "ref=main", "--param", "env=prod", "--job-id", "42"}, "ext.com.acme.ci.status", map[string]any{"limit": json.Number("5"), "workspace": "/repo", "project": "acme/app", "ref": "main", "env": "prod", "job_id": "42", "caller": expectedCaller}},
 		{"agents", []string{"agents"}, "agents.list", map[string]any{}},
 		{"machines", []string{"machines"}, "machines.list", map[string]any{}},
 		{"projects", []string{"projects"}, "projects.list", map[string]any{}},
@@ -277,6 +282,8 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		"schedules", "schedules list", "schedules create", "schedules update", "schedules delete",
 		"bots", "bots list", "bots invoke",
 		"gitlab", "gitlab pipelines", "gitlab status", "gitlab log",
+		"learning", "learning status", "learning ingest", "learning update", "learning scan",
+		"ext", "ext list", "ext call",
 		"browser", "browser eval", "browser screenshot",
 		"agents", "machines", "projects", "bind",
 	}
@@ -312,7 +319,7 @@ func TestHelpUsageAndRegistrationsShareGrammar(t *testing.T) {
 		t.Fatalf("root help exit = %d, stderr = %q", code, stderr.String())
 	}
 	normalizedHelp := strings.Join(strings.Fields(stdout.String()), " ")
-	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,schedules,bots,gitlab,browser,agents,machines,projects,bind} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
+	for _, text := range []string{"usage: astrorder-agent [-h] {catalog,invoke,sessions,schedules,bots,gitlab,learning,ext,browser,agents,machines,projects,bind} ...", "Call Astrorder agent APIs", "catalog", "List capabilities", "invoke", "Call a capability by id"} {
 		if !strings.Contains(normalizedHelp, text) {
 			t.Fatalf("root help missing %q:\n%s", text, stdout.String())
 		}

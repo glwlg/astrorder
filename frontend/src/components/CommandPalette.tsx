@@ -5,6 +5,7 @@ import {
   IconArrowRight,
   IconBolt,
   IconChartBar,
+  IconCompass,
   IconDatabase,
   IconFolder,
   IconHome,
@@ -35,13 +36,14 @@ import {
   WORKSPACE_BACKUPS_PLUGIN_ID,
   WORKSPACE_DIGEST_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
   WORKSPACE_MEETINGS_PLUGIN_ID,
   WORKSPACE_MONITOR_PLUGIN_ID,
 } from '../features/plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../features/plugins/pluginSettingsStore'
 import { useIsOfficeProfile } from '../features/office/appProfile'
 import { AgentBrandIcon } from './AgentBrandIcon'
-import { displaySessionTitle, formatRelativeTime, sessionActivityStatus } from './sessionRailModel'
+import { displaySessionTitle, formatRelativeTime, resolveSessionDisplayTitle, sessionActivityStatus } from './sessionRailModel'
 import './commandPalette.css'
 
 type PaletteCategory = 'session' | 'message' | 'route' | 'action' | 'project'
@@ -80,6 +82,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
   const accountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
   const meetingsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
   const digestEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
+  const learningEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
   const isOfficeProfile = useIsOfficeProfile()
 
   const [query, setQuery] = useState('')
@@ -180,6 +183,10 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
       { id: 'route:inbox', title: isOfficeProfile ? '待办清单' : '待我决策（行动收件箱）', subtitle: '/inbox', to: '/inbox', keywords: 'inbox action todo 待办 清单 决策 审批 收件箱', badge: inboxCount > 0 ? `${inboxCount} 项` : undefined },
       ...(meetingsEnabled ? [{ id: 'route:meetings', title: '会议纪要与录音', subtitle: '/meetings', to: '/meetings', keywords: 'meetings audio minutes 会议 录音 纪要 行动项' }] : []),
       ...(digestEnabled ? [{ id: 'route:digest', title: '工作复盘与周报', subtitle: '/digest', to: '/digest', keywords: 'digest report weekly 复盘 周报 日报 总结' }] : []),
+      ...(learningEnabled ? [
+        { id: 'route:learning', title: '成长雷达（知识盲区与导师伴学）', subtitle: '/learning', to: '/learning', keywords: 'learning radar mentor study 成长 雷达 学习 盲区 导师' },
+        { id: 'route:learning-review', title: '成长雷达 · 间隔复习队列', subtitle: '/learning?tab=review', to: '/learning?tab=review', keywords: 'learning review leitner 间隔 复习 记忆 刷卡' },
+      ] : []),
       { id: 'route:welcome', title: isOfficeProfile ? '首页工作台' : '星序指挥台（欢迎页）', subtitle: '/chat', to: '/chat', keywords: 'welcome home 工作台 指挥台 欢迎页 首页' },
       ...(!isOfficeProfile && monitorEnabled ? [{ id: 'route:matrix', title: '矩阵（多会话网格）', subtitle: '/monitor', to: '/monitor', keywords: 'matrix monitor 矩阵 监控室 多窗' }] : []),
       ...(!isOfficeProfile && groupsEnabled ? [{ id: 'route:groups', title: '群聊协作', subtitle: '/groups', to: '/groups', keywords: 'groups chat 群聊 接力' }] : []),
@@ -280,7 +287,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     }
 
     return items
-  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, digestEnabled, groupsEnabled, inboxCount, isOfficeProfile, meetingsEnabled, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
+  }, [accountsEnabled, agents, analyticsEnabled, backupsEnabled, computedScheme, digestEnabled, groupsEnabled, inboxCount, isOfficeProfile, learningEnabled, meetingsEnabled, monitorEnabled, navigate, onClose, onOpenSettings, onToggleSidebar, projects, sessions, setColorScheme])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -298,8 +305,12 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
         return tokens.every((tok) => hay.includes(tok))
       })
       .slice(0, 16)
+    const sessionsByKey = useAstrorderStore.getState().sessions
     const remoteMessages: PaletteItem[] = messageHits.map((hit) => {
-      const title = hit.session_title?.trim() || hit.workspace?.split(/[/\\]/).filter(Boolean).pop() || hit.session_id
+      const title = resolveSessionDisplayTitle(sessionsByKey, hit.agent_id, hit.session_id, {
+        title: hit.session_title,
+        workspace: hit.workspace,
+      })
       const timeText = formatRelativeTime(hit.created_at)
       const roleTag = hit.role === 'user' ? '我' : '回复'
       return {
@@ -432,6 +443,7 @@ export function CommandPalette({ opened, onClose, onToggleSidebar, onOpenSetting
     if (item.id === 'route:inbox') return <IconInbox size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:meetings') return <IconMicrophone size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:digest') return <IconNotebook size={15} color="var(--astr-indigo)" />
+    if (item.id === 'route:learning' || item.id === 'route:learning-review') return <IconCompass size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:welcome') return <IconHome size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:matrix') return <IconLayoutGrid size={15} color="var(--astr-indigo)" />
     if (item.id === 'route:groups') return <IconUsers size={15} color="var(--astr-indigo)" />

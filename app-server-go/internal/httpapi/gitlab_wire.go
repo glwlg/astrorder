@@ -25,45 +25,15 @@ func bindGitLabCallbacks(agentHandler any, svc *gitlabci.Service) {
 	}
 	binder.SetGitLabCallbacks(
 		func(ctx context.Context, payload map[string]any) (any, error) {
-			return svc.QueryPipelines(ctx, buildGitLabQueryTarget(payload))
+			return svc.InvokeCapability(ctx, "pipelines", payload)
 		},
 		func(ctx context.Context, payload map[string]any) (any, error) {
-			pid := payloadInt64(payload, "pipeline_id")
-			return svc.QueryPipelineDetail(ctx, buildGitLabQueryTarget(payload), pid)
+			return svc.InvokeCapability(ctx, "pipeline", payload)
 		},
 		func(ctx context.Context, payload map[string]any) (any, error) {
-			jid := payloadInt64(payload, "job_id")
-			tail := int(payloadInt64(payload, "tail"))
-			if tail <= 0 {
-				tail = int(payloadInt64(payload, "tail_lines"))
-			}
-			return svc.QueryJobTrace(ctx, buildGitLabQueryTarget(payload), jid, tail, true)
+			return svc.InvokeCapability(ctx, "job_log", payload)
 		},
 	)
-}
-
-func buildGitLabQueryTarget(payload map[string]any) gitlabci.QueryTarget {
-	if payload == nil {
-		return gitlabci.QueryTarget{}
-	}
-	project := payloadString(payload, "project")
-	if project == "" {
-		project = payloadString(payload, "project_path")
-	}
-	instanceID := payloadString(payload, "instance_id")
-	if instanceID == "" {
-		instanceID = payloadString(payload, "instance")
-	}
-	return gitlabci.QueryTarget{
-		Workspace:    payloadString(payload, "workspace"),
-		ConnectionID: payloadString(payload, "connection_id"),
-		SessionID:    payloadString(payload, "session_id"),
-		InstanceID:   instanceID,
-		ProjectPath:  project,
-		Ref:          payloadString(payload, "ref"),
-		SHA:          payloadString(payload, "sha"),
-		Limit:        int(payloadInt64(payload, "limit")),
-	}
 }
 
 func payloadString(payload map[string]any, key string) string {

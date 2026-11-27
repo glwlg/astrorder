@@ -316,7 +316,7 @@ export function useEventStream(
         lastFullResumeAt = now;
         lastWakeResumeAt = now;
         void refreshGroups();
-        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules", "checkpoints"]) {
+        for (const resource of ["bootstrap", "messages", "commands", "tasks", "session_usage", "session-swarm", "session-schedules", "checkpoints", "learning"]) {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", resource] });
         }
       },
@@ -429,6 +429,85 @@ export function useEventStream(
           void queryClient.invalidateQueries({
             queryKey: ["astrorder", "session-schedules"],
           });
+        }
+        if (
+          event.type === "learning.scan.started" ||
+          event.type === "learning.scan.completed" ||
+          event.type === "learning.scan.timeout" ||
+          event.type === "learning.scan.failed" ||
+          event.type === "learning.topic.updated" ||
+          event.type === "learning.reviews.due"
+        ) {
+          void queryClient.invalidateQueries({
+            queryKey: ["astrorder", "learning"],
+          });
+          if (
+            event.type === "learning.scan.completed" &&
+            event.cursor > store.cursor &&
+            event.data.notify_dynamic_island !== false
+          ) {
+            const added = Number(event.data.new_topics_count || 0);
+            const merged = Number(event.data.merged_topics_count || 0);
+            if (added + merged > 0) {
+              const title = "成长雷达已完成盲区扫描";
+              const message =
+                typeof event.data.summary === "string" && event.data.summary.trim()
+                  ? event.data.summary.trim()
+                  : `新增 ${added} 条、更新 ${merged} 条待学知识卡片`;
+              const notice = {
+                cursor: event.cursor,
+                key: `learning-scan:${String(event.data.run_id || event.id)}`,
+                kind: "task_completed" as const,
+                title,
+                message,
+                agent_id: "learning",
+                session_id: String(event.data.run_id || "radar"),
+                target_path: "/learning",
+                created_at: new Date().toISOString(),
+              };
+              if (hasIslandNotificationHost()) {
+                pushIslandNotification(notice);
+              } else {
+                mantineNotifications.show({
+                  id: notice.key,
+                  title: notice.title,
+                  message: `${notice.message}（点击查看）`,
+                  color: "blue",
+                  autoClose: 8000,
+                  style: { cursor: "pointer" },
+                  onClick: () => {
+                    const isMobile =
+                      typeof window !== "undefined" &&
+                      (window.location.pathname.startsWith("/mobile") ||
+                        window.innerWidth < 768 ||
+                        window.matchMedia?.("(max-width: 767px)").matches);
+                    const targetPath = notificationPath(notice, isMobile);
+                    navigateRef.current?.(targetPath);
+                    mantineNotifications.hide(notice.key);
+                  },
+                });
+              }
+            }
+          }
+          if (event.type === "learning.reviews.due" && event.cursor > store.cursor) {
+            const dueCount = Number(event.data.due_count || 0);
+            if (dueCount > 0) {
+              const notice = {
+                cursor: event.cursor,
+                key: `learning-due:${new Date().toISOString().slice(0, 10)}`,
+                kind: "task_completed" as const,
+                title: "成长雷达 · 间隔复习提醒",
+                message: `有 ${dueCount} 条知识卡片已到期，趁热巩固记忆`,
+                agent_id: "learning",
+                session_id: "review",
+                target_path: "/learning?tab=review",
+                created_at: new Date().toISOString(),
+              };
+              if (hasIslandNotificationHost()) {
+                pushIslandNotification(notice);
+              }
+            }
+          }
         }
         if (event.type === "git.worktrees.changed" || event.type === "git.branch.changed") {
           void queryClient.invalidateQueries({ queryKey: ["astrorder", "git-worktrees"] });

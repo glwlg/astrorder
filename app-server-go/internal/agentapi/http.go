@@ -164,7 +164,7 @@ func (h *Handler) invoke(ctx context.Context, capability string, payload map[str
 
 	switch capability {
 	case "catalog.list":
-		return h.invokeCatalogList(ctx, payload)
+		return map[string]any{"items": h.buildCatalog(ctx)}, nil
 	case "agents.list":
 		return h.invokeAgentsList(ctx, payload)
 	case "machines.list":
@@ -265,7 +265,20 @@ func (h *Handler) invoke(ctx context.Context, capability string, payload map[str
 		return h.invokeGitLabPipeline(ctx, payload)
 	case "gitlab.job_log":
 		return h.invokeGitLabJobLog(ctx, payload)
+	case "learning.status":
+		return h.invokeLearningStatus(ctx, payload)
+	case "learning.ingest":
+		return h.invokeLearningIngest(ctx, payload)
+	case "learning.update":
+		return h.invokeLearningUpdate(ctx, payload)
+	case "learning.scan":
+		return h.invokeLearningScan(ctx, payload)
+	case "ext.list":
+		return h.invokeExtList(ctx)
 	default:
+		if strings.HasPrefix(capability, "ext.") {
+			return h.invokeExtensionCapability(ctx, capability, payload)
+		}
 		return nil, NewAgentApiError("not_found", "Unknown capability")
 	}
 }
@@ -333,7 +346,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/api/v1/agent/catalog":
-		agentJSON(w, 200, map[string]any{"items": AllCapabilities})
+		agentJSON(w, 200, map[string]any{"items": h.buildCatalog(r.Context())})
 	case path == "/api/v1/blackboard":
 		namespace := r.URL.Query().Get("namespace")
 		if namespace == "" {
@@ -403,6 +416,9 @@ func (h *Handler) recordAgentUsage(ctx context.Context, capability string, calle
 			known = true
 			break
 		}
+	}
+	if !known && (capability == "ext.list" || strings.HasPrefix(capability, "ext.")) {
+		known = true
 	}
 	if !known {
 		capability = "unknown"

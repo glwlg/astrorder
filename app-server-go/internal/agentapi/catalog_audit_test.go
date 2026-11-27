@@ -17,8 +17,8 @@ import (
 // invoke path for every non-session capability. The MCP tool surface is
 // retired; HTTP catalog/invoke remain the supported automation surface.
 func TestEveryNonSessionCapabilityThroughHTTPInvoke(t *testing.T) {
-	if len(AllCapabilities) != 51 {
-		t.Fatalf("expected 51 HTTP capabilities, got %d", len(AllCapabilities))
+	if len(AllCapabilities) != 55 {
+		t.Fatalf("expected 55 HTTP capabilities, got %d", len(AllCapabilities))
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "app.db"))
 	if err != nil {

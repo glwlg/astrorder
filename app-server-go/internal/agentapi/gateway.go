@@ -55,6 +55,11 @@ type Options struct {
 	GitLabPipelines  func(context.Context, map[string]any) (any, error)
 	GitLabPipeline   func(context.Context, map[string]any) (any, error)
 	GitLabJobLog     func(context.Context, map[string]any) (any, error)
+	LearningStatus   func(context.Context, map[string]any) (any, error)
+	LearningIngest   func(context.Context, map[string]any) (any, error)
+	LearningUpdate   func(context.Context, map[string]any) (any, error)
+	LearningScan     func(context.Context, map[string]any) (any, error)
+	Extensions       ExtensionDispatcher
 	DefaultWorkspace string
 	FileResolver     blackboard.FileResolver
 	RemoteExecutable RemoteExecutableResolver

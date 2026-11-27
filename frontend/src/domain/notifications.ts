@@ -57,6 +57,12 @@ function mobileRoute(): boolean {
 
 export function notificationPath(notification: EventNotification, mobile = mobileRoute()): string {
   const prefix = mobile ? '/mobile' : ''
+  if (notification.target_path) {
+    if (mobile && !notification.target_path.startsWith('/mobile')) {
+      return `/mobile${notification.target_path.startsWith('/') ? '' : '/'}${notification.target_path}`
+    }
+    return notification.target_path
+  }
   if (notification.group_id) return `${prefix}/groups/${encodeURIComponent(notification.group_id)}`
   return `${prefix}/chat/${encodeURIComponent(notification.session_id)}?agent_id=${encodeURIComponent(notification.agent_id)}`
 }

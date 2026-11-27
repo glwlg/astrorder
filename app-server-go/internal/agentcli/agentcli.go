@@ -85,18 +85,20 @@ type optionDefinition struct {
 	kind         valueKind
 	positional   bool
 	required     bool
+	repeatable   bool
 	hasDefault   bool
 	defaultValue any
 	help         string
 }
 
 type commandDefinition struct {
-	name         string
-	help         string
-	children     []*commandDefinition
-	options      []optionDefinition
-	capability   func(map[string]any, Config) (string, map[string]any, error)
-	handleResult func(json.RawMessage, map[string]any, Config) (any, error)
+	name              string
+	help              string
+	children          []*commandDefinition
+	options           []optionDefinition
+	allowDynamicFlags bool
+	capability        func(map[string]any, Config) (string, map[string]any, error)
+	handleResult      func(json.RawMessage, map[string]any, Config) (any, error)
 }
 
 var helpOption = optionDefinition{
@@ -817,6 +819,166 @@ func buildCommands() *commandDefinition {
 		},
 	}
 
+	learningStatus := &commandDefinition{
+		name: "status",
+		help: "Inspect Learning Radar blind spots, due reviews, and weekly schedule",
+		options: []optionDefinition{
+			{name: "status", flags: []string{"--status"}, metavar: "STATUS", kind: kindString, help: "Filter topics by status (open, learning, review_due, mastered, snoozed, dismissed)"},
+		},
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{}
+			if s, ok := values["status"].(string); ok && strings.TrimSpace(s) != "" {
+				payload["status"] = strings.TrimSpace(s)
+			}
+			return "learning.status", payload, nil
+		},
+	}
+
+	learningIngest := &commandDefinition{
+		name: "ingest",
+		help: "Ingest structured blind-spot cards discovered by the Learning Mentor Bot",
+		options: []optionDefinition{
+			{name: "run_id", flags: []string{"--run-id"}, metavar: "RUN_ID", kind: kindString, help: "Scan run ID being completed"},
+			{name: "file", flags: []string{"--file"}, metavar: "JSON_FILE", kind: kindString, required: true, help: "UTF-8 JSON file containing {summary, topics: [...]}"},
+		},
+		capability: func(values map[string]any, config Config) (string, map[string]any, error) {
+			filePath, _ := values["file"].(string)
+			payload, err := readInputFile(filePath, config)
+			if err != nil {
+				return "", nil, err
+			}
+			if runID, ok := values["run_id"].(string); ok && strings.TrimSpace(runID) != "" {
+				payload["run_id"] = strings.TrimSpace(runID)
+			}
+			return "learning.ingest", payload, nil
+		},
+	}
+
+	learningUpdate := &commandDefinition{
+		name: "update",
+		help: "Update a Learning Radar topic's mastery status, notes, or linked Markdown note file",
+		options: []optionDefinition{
+			{name: "topic_id", flags: []string{"--topic-id"}, metavar: "TOPIC_ID", kind: kindString, required: true, help: "Learning topic ID"},
+			{name: "status", flags: []string{"--status"}, metavar: "STATUS", kind: kindString, help: "New status: open, learning, review_due, mastered, snoozed, dismissed"},
+			{name: "notes", flags: []string{"--notes"}, metavar: "NOTES", kind: kindString, help: "Concise personal study notes"},
+			{name: "notes_file", flags: []string{"--notes-file"}, metavar: "PATH", kind: kindString, help: "Path to saved Markdown note file"},
+			{name: "snooze_days", flags: []string{"--snooze-days"}, metavar: "DAYS", kind: kindInteger, help: "Snooze days when status=snoozed (default 14)"},
+		},
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{
+				"topic_id": strings.TrimSpace(values["topic_id"].(string)),
+			}
+			if s, ok := values["status"].(string); ok && strings.TrimSpace(s) != "" {
+				payload["status"] = strings.TrimSpace(s)
+			}
+			if n, ok := values["notes"].(string); ok && strings.TrimSpace(n) != "" {
+				payload["study_notes"] = strings.TrimSpace(n)
+			}
+			if p, ok := values["notes_file"].(string); ok && strings.TrimSpace(p) != "" {
+				payload["notes_file_path"] = strings.TrimSpace(p)
+			}
+			if d, ok := values["snooze_days"].(int); ok && d > 0 {
+				payload["snooze_days"] = d
+			}
+			return "learning.update", payload, nil
+		},
+	}
+
+	learningScan := &commandDefinition{
+		name: "scan",
+		help: "Trigger a manual Learning Radar scan via the bound Mentor Bot",
+		options: []optionDefinition{
+			{name: "days", flags: []string{"--days"}, metavar: "DAYS", kind: kindInteger, help: "Lookback window in days (7, 14, or 30)"},
+			{name: "bot", flags: []string{"--bot"}, metavar: "BOT", kind: kindString, help: "Optional Mentor Bot ID or slug override"},
+		},
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			payload := map[string]any{}
+			if d, ok := values["days"].(int); ok && d > 0 {
+				payload["lookback_days"] = d
+			}
+			if b, ok := values["bot"].(string); ok && strings.TrimSpace(b) != "" {
+				payload["bot_id"] = strings.TrimSpace(b)
+			}
+			return "learning.scan", payload, nil
+		},
+	}
+
+	learningCmd := &commandDefinition{
+		name: "learning",
+		help: "Interact with Astrorder Learning Radar (status, ingest, update, scan)",
+		children: []*commandDefinition{
+			learningStatus,
+			learningIngest,
+			learningUpdate,
+			learningScan,
+		},
+	}
+
+	extList := simple("list", "List capabilities exposed by enabled extensions", "ext.list")
+	extCall := &commandDefinition{
+		name:              "call",
+		help:              "Invoke an extension capability by plugin ID and capability ID",
+		allowDynamicFlags: true,
+		options: []optionDefinition{
+			{name: "plugin_id", metavar: "plugin_id", kind: kindString, positional: true, required: true, help: "Extension/plugin ID"},
+			{name: "capability_id", metavar: "capability_id", kind: kindString, positional: true, required: true, help: "Capability ID within the plugin"},
+			{name: "json", flags: []string{"--json"}, metavar: "JSON", kind: kindJSON, help: "JSON object payload"},
+			{name: "workspace", flags: []string{"--workspace"}, metavar: "WORKSPACE", kind: kindString, help: "Workspace directory override"},
+			{name: "project", flags: []string{"--project"}, metavar: "PROJECT", kind: kindString, help: "Project identifier override"},
+			{name: "param", flags: []string{"-p", "--param"}, metavar: "KEY=VALUE", kind: kindString, repeatable: true, help: "Additional key=value parameter (repeatable)"},
+		},
+		capability: func(values map[string]any, _ Config) (string, map[string]any, error) {
+			pluginID := strings.TrimSpace(values["plugin_id"].(string))
+			capID := strings.TrimSpace(values["capability_id"].(string))
+			if pluginID == "" || containsWhitespace(pluginID) {
+				return "", nil, fmt.Errorf("invalid plugin_id: %q", pluginID)
+			}
+			if capID == "" || containsWhitespace(capID) {
+				return "", nil, fmt.Errorf("invalid capability_id: %q", capID)
+			}
+			payload := map[string]any{}
+			if rawJSON, ok := values["json"].(string); ok && rawJSON != "" {
+				obj, err := decodeObject(rawJSON)
+				if err != nil {
+					if err.Error() == "--input must be a JSON object" {
+						return "", nil, errors.New("--json must be a JSON object")
+					}
+					return "", nil, fmt.Errorf("invalid --json JSON: %w", err)
+				}
+				payload = obj
+			}
+			for _, key := range []string{"workspace", "project"} {
+				if s, ok := values[key].(string); ok && strings.TrimSpace(s) != "" {
+					payload[key] = strings.TrimSpace(s)
+				}
+			}
+			if params, ok := values["param"].([]string); ok {
+				for _, entry := range params {
+					k, v, hasEq := strings.Cut(entry, "=")
+					k = strings.TrimSpace(k)
+					if !hasEq || k == "" {
+						return "", nil, fmt.Errorf("invalid --param %q: expected key=value", entry)
+					}
+					payload[k] = v
+				}
+			}
+			if extra, ok := values["__dynamic_flags__"].(map[string]string); ok {
+				for k, v := range extra {
+					payload[k] = v
+				}
+			}
+			return "ext." + pluginID + "." + capID, payload, nil
+		},
+	}
+	extCmd := &commandDefinition{
+		name: "ext",
+		help: "List and invoke Astrorder extension/plugin capabilities",
+		children: []*commandDefinition{
+			extList,
+			extCall,
+		},
+	}
+
 	return &commandDefinition{
 		children: []*commandDefinition{
 			catalog,
@@ -825,6 +987,8 @@ func buildCommands() *commandDefinition {
 			schedulesCmd,
 			botsCmd,
 			gitlabCmd,
+			learningCmd,
+			extCmd,
 			browser,
 			simple("agents", "", "agents.list"),
 			simple("machines", "", "machines.list"),
@@ -1045,6 +1209,29 @@ func parseLeaf(command *commandDefinition, args []string) (map[string]any, error
 			}
 			option := findFlag(command, flagName)
 			if option == nil {
+				if command.allowDynamicFlags && strings.HasPrefix(flagName, "--") && len(flagName) > 2 {
+					var raw string
+					if hasInlineValue {
+						raw = inlineValue
+					} else {
+						index++
+						if index >= len(args) {
+							return nil, fmt.Errorf("argument %s: expected one argument", flagName)
+						}
+						raw = args[index]
+					}
+					dynKey := strings.ReplaceAll(strings.TrimPrefix(flagName, "--"), "-", "_")
+					if dynKey == "" {
+						return nil, fmt.Errorf("unrecognized arguments: %s", argument)
+					}
+					extra, _ := values["__dynamic_flags__"].(map[string]string)
+					if extra == nil {
+						extra = map[string]string{}
+						values["__dynamic_flags__"] = extra
+					}
+					extra[dynKey] = raw
+					continue
+				}
 				return nil, fmt.Errorf("unrecognized arguments: %s", argument)
 			}
 			var raw string
@@ -1061,7 +1248,14 @@ func parseLeaf(command *commandDefinition, args []string) (map[string]any, error
 			if err != nil {
 				return nil, err
 			}
-			values[option.name] = value
+			if option.repeatable {
+				existing, _ := values[option.name].([]string)
+				if s, ok := value.(string); ok {
+					values[option.name] = append(existing, s)
+				}
+			} else {
+				values[option.name] = value
+			}
 			continue
 		}
 		positionals = append(positionals, argument)
@@ -1904,6 +2098,9 @@ func resolveCaller(envLookup EnvLookup, config Config) (*Caller, error) {
 
 func requiresCaller(capability string) bool {
 	if strings.HasPrefix(capability, "sessions.") || strings.HasPrefix(capability, "schedules.") || strings.HasPrefix(capability, "gitlab.") || capability == "machines.dispatch" || capability == "bots.invoke" {
+		return true
+	}
+	if strings.HasPrefix(capability, "ext.") && capability != "ext.list" {
 		return true
 	}
 	switch capability {

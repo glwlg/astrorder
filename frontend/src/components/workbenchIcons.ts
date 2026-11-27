@@ -12,6 +12,7 @@ export { ChatCircleDotsIcon } from '@phosphor-icons/react/dist/csr/ChatCircleDot
 export { ChatsCircleIcon } from '@phosphor-icons/react/dist/csr/ChatsCircle'
 export { CheckIcon } from '@phosphor-icons/react/dist/csr/Check'
 export { ClockCounterClockwiseIcon } from '@phosphor-icons/react/dist/csr/ClockCounterClockwise'
+export { CompassIcon } from '@phosphor-icons/react/dist/csr/Compass'
 export { CpuIcon } from '@phosphor-icons/react/dist/csr/Cpu'
 export { DatabaseIcon } from '@phosphor-icons/react/dist/csr/Database'
 export { DesktopIcon } from '@phosphor-icons/react/dist/csr/Desktop'

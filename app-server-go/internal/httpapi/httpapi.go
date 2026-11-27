@@ -47,12 +47,14 @@ import (
 	"astrorder.dev/app-server/internal/git"
 	"astrorder.dev/app-server/internal/gitlabci"
 	"astrorder.dev/app-server/internal/integrations"
+	"astrorder.dev/app-server/internal/learning"
 	"astrorder.dev/app-server/internal/lifecycle"
 	"astrorder.dev/app-server/internal/meetings"
 	"astrorder.dev/app-server/internal/memory"
 	"astrorder.dev/app-server/internal/modelgateway"
 	"astrorder.dev/app-server/internal/notifications"
 	"astrorder.dev/app-server/internal/office"
+	"astrorder.dev/app-server/internal/pluginhost"
 	"astrorder.dev/app-server/internal/preferences"
 	"astrorder.dev/app-server/internal/reviewrelay"
 	"astrorder.dev/app-server/internal/sessions"
@@ -149,7 +151,10 @@ type Options struct {
 	DbxPlugin        http.Handler
 	Office           http.Handler
 	Bots             http.Handler
+	PluginHost       *pluginhost.Manager
+	HostBaseURL      string
 	GitLab           http.Handler
+	Learning         http.Handler
 	Digest           http.Handler
 	Meetings         http.Handler
 	Telemetry        http.Handler
@@ -198,7 +203,9 @@ type api struct {
 	dbxPlugin       http.Handler
 	office          http.Handler
 	bots            http.Handler
+	pluginHost      http.Handler
 	gitlab          http.Handler
+	learning        http.Handler
 	digest          http.Handler
 	meetings        http.Handler
 	telemetry       http.Handler
@@ -621,6 +628,28 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		botsHandler = botSvc
 	}
 
+	pluginMgr := options.PluginHost
+	if pluginMgr == nil && options.Store != nil {
+		pluginsDir := ""
+		if dbxAuditDir != "" {
+			pluginsDir = filepath.Join(dbxAuditDir, "plugins")
+		}
+		pluginMgr = pluginhost.NewManager(pluginhost.Options{
+			Store:       options.Store,
+			Authorizer:  authenticator,
+			Resolver:    resolver,
+			PluginsDir:  pluginsDir,
+			HostBaseURL: normalizeLoopbackHostBaseURL(options.HostBaseURL, options.Config.Listen),
+			Logger:      logger,
+		})
+		if options.Context != nil {
+			go func() {
+				<-options.Context.Done()
+				pluginMgr.Close()
+			}()
+		}
+	}
+
 	gitlabHandler := options.GitLab
 	if gitlabHandler == nil && options.Store != nil {
 		gitlabSvc := gitlabci.NewService(gitlabci.Options{
@@ -628,8 +657,61 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 			Authorizer: authenticator,
 			Resolver:   resolver,
 		})
-		bindGitLabCallbacks(agentHandler, gitlabSvc)
+		if pluginMgr != nil {
+			if regErr := pluginMgr.RegisterBuiltin(gitlabSvc); regErr != nil {
+				logger.Warn("failed to register gitlab builtin plugin", "error", regErr)
+			}
+		} else {
+			bindGitLabCallbacks(agentHandler, gitlabSvc)
+		}
 		gitlabHandler = gitlabSvc
+	} else if pluginMgr != nil {
+		if bp, ok := gitlabHandler.(pluginhost.BuiltinPlugin); ok {
+			_ = pluginMgr.RegisterBuiltin(bp)
+		}
+	}
+
+	var pluginHostHandler http.Handler
+	if pluginMgr != nil {
+		bindPluginHost(options.Context, pluginMgr, agentHandler, options.Capabilities)
+		pluginHostHandler = pluginMgr
+	}
+
+	learningHandler := options.Learning
+	if learningHandler == nil && options.Store != nil {
+		var botMgr learning.BotManager
+		if bm, ok := botsHandler.(learning.BotManager); ok {
+			botMgr = bm
+		}
+		var failureSignals learning.ExternalFailureSignalProvider
+		if pluginMgr != nil {
+			failureSignals = &pluginHostFailureSignalsAdapter{mgr: pluginMgr}
+		}
+		var wakeSched func()
+		if waker, ok := sessionHandler.(interface{ WakeSchedules() }); ok {
+			wakeSched = waker.WakeSchedules
+		}
+		var learnHistory learning.SessionHistoryReader
+		if historyReader != nil {
+			learnHistory = learning.SessionHistoryReader(historyReader)
+		}
+		learningSvc := learning.NewService(learning.Options{
+			Store:            options.Store,
+			Authorizer:       authenticator,
+			Resolver:         resolver,
+			Publisher:        eventHub,
+			HistoryReader:    learnHistory,
+			Bots:             botMgr,
+			FailureSignals:   failureSignals,
+			WakeSchedules:    wakeSched,
+			DefaultWorkspace: options.Config.DefaultWorkspace,
+			Logger:           logger,
+		})
+		bindLearningCallbacks(agentHandler, learningSvc)
+		if options.Context != nil {
+			go learningSvc.RunScheduler(options.Context)
+		}
+		learningHandler = learningSvc
 	}
 
 	telemetryHandler := options.Telemetry
@@ -676,7 +758,9 @@ func NewHandlerChecked(options Options) (http.Handler, error) {
 		dbxPlugin:       dbxHandler,
 		office:          officeHandler,
 		bots:            botsHandler,
+		pluginHost:      pluginHostHandler,
 		gitlab:          gitlabHandler,
+		learning:        learningHandler,
 		digest:          digestHandler,
 		meetings:        meetingsHandler,
 		telemetry:       telemetryHandler,
@@ -779,8 +863,16 @@ func (a *api) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.bots.ServeHTTP(response, request)
 		return
 	}
+	if a.pluginHost != nil && pluginhost.Matches(request.URL.Path) {
+		a.pluginHost.ServeHTTP(response, request)
+		return
+	}
 	if a.gitlab != nil && gitlabci.Matches(request.Method, request.URL.Path) {
 		a.gitlab.ServeHTTP(response, request)
+		return
+	}
+	if a.learning != nil && learning.Matches(request.Method, request.URL.Path) {
+		a.learning.ServeHTTP(response, request)
 		return
 	}
 	if a.digest != nil && digest.Matches(request.Method, request.URL.Path) {
@@ -1211,6 +1303,7 @@ func cors(authenticator *auth.Authenticator, next http.Handler) http.Handler {
 		if allowed {
 			response.Header().Set("Access-Control-Allow-Origin", origin)
 			response.Header().Set("Access-Control-Allow-Credentials", "true")
+			response.Header().Set("Access-Control-Expose-Headers", "X-Astrorder-Resolved-Path, X-Astrorder-Worktree-Path, X-Astrorder-Worktree-Branch")
 			appendVary(response.Header(), "Origin")
 		}
 		if request.Method == http.MethodOptions && request.Header.Get("Access-Control-Request-Method") != "" {

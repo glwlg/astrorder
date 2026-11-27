@@ -495,7 +495,8 @@ describe('event stream notifications', () => {
       })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'bootstrap'] })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'messages'] })
-      expect(invalidate).toHaveBeenCalledTimes(8)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['astrorder', 'learning'] })
+      expect(invalidate).toHaveBeenCalledTimes(9)
     } finally {
       view.unmount()
       vi.restoreAllMocks()

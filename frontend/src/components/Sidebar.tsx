@@ -1,4 +1,4 @@
-import { ChartLineUpIcon, ChatCircleDotsIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, RobotIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
+import { ChartLineUpIcon, ChatCircleDotsIcon, CompassIcon, GearSixIcon, HardDrivesIcon, IdentificationCardIcon, MicrophoneIcon, NotebookIcon, RobotIcon, SquaresFourIcon, TrayIcon, UsersThreeIcon } from './workbenchIcons'
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPin, IconPlus } from '@tabler/icons-react'
 import { ActionIcon, HoverCard, Modal, NavLink, Stack, Text, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -33,6 +33,7 @@ import {
   WORKSPACE_BACKUPS_PLUGIN_ID,
   WORKSPACE_DIGEST_PLUGIN_ID,
   WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
   WORKSPACE_MEETINGS_PLUGIN_ID,
   WORKSPACE_MONITOR_PLUGIN_ID,
 } from '../features/plugins/builtinPlugins'
@@ -65,6 +66,7 @@ const navItems = [
   { to: '/agent-accounts', label: '账号', icon: IdentificationCardIcon, id: 'agentAccounts' },
   { to: '/digest', label: '复盘', icon: NotebookIcon, id: 'digest' },
   { to: '/meetings', label: '会议', icon: MicrophoneIcon, id: 'meetings' },
+  { to: '/learning', label: '成长', icon: CompassIcon, id: 'learning' },
 ]
 
 function readStoredPrimaryNavOrder(): string[] {
@@ -232,6 +234,7 @@ export function Sidebar({
   const agentAccountsEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID))
   const digestPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_DIGEST_PLUGIN_ID))
   const meetingsPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_MEETINGS_PLUGIN_ID))
+  const learningPluginEnabled = usePluginSettingsStore((s) => s.isPluginEnabled(WORKSPACE_LEARNING_RADAR_PLUGIN_ID))
   const appProfile = useAppProfile()
   const isOfficeProfile = appProfile === 'office'
 
@@ -248,6 +251,7 @@ export function Sidebar({
       if (isOfficeProfile && DEV_ONLY_PRIMARY_NAV_IDS.has(item.id)) return false
       if (item.id === 'digest') return digestPluginEnabled
       if (item.id === 'meetings') return meetingsPluginEnabled
+      if (item.id === 'learning') return learningPluginEnabled
       if (item.id === 'groups') return groupsPluginEnabled
       if (item.id === 'monitor') return monitorPluginEnabled
       if (item.id === 'analytics') return analyticsGatewayEnabled
@@ -350,13 +354,14 @@ export function Sidebar({
   const isInbox = location.pathname.startsWith('/inbox')
   const isDigest = location.pathname.startsWith('/digest')
   const isMeetings = location.pathname.startsWith('/meetings')
+  const isLearning = location.pathname.startsWith('/learning')
   const isGroups = location.pathname.startsWith('/groups') || location.pathname.startsWith('/chat/group-')
   const isMonitorRoute = location.pathname.startsWith('/monitor')
   const isAnalytics = location.pathname.startsWith('/analytics')
   const isBackups = location.pathname.startsWith('/backups')
   const isAgentAccounts = location.pathname.startsWith('/agent-accounts')
   const isIntegrations = location.pathname.startsWith('/integrations/')
-  const isChat = !isBots && !isInbox && !isDigest && !isMeetings && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
+  const isChat = !isBots && !isInbox && !isDigest && !isMeetings && !isLearning && !isGroups && !isMonitorRoute && !isAnalytics && !isBackups && !isAgentAccounts && !isIntegrations
   const isInChatSession = isChat && (
     (location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/chat/group-')) ||
     Boolean(activeSessionKey)
@@ -372,7 +377,7 @@ export function Sidebar({
   const accountTarget = sessionAccountTarget(activeSession, activeAgent)
   const connectionLabel = connection === 'connected' ? '已连接' : connection === 'connecting' ? '连接中' : connection === 'error' ? '连接异常' : '离线'
 
-  const hasSecondaryPanel = !(isBots || isInbox || isDigest || isMeetings || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
+  const hasSecondaryPanel = !(isBots || isInbox || isDigest || isMeetings || isLearning || isAgentAccounts || isBackups || isAnalytics || isIntegrations)
   const isCollapsedDesktop = Boolean(!onNavigate && hasSecondaryPanel && panelCollapsed)
   const isPeekingDesktop = Boolean(isCollapsedDesktop && isPeeking)
 
@@ -407,6 +412,7 @@ export function Sidebar({
                 (id === 'inbox' && isInbox) ||
                 (id === 'digest' && isDigest) ||
                 (id === 'meetings' && isMeetings) ||
+                (id === 'learning' && isLearning) ||
                 (id === 'groups' && isGroups) ||
                 (id === 'monitor' && isMonitorRoute) ||
                 (id === 'analytics' && isAnalytics) ||

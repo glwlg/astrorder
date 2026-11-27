@@ -245,6 +245,7 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 	var groupService *botgroups.Service
 	var audioService *audio.Service
 	var notificationService *notifications.Service
+	var capabilityService *capabilities.Service
 	var remoteExecutable connections.RemoteExecutableResolver
 	var browserHandler, modelHandler, connectionHandler, settingsHandler, capabilitiesHandler, toolchainHandler, notificationHandler http.Handler
 	if st != nil && client != nil {
@@ -305,18 +306,22 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 		if err != nil {
 			return fmt.Errorf("resolve kernel controller: %w", err)
 		}
+		hookResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, HelperAssetsDir: bundledHelperAssetsDir()})
+		envResolver := &envtarget.Resolver{Store: st, Remote: hookResolver}
+		capabilityService = capabilities.New(envResolver)
+		capabilityService.Agents = st
+		capabilityService.Logger = logger
+		capabilityService.CLITransport = capabilities.TransportProvisioner(listenPort, os.Getenv("ASTRORDER_PUBLIC_URL"), cfg.BrowserSecret)
+		capabilitiesHandler = capabilities.NewHandler(capabilityService, authorizer)
 		settingsHandler = settingsapi.NewHandler(settingsapi.Options{
 			Store: st, Authorizer: authorizer, Port: portNumber, Origins: cfg.AllowedOrigins,
 			PublicURL: os.Getenv("ASTRORDER_PUBLIC_URL"), BrowserSecret: cfg.BrowserSecret,
 			Kernels:             kernelcontrol.New(cfg.SourcePath, executable),
 			AgentInstalledProbe: toolchain.LocalInstalledProbe(serverContext),
+			OnPluginsChanged: func() {
+				capabilityService.TriggerAutoSync(serverContext)
+			},
 		})
-		hookResolver := targetfs.NewResolver(targetfs.ResolverOptions{Store: st, HelperAssetsDir: bundledHelperAssetsDir()})
-		envResolver := &envtarget.Resolver{Store: st, Remote: hookResolver}
-		capabilityService := capabilities.New(envResolver)
-		capabilityService.Agents = st
-		capabilityService.CLITransport = capabilities.TransportProvisioner(listenPort, os.Getenv("ASTRORDER_PUBLIC_URL"), cfg.BrowserSecret)
-		capabilitiesHandler = capabilities.NewHandler(capabilityService, authorizer)
 		stateDir := filepath.Dir(cfg.DatabasePath)
 		if daemonCfg := strings.TrimSpace(os.Getenv("ASTRORDER_SESSION_DAEMON_CONFIG")); daemonCfg != "" {
 			stateDir = filepath.Dir(daemonCfg)
@@ -356,10 +361,18 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 	if eventProjection != nil {
 		nativeSessions = eventProjection
 	}
+	hostAddr := listener.Addr().String()
+	if h, p, splitErr := net.SplitHostPort(hostAddr); splitErr == nil {
+		if h == "" || h == "0.0.0.0" || h == "::" {
+			h = "127.0.0.1"
+		}
+		hostAddr = net.JoinHostPort(h, p)
+	}
 	handler, err := httpapi.NewHandlerChecked(httpapi.Options{
 		Context:          serverContext,
 		NativeSessions:   nativeSessions,
 		Config:           cfg,
+		HostBaseURL:      "http://" + hostAddr,
 		Store:            st,
 		DaemonClient:     client,
 		RemoteExecutable: remoteExecutable,
@@ -397,6 +410,9 @@ func runServer(ctx context.Context, cfg config.Config, ready io.Writer, logger *
 	go func() {
 		serveResult <- server.Serve(listener)
 	}()
+	if capabilityService != nil {
+		capabilityService.StartAutoSync(serverContext)
+	}
 
 	if err := json.NewEncoder(ready).Encode(readyMessage{
 		Ready: true, Address: listener.Addr().String(), PID: os.Getpid(),

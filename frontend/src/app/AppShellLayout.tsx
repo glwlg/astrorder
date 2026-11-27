@@ -108,6 +108,7 @@ export function AppShellLayout({ chatReturnPath }: { chatReturnPath: string }) {
     location.pathname.startsWith('/inbox') ||
     location.pathname.startsWith('/digest') ||
     location.pathname.startsWith('/meetings') ||
+    location.pathname.startsWith('/learning') ||
     location.pathname.startsWith('/agent-accounts') ||
     location.pathname.startsWith('/backups') ||
     location.pathname.startsWith('/analytics') ||

@@ -121,7 +121,7 @@ func TestCallerScopeRejectsExplicitBadValuesBeforeHTTP(t *testing.T) {
 
 // Without a resolvable caller these capabilities must fail before any HTTP call.
 func TestCallerScopeRequiresCallerBeforeHTTP(t *testing.T) {
-	for _, capability := range []string{"swarm.lock.acquire", "swarm.lock.release", "swarm.sos.escalate", "plugins.open", "plugins.close", "schedules.list", "schedules.create", "schedules.update", "schedules.delete", "gitlab.pipelines", "gitlab.pipeline", "gitlab.job_log"} {
+	for _, capability := range []string{"swarm.lock.acquire", "swarm.lock.release", "swarm.sos.escalate", "plugins.open", "plugins.close", "schedules.list", "schedules.create", "schedules.update", "schedules.delete", "gitlab.pipelines", "gitlab.pipeline", "gitlab.job_log", "ext.gitlab-ci-viewer.pipelines", "ext.com.acme.hello.echo"} {
 		t.Run(capability, func(t *testing.T) {
 			var requests atomic.Int32
 			server := newTestServer(t, &requests, nil)

@@ -50,6 +50,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
       'agentAccounts',
       'digest',
       'meetings',
+      'learning',
     ])
   })
 
@@ -73,7 +74,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
         (el) => el.getAttribute('aria-label'),
       )
 
-    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '待办', '矩阵', '群聊', '统计', '备份', '账号', '复盘', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '待办', '矩阵', '群聊', '统计', '备份', '账号', '复盘', '会议', '成长'])
 
     const digestLink = screen.getByRole('link', { name: '复盘' })
     const inboxLink = screen.getByRole('link', { name: '待办' })
@@ -95,7 +96,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
     fireEvent.drop(inboxLink, { dataTransfer: dt, clientY: 110 })
     fireEvent.dragEnd(digestLink)
 
-    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议', '成长'])
     expect(JSON.parse(localStorage.getItem('astrorder:sidebar-primary-nav-order') || '[]')).toEqual([
       'chat',
       'bots',
@@ -107,6 +108,7 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
       'backups',
       'agentAccounts',
       'meetings',
+      'learning',
     ])
 
     // Dragging a session onto 矩阵 still adds it to monitor without changing primary nav order
@@ -117,6 +119,6 @@ describe('Sidebar primary nav core ordering & drag reorder', () => {
     fireEvent.dragOver(monitorLink, { dataTransfer: sessionDt })
     fireEvent.drop(monitorLink, { dataTransfer: sessionDt })
     expect(JSON.parse(localStorage.getItem('astrorder:monitor-sessions') || '[]')).toEqual(['codex::s-1'])
-    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议'])
+    expect(getPrimaryLabels()).toEqual(['会话', 'Bot', '复盘', '待办', '矩阵', '群聊', '统计', '备份', '账号', '会议', '成长'])
   })
 })

@@ -266,34 +266,43 @@ func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// CreateBot registers a Bot and optionally initializes its workspace AGENTS.md and SKILL.md.
+func (s *Service) CreateBot(ctx context.Context, req CreateBotRequest) (*BotSummary, []string, error) {
+	bot, err := s.registry.Create(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	warnings := []string{}
+	if req.WriteAgentsMD && strings.TrimSpace(req.AgentsMD) != "" {
+		if _, writeErr := s.WriteAgentsMD(ctx, *bot, req.AgentsMD); writeErr != nil {
+			warnings = append(warnings, "写入 AGENTS.md 失败: "+writeErr.Error())
+		}
+	}
+	if req.WriteSkill && strings.TrimSpace(req.SkillMD) != "" {
+		slug := nonEmpty(NormalizeSlug(req.SkillSlug), bot.Slug+"-workflow")
+		if _, writeErr := s.WriteSkill(ctx, *bot, slug, req.SkillMD); writeErr != nil {
+			warnings = append(warnings, "写入 Skill 失败: "+writeErr.Error())
+		}
+	}
+
+	summary, sumErr := s.GetSummary(ctx, bot.ID)
+	if sumErr != nil {
+		fallback := BotSummary{BotProfile: *bot, Skills: []BotSkillSummary{}}
+		return &fallback, warnings, nil
+	}
+	return summary, warnings, nil
+}
+
 func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
 	var req CreateBotRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "无效的 JSON 请求体")
 		return
 	}
-	bot, err := s.registry.Create(r.Context(), req)
+	summary, warnings, err := s.CreateBot(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, err)
-		return
-	}
-
-	warnings := []string{}
-	if req.WriteAgentsMD && strings.TrimSpace(req.AgentsMD) != "" {
-		if _, writeErr := s.WriteAgentsMD(r.Context(), *bot, req.AgentsMD); writeErr != nil {
-			warnings = append(warnings, "写入 AGENTS.md 失败: "+writeErr.Error())
-		}
-	}
-	if req.WriteSkill && strings.TrimSpace(req.SkillMD) != "" {
-		slug := nonEmpty(NormalizeSlug(req.SkillSlug), bot.Slug+"-workflow")
-		if _, writeErr := s.WriteSkill(r.Context(), *bot, slug, req.SkillMD); writeErr != nil {
-			warnings = append(warnings, "写入 Skill 失败: "+writeErr.Error())
-		}
-	}
-
-	summary, err := s.GetSummary(r.Context(), bot.ID)
-	if err != nil {
-		writeJSON(w, http.StatusCreated, map[string]any{"bot": bot, "warnings": warnings})
 		return
 	}
 	resp := map[string]any{"bot": summary}
