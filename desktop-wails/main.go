@@ -53,8 +53,10 @@ func main() {
 	if *check {
 		_ = json.NewEncoder(os.Stdout).Encode(ShellInfo{
 			Framework:         desktopFramework,
+			Packaged:          cfg.Packaged,
 			BackendConfigured: cfg.Backend != nil,
 			StateDir:          cfg.StateDir,
+			RootDir:           cfg.RootDir,
 			KernelManagement:  ctlErr == nil,
 		})
 		return

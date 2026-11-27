@@ -47,8 +47,9 @@ $Control = Join-Path $ServerRoot 'bin\astrorderctl.exe'
 各组件独立发布边界：
 
 - **Web / PWA 资源**：构建浏览器版 `frontend/dist/` 后，通过 `astrorderctl sync --dev-root <source> --installed-root <server>` 同步（或在 `frontend/` 执行 `npm run build:sync -- --installed-root "$ServerRoot"`）。同步命令会在拷贝前与落盘替换前两次校验 `index.html`、所有被引用的 `assets/*` 及 `sw-astrorder.js`，避免半成品覆盖线上静态目录；也可通过 `astrorderctl sync --verify-only --installed-root "$ServerRoot"` 或 `node scripts/verify-frontend-dist.mjs --mode browser "$ServerRoot/frontend/dist"` 单独核验。
-- **桌面客户端**：仅替换并重启 `Astrorder.exe`，核对 SHA-256 与 `--check`，不影响大内核与小内核进程。
-- **Go 大内核**：可独立替换并重启 `astrorder-app.exe`，发布时同步核对 `helpers/linux-amd64/astrorder-helper` 与 `helpers/linux-arm64/astrorder-helper`；重启后确认健康检查正常且小内核 PID 未变化。
+- **桌面客户端**：使用 `node scripts/desktop-wails.mjs build-packaged` 构建正式版 `desktop-wails/bin/Astrorder.exe`（注入 `-X main.defaultPackaged=true`），并通过 `node scripts/deploy-local.mjs --desktop` 完成替换前 `--check` 门禁、替换重启与全链路验收；严禁将开发版 `astrorder-desktop-dev.exe` 覆盖至安装目录。
+- **Go 大内核**：可独立替换并重启 `astrorder-app.exe`（通过 `node scripts/deploy-local.mjs --app` 或 `astrorderctl service app stop/start`），发布时同步核对 `helpers/linux-amd64/astrorder-helper` 与 `helpers/linux-arm64/astrorder-helper`；重启后确认健康检查正常且小内核 PID 未变化。
+- **本地发布验收门禁**：随时可执行 `node scripts/verify-local-release.mjs` 一次性校验 Web Dist、`Astrorder.exe --check`（`packaged: true` 与生产 `stateDir`）、桌面主窗口状态、大内核健康态及小内核未受扰动。
 - **Go 小内核**：将验证后的新版本暂存为同目录的 `astrorder-sessiond.exe.new`，通过 `astrorderctl service daemon update-check` 核对后，由用户在系统托盘 **「小内核 → 更新小内核」** 手动激活，遵循 [`AGENTS.md`](../AGENTS.md) 约束。
 
 ### 小内核运行环境变量参考

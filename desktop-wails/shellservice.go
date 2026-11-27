@@ -40,8 +40,10 @@ func daemonStopNeedsConfirmation(daemon map[string]any) (bool, string) {
 
 type ShellInfo struct {
 	Framework         string `json:"framework"`
+	Packaged          bool   `json:"packaged"`
 	BackendConfigured bool   `json:"backendConfigured"`
 	StateDir          string `json:"stateDir"`
+	RootDir           string `json:"rootDir,omitempty"`
 	KernelManagement  bool   `json:"kernelManagement"`
 }
 
@@ -68,8 +70,10 @@ type ShellService struct {
 func (s *ShellService) Info() ShellInfo {
 	return ShellInfo{
 		Framework:         desktopFramework,
+		Packaged:          s.config.Packaged,
 		BackendConfigured: s.config.Backend != nil,
 		StateDir:          s.config.StateDir,
+		RootDir:           s.config.RootDir,
 		KernelManagement:  s.ctl != nil,
 	}
 }

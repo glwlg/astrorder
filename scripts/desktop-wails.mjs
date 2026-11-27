@@ -49,6 +49,7 @@ if (windows) {
 }
 mkdirSync(path.join(desktop, 'bin'), { recursive: true })
 const output = path.join(desktop, 'bin', 'astrorder-desktop-dev.exe')
+const packagedOutput = path.join(desktop, 'bin', 'Astrorder.exe')
 switch (action) {
   case 'install':
     run('go', ['mod', 'download'], desktop)
@@ -65,6 +66,16 @@ switch (action) {
     if (windows) run(output, ['--check'], desktop)
     else console.log('Windows desktop compiled; run --check on Windows.')
     break
+  case 'build-packaged':
+    run(wails, ['generate', 'syso', '-arch', 'amd64', '-icon', 'assets/app.ico', '-manifest', 'assets/windows.manifest', '-out', 'rsrc_windows_amd64.syso'], desktop)
+    bindings()
+    frontend()
+    withWailsImeFix(fix => {
+      run('go', ['build', '-modfile', fix.modfile, '-trimpath', '-tags', 'production', '-ldflags', '-H=windowsgui -s -w -X main.defaultPackaged=true', '-o', packagedOutput, '.'], desktop, { env: fix.env })
+    })
+    if (windows) run(packagedOutput, ['--check'], desktop)
+    else console.log('Packaged Windows desktop compiled to desktop-wails/bin/Astrorder.exe; verify --check on Windows.')
+    break
   case 'check':
     run('go', ['version'], desktop)
     run(wails, ['version'], desktop)
@@ -78,7 +89,7 @@ switch (action) {
       }
       run('go', ['vet', '-modfile', fix.modfile, './...'], desktop, { env: fix.env })
     })
-    run(node, ['--test', 'assets/desktop-files.test.mjs', '../scripts/wails-ime-fix.test.mjs', '../scripts/verify-frontend-dist.test.mjs'], desktop)
+    run(node, ['--test', 'assets/desktop-files.test.mjs', '../scripts/wails-ime-fix.test.mjs', '../scripts/verify-frontend-dist.test.mjs', '../scripts/verify-local-release.test.mjs'], desktop)
     runNpm(['run', 'lint'])
     break
   case 'test': runNpm(['test']); break
@@ -98,5 +109,5 @@ switch (action) {
     console.log(JSON.stringify(data))
     break
   }
-  default: throw new Error('Usage: node scripts/desktop-wails.mjs install|bindings|build|check|test|run|smoke')
+  default: throw new Error('Usage: node scripts/desktop-wails.mjs install|bindings|build|build-packaged|check|test|run|smoke')
 }
