@@ -15,9 +15,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"astrorder.dev/app-server/internal/store"
 )
+
+type cachedPluginSignature struct {
+	fingerprint string
+	sigKey      string
+	verified    bool
+}
 
 const (
 	prefAppProfileKey           = "app-profile"
@@ -169,20 +176,19 @@ func effectiveRequiredPermissions(source string, manifest Manifest, sigVerified 
 	return perms
 }
 
-// checkFrontendESMPolicy enforces the dual-track trust boundary for same-page ESM plugins:
+// checkFrontendESMPolicy enforces the dual-track trust boundary for same-page ESM plugins
+// and returns whether the plugin directory passed live Ed25519 signature verification:
 //   - source == "official" (read-only OfficialPluginsDir): allowed in all profiles.
 //   - source == "external" with valid live Ed25519 directory signature: allowed in all profiles.
 //   - unsigned external ESM plugin: strictly blocked in office/normal mode; in developer mode
 //     allowed only when security policy permits it (and explicit permission grant is enforced separately).
-func (m *Manager) checkFrontendESMPolicy(ctx context.Context, source string, manifest Manifest, pluginDir string) error {
+func (m *Manager) checkFrontendESMPolicy(ctx context.Context, source string, manifest Manifest, pluginDir string) (bool, error) {
 	if !IsFrontendESM(manifest) {
-		return nil
+		return false, nil
 	}
-	if source == SourceOfficial {
-		return nil
-	}
-	if verifyPluginSignature(manifest, pluginDir, m.trustedPublicKeys) {
-		return nil
+	sigVerified := m.verifyPluginSignatureCached(manifest, pluginDir)
+	if source == SourceOfficial || sigVerified {
+		return sigVerified, nil
 	}
 	allowed, reason := m.AllowUnsignedESMPlugins(ctx)
 	if !allowed {
@@ -192,9 +198,9 @@ func (m *Manager) checkFrontendESMPolicy(ctx context.Context, source string, man
 			"app_profile", m.EffectiveAppProfile(ctx),
 			"reason", reason,
 		)
-		return fmt.Errorf("%w: plugin %q: %s", ErrPermissionDenied, manifest.ID, reason)
+		return false, fmt.Errorf("%w: plugin %q: %s", ErrPermissionDenied, manifest.ID, reason)
 	}
-	return nil
+	return false, nil
 }
 
 // checkExternalProcessPolicy blocks installing or running unsigned external process
@@ -204,7 +210,7 @@ func (m *Manager) checkExternalProcessPolicy(ctx context.Context, manifest Manif
 	if manifest.Backend.Type != BackendTypeProcess {
 		return nil
 	}
-	if verifyPluginSignature(manifest, pluginDir, m.trustedPublicKeys) {
+	if m.verifyPluginSignatureCached(manifest, pluginDir) {
 		return nil
 	}
 	allowed, reason := m.AllowUnsignedProcessPlugins(ctx)
@@ -218,6 +224,90 @@ func (m *Manager) checkExternalProcessPolicy(ctx context.Context, manifest Manif
 		return fmt.Errorf("%w: plugin %q: %s", ErrPermissionDenied, manifest.ID, reason)
 	}
 	return nil
+}
+
+// verifyPluginSignatureCached caches Ed25519 directory verification keyed by a
+// stat-only directory fingerprint (relative path, size, mtime, mode). Files
+// modified within the last 2 seconds always bypass the cache (racy-clean guard)
+// so live tampering is detected immediately without re-hashing static files on
+// every ESM asset request.
+func (m *Manager) verifyPluginSignatureCached(manifest Manifest, pluginDir string) bool {
+	if manifest.Signature == nil || len(m.trustedPublicKeys) == 0 || strings.TrimSpace(pluginDir) == "" {
+		return false
+	}
+	fp, racy, fpErr := computePluginStatFingerprint(pluginDir)
+	sigKey := strings.TrimSpace(manifest.Signature.Algorithm) + ":" +
+		strings.TrimSpace(manifest.Signature.KeyID) + ":" +
+		strings.TrimSpace(manifest.Signature.Value)
+	cacheKey := filepath.Clean(pluginDir)
+
+	if fpErr == nil && !racy {
+		m.sigCacheMu.RLock()
+		if entry, ok := m.sigCache[cacheKey]; ok && entry.fingerprint == fp && entry.sigKey == sigKey {
+			m.sigCacheMu.RUnlock()
+			return entry.verified
+		}
+		m.sigCacheMu.RUnlock()
+	}
+
+	verified := verifyPluginSignature(manifest, pluginDir, m.trustedPublicKeys)
+	if fpErr == nil && !racy {
+		m.sigCacheMu.Lock()
+		if m.sigCache == nil {
+			m.sigCache = map[string]cachedPluginSignature{}
+		}
+		m.sigCache[cacheKey] = cachedPluginSignature{
+			fingerprint: fp,
+			sigKey:      sigKey,
+			verified:    verified,
+		}
+		m.sigCacheMu.Unlock()
+	}
+	return verified
+}
+
+func computePluginStatFingerprint(pluginDir string) (string, bool, error) {
+	absRoot, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return "", false, err
+	}
+	now := time.Now()
+	racy := false
+	entries := make([]string, 0, 16)
+	err = filepath.WalkDir(absRoot, func(curr string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlinks are not allowed in signed plugin directory")
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(absRoot, curr)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if now.Sub(info.ModTime()) < 2*time.Second {
+			racy = true
+		}
+		entries = append(entries, fmt.Sprintf("%s\x00%d\x00%d\x00%o\n",
+			filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano(), info.Mode().Perm()))
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	sort.Strings(entries)
+	h := sha256.New()
+	for _, line := range entries {
+		_, _ = io.WriteString(h, line)
+	}
+	return hex.EncodeToString(h.Sum(nil)), racy, nil
 }
 
 // SignPluginDir computes a deterministic Ed25519 signature over plugin.json (excluding

@@ -1648,6 +1648,12 @@ func recoverPanics(logger *slog.Logger, next http.Handler) http.Handler {
 		recorder := &recoveryWriter{ResponseWriter: response}
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				// net/http's ReverseProxy intentionally panics with http.ErrAbortHandler
+				// when a client disconnects mid-stream (e.g. SSE). Re-panic so http.Server
+				// handles it silently instead of logging a false-positive ERROR panic.
+				if recovered == http.ErrAbortHandler {
+					panic(http.ErrAbortHandler)
+				}
 				logger.Error("unhandled http panic", "method", request.Method, "path", request.URL.Path)
 				if recorder.wrote {
 					return

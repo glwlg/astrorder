@@ -1,10 +1,18 @@
+import { Suspense, lazy } from 'react'
 import { defineAstrorderPlugin, type AstrorderPluginContext, type ViewerContext } from '@astrorder/sdk'
 import { BoxIcon } from './icons'
-import { ThreeViewer } from './ThreeViewer'
 import './threeViewer.css'
 
+const LazyThreeViewer = lazy(() =>
+  import('./ThreeViewer').then((mod) => ({ default: mod.ThreeViewer })),
+)
+
 export function activate(ctx: AstrorderPluginContext): void {
-  const BoundThreeViewer = (props: ViewerContext) => <ThreeViewer {...props} ctx={ctx} />
+  const BoundThreeViewer = (props: ViewerContext) => (
+    <Suspense fallback={<div className="three-viewer-loading">正在加载 3D 渲染引擎…</div>}>
+      <LazyThreeViewer {...props} ctx={ctx} />
+    </Suspense>
+  )
 
   ctx.registerViewer({
     id: 'three-viewer',

@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import {
   defineAstrorderPlugin,
   type AstrorderPluginContext,
@@ -13,14 +14,21 @@ import {
   openSqlFileInDbx,
   openSqlSnippetInDbx,
 } from './dbxStore'
-import { DbxViewer } from './DbxViewer'
 import { DatabaseIcon } from './icons'
 import './dbxViewer.css'
+
+const LazyDbxViewer = lazy(() =>
+  import('./DbxViewer').then((mod) => ({ default: mod.DbxViewer })),
+)
 
 const DATABASE_TOOL_SLOT = 'database-tool'
 
 export function activate(ctx: AstrorderPluginContext): void {
-  const BoundDbxViewer = (props: ViewerContext) => <DbxViewer {...props} ctx={ctx} />
+  const BoundDbxViewer = (props: ViewerContext) => (
+    <Suspense fallback={<div style={{ padding: 16, fontSize: 13, opacity: 0.7 }}>正在加载数据库工作台…</div>}>
+      <LazyDbxViewer {...props} ctx={ctx} />
+    </Suspense>
+  )
 
   ctx.registerViewer({
     id: DBX_PLUGIN_ID,

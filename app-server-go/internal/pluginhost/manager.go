@@ -52,6 +52,8 @@ type Manager struct {
 	officialPluginsDir string
 	legacyPluginsDir   string
 	trustedPublicKeys  map[string]ed25519.PublicKey
+	sigCacheMu         sync.RWMutex
+	sigCache           map[string]cachedPluginSignature
 	appProfileOverride string
 	renameFn           func(oldPath, newPath string) error
 	logger             *slog.Logger
@@ -89,6 +91,7 @@ func NewManager(opts Options) *Manager {
 		officialPluginsDir: strings.TrimSpace(opts.OfficialPluginsDir),
 		legacyPluginsDir:   strings.TrimSpace(opts.LegacyPluginsDir),
 		trustedPublicKeys:  trusted,
+		sigCache:           map[string]cachedPluginSignature{},
 		appProfileOverride: strings.TrimSpace(opts.AppProfileOverride),
 		logger:             logger,
 		onChange:           opts.OnChange,
@@ -413,11 +416,16 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 			return view, nil, policyErr
 		}
 	}
+	var sigVerified bool
+	var sigChecked bool
 	if IsFrontendESM(plug.manifest) {
-		if policyErr := m.checkFrontendESMPolicy(ctx, plug.source, plug.manifest, plug.dir); policyErr != nil {
+		var policyErr error
+		sigVerified, policyErr = m.checkFrontendESMPolicy(ctx, plug.source, plug.manifest, plug.dir)
+		if policyErr != nil {
 			view, _ := m.GetPlugin(ctx, id)
 			return view, nil, policyErr
 		}
+		sigChecked = true
 	}
 
 	currentGranted, err := m.storage.GetGrantedPermissions(ctx, id)
@@ -432,7 +440,9 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool, grant
 		currentGranted = merged
 	}
 
-	sigVerified := verifyPluginSignature(plug.manifest, plug.dir, m.trustedPublicKeys)
+	if !sigChecked {
+		sigVerified = m.verifyPluginSignatureCached(plug.manifest, plug.dir)
+	}
 	reqPerms := effectiveRequiredPermissions(plug.source, plug.manifest, sigVerified)
 	granted, pending := computePermissionState(reqPerms, currentGranted)
 	if len(pending) > 0 {

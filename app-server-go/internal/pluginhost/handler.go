@@ -261,12 +261,12 @@ func (m *Manager) servePluginESM(w http.ResponseWriter, r *http.Request, pluginI
 			return
 		}
 
-		if policyErr := m.checkFrontendESMPolicy(r.Context(), diskPlug.source, diskPlug.manifest, diskPlug.dir); policyErr != nil {
+		sigVerified, policyErr := m.checkFrontendESMPolicy(r.Context(), diskPlug.source, diskPlug.manifest, diskPlug.dir)
+		if policyErr != nil {
 			writePluginError(w, policyErr)
 			return
 		}
 
-		sigVerified := verifyPluginSignature(diskPlug.manifest, diskPlug.dir, m.trustedPublicKeys)
 		reqPerms := effectiveRequiredPermissions(diskPlug.source, diskPlug.manifest, sigVerified)
 		granted, err := m.storage.GetGrantedPermissions(r.Context(), pluginID)
 		if err != nil {
@@ -331,7 +331,8 @@ func (m *Manager) servePluginESM(w http.ResponseWriter, r *http.Request, pluginI
 	w.Header().Set("Content-Type", explicitESMContentType(filepath.Ext(realTarget)))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if v := strings.TrimSpace(r.URL.Query().Get("v")); v != "" && plug.contentDigest != "" && v == plug.contentDigest {
+	if v := strings.TrimSpace(r.URL.Query().Get("v")); (v != "" && plug.contentDigest != "" && v == plug.contentDigest) ||
+		strings.HasPrefix(cleanRel, "ui/chunks/") || strings.HasPrefix(cleanRel, "ui/assets/") {
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-store")

@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import {
   defineAstrorderPlugin,
   type AstrorderPluginContext,
@@ -6,22 +7,30 @@ import {
   type ViewerContext,
 } from '@astrorder/sdk'
 import { createGitLabApi } from './api'
-import { GitLabCIViewer } from './GitLabCIViewer'
 import {
   GITLAB_CI_PANEL_ID,
   GITLAB_CI_PLUGIN_ID,
   GitLabComposerStatusPill,
   openGitLabCIPanel,
 } from './gitlabExtension'
-import { GitLabSettingsSection } from './GitLabSettingsSection'
 import { GitlabIcon } from './icons'
 import './gitlabci.css'
+
+const LazyGitLabCIViewer = lazy(() =>
+  import('./GitLabCIViewer').then((mod) => ({ default: mod.GitLabCIViewer })),
+)
+
+const LazyGitLabSettingsSection = lazy(() =>
+  import('./GitLabSettingsSection').then((mod) => ({ default: mod.GitLabSettingsSection })),
+)
 
 export function activate(ctx: AstrorderPluginContext): void {
   const api = createGitLabApi(ctx.api.fetch)
 
   const BoundGitLabCIViewer = (props: ViewerContext) => (
-    <GitLabCIViewer {...props} ctx={ctx} api={api} />
+    <Suspense fallback={<div style={{ padding: 16, fontSize: 13, opacity: 0.7 }}>正在加载 GitLab CI 视图…</div>}>
+      <LazyGitLabCIViewer {...props} ctx={ctx} api={api} />
+    </Suspense>
   )
 
   const BoundGitLabCIPanelAdapter = ({
@@ -31,19 +40,23 @@ export function activate(ctx: AstrorderPluginContext): void {
     surface,
     onClose,
   }: PluginPanelContext) => (
-    <GitLabCIViewer
-      ctx={ctx}
-      api={api}
-      artifact={artifact}
-      session={session}
-      isActive={isActive}
-      surface={surface}
-      onClose={onClose}
-    />
+    <Suspense fallback={<div style={{ padding: 16, fontSize: 13, opacity: 0.7 }}>正在加载 GitLab CI 视图…</div>}>
+      <LazyGitLabCIViewer
+        ctx={ctx}
+        api={api}
+        artifact={artifact}
+        session={session}
+        isActive={isActive}
+        surface={surface}
+        onClose={onClose}
+      />
+    </Suspense>
   )
 
   const BoundGitLabSettingsSection = (props: { embedded?: boolean; onClose?: () => void }) => (
-    <GitLabSettingsSection {...props} ctx={ctx} api={api} />
+    <Suspense fallback={<div style={{ padding: 12, fontSize: 13, opacity: 0.7 }}>正在加载 GitLab 配置…</div>}>
+      <LazyGitLabSettingsSection {...props} ctx={ctx} api={api} />
+    </Suspense>
   )
 
   const BoundStatusBarPill = (props: StatusBarSlotContext) => (
