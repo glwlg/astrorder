@@ -1864,14 +1864,12 @@ a { color: inherit; }
   min-width: 380px;
   max-width: 100%;
 }
+/* Avoid content-visibility: auto on dynamic text/card containers: Chromium 158+ Blink
+   AXBlockFlowData::ComputeNeighborOnLine hits CHECK_EQ(it->Type(), FragmentItem::kGeneratedText)
+   (STATUS_BREAKPOINT 0x80000003) when Windows UIA / WebView2 accessibility (kInlineTextBoxes)
+   serializes asynchronously mutated text inside display-locked subtrees. */
 .monitor-card-wrapper.is-below-fold {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 520px;
-}
-@supports not (content-visibility: auto) {
-  .monitor-card-wrapper.is-below-fold {
-    contain: layout style paint;
-  }
+  contain: layout style paint;
 }
 .monitor-card-wrapper.is-drop-target {
   outline: 2px solid var(--astr-indigo);
@@ -2224,16 +2222,11 @@ a { color: inherit; }
   flex-direction: column;
   width: 100%;
 }
+/* Use containment without content-visibility: auto display locking (prevents Chromium 158+
+   Blink AXBlockFlowData renderer crashes under WebView2/Windows UIA accessibility). */
 .monitor-message-row.is-deferred-row,
 .monitor-activity-pack-row.is-deferred-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 72px;
-}
-@supports not (content-visibility: auto) {
-  .monitor-message-row.is-deferred-row,
-  .monitor-activity-pack-row.is-deferred-row {
-    contain: layout style paint;
-  }
+  contain: layout style paint;
 }
 .monitor-message-row.message-user {
   align-items: flex-end;
@@ -2994,13 +2987,12 @@ a { color: inherit; }
   }
 }
 
-/* Defer layout/paint of older off-screen transcript turns (never applied to latest viewport turns) */
-.transcript-message-entry.is-deferred-turn {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 160px;
-}
-
+/* Avoid content-visibility: auto on transcript turns: Chromium 158+ Blink
+   AXBlockFlowData::ComputeNeighborOnLine crashes the WebView2 renderer (STATUS_BREAKPOINT
+   0x80000003) when async markdown auto-linking mutates display-locked off-screen turns while
+   Windows UIA accessibility (kInlineTextBoxes) is active. Transcript already caps initial DOM
+   with INITIAL_VISIBLE_ROWS; use style containment without clipping popovers or display locking. */
+.transcript-message-entry.is-deferred-turn,
 .activity-pack.is-deferred-turn {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 56px;
+  contain: style;
 }

@@ -622,10 +622,9 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Defer layout/paint strictly for older off-screen messages above the initial fold */
+  /* Avoid content-visibility: auto display locking on message streams (Chromium 158+ AXBlockFlowData crash). */
   .m-transcript > :is(.m-msg, .m-think-pack):nth-last-child(n + 17) {
-    content-visibility: auto;
-    contain-intrinsic-size: auto none auto 110px;
+    contain: style;
   }
 
   .m-msg {
@@ -2867,8 +2866,7 @@ body:has(.mobile-workspace) .mantine-Notification-root {
 }
 
 .mobile-workspace .bot-group-chat-page.is-mobile .group-chat-feed > :is(.group-chat-message, .group-chat-notice):nth-last-child(n + 7) {
-  content-visibility: auto;
-  contain-intrinsic-size: auto none auto 110px;
+  contain: style;
 }
 
 .mobile-workspace .bot-group-chat-page.is-mobile .group-chat-message-bubble {

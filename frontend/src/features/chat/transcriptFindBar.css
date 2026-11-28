@@ -142,7 +142,6 @@
 /* Fallback / visual accent on the message containing the active search match */
 .transcript-message-entry.is-find-active,
 .activity-pack.is-find-active {
-  content-visibility: visible !important;
   border-radius: 12px;
   box-shadow: 0 0 0 2px color-mix(in oklab, #f97316 45%, transparent);
 }

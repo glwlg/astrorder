@@ -139,6 +139,11 @@ export function MobileVideoLightbox({
             preload="metadata"
             width={meta?.width || 1280}
             height={meta?.height || 720}
+            style={
+              meta && meta.width > 0 && meta.height > 0
+                ? { aspectRatio: `${meta.width} / ${meta.height}` }
+                : { aspectRatio: '16 / 9' }
+            }
             aria-label={video.name}
             onLoadedMetadata={(event) => {
               const el = event.currentTarget
