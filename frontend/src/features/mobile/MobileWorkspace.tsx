@@ -92,6 +92,11 @@ import {
   WORKFLOW_GIT_WORKTREE_PLUGIN_ID,
   WORKSPACE_AGENT_ACCOUNTS_PLUGIN_ID,
   WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID,
+  WORKSPACE_BACKUPS_PLUGIN_ID,
+  WORKSPACE_DIGEST_PLUGIN_ID,
+  WORKSPACE_GROUPS_PLUGIN_ID,
+  WORKSPACE_LEARNING_RADAR_PLUGIN_ID,
+  WORKSPACE_MEETINGS_PLUGIN_ID,
 } from '../plugins/builtinPlugins'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { registerBuiltinWorkspacePages } from '../extensions/builtinWorkspacePages'
@@ -109,7 +114,6 @@ import { interpretGatewayError } from '../chat/ChatComposer'
 import { SessionComposerGate } from '../chat/SessionComposerGate'
 import { SessionConnectionNotice } from '../chat/SessionConnectionNotice'
 import { InlineNotice } from '../../components/InlineNotice'
-import { GroupsPage } from '../chat/GroupsPage'
 import { GoalManager } from '../chat/GoalManager'
 import { SessionSchedulesView } from '../chat/SessionSchedulesView'
 import { useBackgroundProcesses } from '../chat/useBackgroundProcesses'
@@ -362,12 +366,12 @@ export function MobileWorkspace() {
   const digestPage = activeExtensionPages.find((page) => page.id === 'digest')
   const extensionsHydrated = useExtensionStore((s) => s.hydrated)
   const extensionsError = useExtensionStore((s) => s.error)
-  const routeExtPluginItem = useExtensionStore((s) =>
-    routeExtPluginId ? s.items.find((item) => item.id === routeExtPluginId) : undefined,
-  )
-  const routeExtEsmState = useExtensionStore((s) =>
-    routeExtPluginId ? s.esmStates[routeExtPluginId] : undefined,
-  )
+  const extensionItems = useExtensionStore((s) => s.items)
+  const extensionEsmStates = useExtensionStore((s) => s.esmStates)
+  const routeExtPluginItem = routeExtPluginId
+    ? extensionItems.find((item) => item.id === routeExtPluginId)
+    : undefined
+  const routeExtEsmState = routeExtPluginId ? extensionEsmStates[routeExtPluginId] : undefined
   const matchedExtPage = useMemo(() => {
     void extensionRegistryVersion
     if (!isExtPageRoute || !routeExtPluginId || !routeExtPageId) return undefined
@@ -400,12 +404,56 @@ export function MobileWorkspace() {
     !matchedExtPage &&
     ((!extensionsHydrated && !extensionsError) || (isRouteExtEligibleEsm && !isRouteExtSettled)),
   )
+  const standardWorkspaceRouteMeta = isGroupRoute
+    ? { pluginId: WORKSPACE_GROUPS_PLUGIN_ID, page: groupsPage, hideInOfficeMode: true, label: '群聊', mode: 'groups' as const }
+    : isLearningRoute
+      ? { pluginId: WORKSPACE_LEARNING_RADAR_PLUGIN_ID, page: learningPage, hideInOfficeMode: true, label: '成长雷达', mode: 'learning' as const }
+      : isAnalyticsRoute
+        ? { pluginId: WORKSPACE_ANALYTICS_GATEWAY_PLUGIN_ID, page: analyticsPage, hideInOfficeMode: true, label: '用量统计', mode: 'analytics' as const }
+        : isBackupsRoute
+          ? { pluginId: WORKSPACE_BACKUPS_PLUGIN_ID, page: backupsPage, hideInOfficeMode: true, label: '备份同步', mode: 'backups' as const }
+          : isMeetingsRoute
+            ? { pluginId: WORKSPACE_MEETINGS_PLUGIN_ID, page: meetingsPage, hideInOfficeMode: false, label: '会议', mode: 'meetings' as const }
+            : isDigestRoute
+              ? { pluginId: WORKSPACE_DIGEST_PLUGIN_ID, page: digestPage, hideInOfficeMode: false, label: '复盘', mode: 'digest' as const }
+              : null
+  const workspaceRoutePluginItem = standardWorkspaceRouteMeta
+    ? extensionItems.find((item) => item.id === standardWorkspaceRouteMeta.pluginId)
+    : undefined
+  const workspaceRouteEsmState = standardWorkspaceRouteMeta
+    ? extensionEsmStates[standardWorkspaceRouteMeta.pluginId]
+    : undefined
+  const isWorkspaceRouteEligibleEsm = Boolean(
+    workspaceRoutePluginItem &&
+    workspaceRoutePluginItem.frontend?.mode === 'esm' &&
+    workspaceRoutePluginItem.enabled &&
+    workspaceRoutePluginItem.permissions_granted !== false &&
+    !(workspaceRoutePluginItem.pending_permissions && workspaceRoutePluginItem.pending_permissions.length > 0) &&
+    enabledPlugins[workspaceRoutePluginItem.id] !== false,
+  )
+  const isWorkspaceRouteSettled =
+    workspaceRouteEsmState?.status === 'loaded' || workspaceRouteEsmState?.status === 'error'
+  const isWorkspacePagePending = Boolean(
+    standardWorkspaceRouteMeta &&
+    !standardWorkspaceRouteMeta.page &&
+    !(isOfficeMode && standardWorkspaceRouteMeta.hideInOfficeMode) &&
+    enabledPlugins[standardWorkspaceRouteMeta.pluginId] !== false &&
+    ((!extensionsHydrated && !extensionsError) ||
+      (isWorkspaceRouteEligibleEsm && !isWorkspaceRouteSettled)),
+  )
+  const STANDARD_MOBILE_PAGE_IDS = useMemo(
+    () => new Set(['groups', 'learning', 'analytics', 'backups', 'meetings', 'digest', 'monitor', 'agentAccounts']),
+    [],
+  )
   const dynamicMobilePages = useMemo(
     () =>
       activeExtensionPages.filter(
-        (page) => page.source !== 'builtin' && page.showInMobileApps !== false,
+        (page) =>
+          page.source !== 'builtin' &&
+          !STANDARD_MOBILE_PAGE_IDS.has(page.id) &&
+          page.showInMobileApps !== false,
       ),
-    [activeExtensionPages],
+    [STANDARD_MOBILE_PAGE_IDS, activeExtensionPages],
   )
   const meetingsPluginEnabled = Boolean(meetingsPage)
   const digestPluginEnabled = Boolean(digestPage)
@@ -440,15 +488,16 @@ export function MobileWorkspace() {
     effectiveSettingsRoute ||
     effectiveIntegrationRoute ||
     effectiveExtPageRoute ||
-    isExtPagePending
+    isExtPagePending ||
+    isWorkspacePagePending
   const isBlockedRoute =
-    (isGroupRoute && !effectiveGroupRoute) ||
-    (isLearningRoute && !effectiveLearningRoute) ||
+    (isGroupRoute && !effectiveGroupRoute && !isWorkspacePagePending) ||
+    (isLearningRoute && !effectiveLearningRoute && !isWorkspacePagePending) ||
     (isBotsRoute && !effectiveBotsRoute) ||
-    (isAnalyticsRoute && !effectiveAnalyticsRoute) ||
-    (isBackupsRoute && !effectiveBackupsRoute) ||
-    (isMeetingsRoute && !effectiveMeetingsRoute) ||
-    (isDigestRoute && !effectiveDigestRoute) ||
+    (isAnalyticsRoute && !effectiveAnalyticsRoute && !isWorkspacePagePending) ||
+    (isBackupsRoute && !effectiveBackupsRoute && !isWorkspacePagePending) ||
+    (isMeetingsRoute && !effectiveMeetingsRoute && !isWorkspacePagePending) ||
+    (isDigestRoute && !effectiveDigestRoute && !isWorkspacePagePending) ||
     (isIntegrationRoute && !effectiveIntegrationRoute) ||
     (isExtPageRoute && !effectiveExtPageRoute && !isExtPagePending) ||
     (isHomeRoute && !effectiveHomeRoute)
@@ -1109,10 +1158,23 @@ export function MobileWorkspace() {
   const send = async (quickText?: string) => {
     if (!selected || readOnly || sending.current) return
     hapticFeedback(12)
-    const body = expandSystemMentions(quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text), `${selected.agent_id}::${selected.id}`)
+    let body = expandSystemMentions(quickText ?? (quote ? quote.split('\n').map(line => `> ${line}`).join('\n') + '\n\n' + text : text), `${selected.agent_id}::${selected.id}`)
     const chosenAttachments = quickText ? [] : draft.attachments.flatMap(item => item.attachment ? [item.attachment] : [])
     const chosenFiles = quickText ? [] : draft.attachments.filter(item => !item.attachment).map(item => item.file)
     if (!body.trim() && !chosenFiles.length && !chosenAttachments.length) return
+    if (extensionRegistry.getActiveMessageInterceptors().length > 0) {
+      const intercepted = await extensionRegistry.runMessageInterceptors({
+        session: selected,
+        text: body,
+        attachments: chosenFiles,
+        metadata: { surface: 'mobile', quickText: Boolean(quickText) },
+      })
+      if (intercepted.cancelled) {
+        notify(intercepted.reason || '发送已被扩展插件拦截', 'yellow')
+        return
+      }
+      body = intercepted.text
+    }
     const commandId = newCommandId()
     setSubmittedCommandId(commandId)
     setSessionError(null)
@@ -1592,7 +1654,13 @@ export function MobileWorkspace() {
                                 ariaLabel: `${routeExtPluginItem?.name || '扩展页面'}，打开会话列表`,
                                 drawerTab: 'sessions' as const,
                               }
-                            : null
+                            : isWorkspacePagePending && standardWorkspaceRouteMeta
+                              ? {
+                                  title: standardWorkspaceRouteMeta.label,
+                                  ariaLabel: `${standardWorkspaceRouteMeta.label}，打开会话列表`,
+                                  drawerTab: standardWorkspaceRouteMeta.mode === 'groups' ? ('groups' as const) : ('sessions' as const),
+                                }
+                              : null
 
   const mobileModeAttr = effectiveGroupRoute
     ? 'groups'
@@ -1618,7 +1686,9 @@ export function MobileWorkspace() {
                         ? 'integration'
                         : effectiveExtPageRoute || isExtPagePending
                           ? 'ext-page'
-                          : 'sessions'
+                          : isWorkspacePagePending && standardWorkspaceRouteMeta
+                            ? standardWorkspaceRouteMeta.mode
+                            : 'sessions'
 
   const appNavItems: Array<{
     id: string
@@ -1780,9 +1850,18 @@ export function MobileWorkspace() {
       </nav>
     )}
     <Suspense fallback={<main className="m-main m-module-page-main"><div className="m-office-page-loading">正在加载页面…</div></main>}>
-    {effectiveGroupRoute ? (
+    {effectiveGroupRoute && groupsPage ? (
       <main className="m-main m-groups-main">
-        <GroupsPage groupId={routeGroupId || undefined} routePrefix="/mobile" surface="mobile" onGroupUpdated={upsertGroupInCache} />
+        <PluginErrorBoundary pluginId={groupsPage.pluginId} pluginName={groupsPage.title}>
+          <groupsPage.component
+            pluginId={groupsPage.pluginId}
+            pageId={groupsPage.id}
+            groupId={routeGroupId || undefined}
+            routePrefix="/mobile"
+            surface="mobile"
+            onGroupUpdated={upsertGroupInCache}
+          />
+        </PluginErrorBoundary>
       </main>
     ) : effectiveInboxRoute ? (
       <main className="m-main m-office-page-main">
@@ -1790,7 +1869,7 @@ export function MobileWorkspace() {
           <ActionInboxView onOpenSession={openSessionById} />
         </div>
       </main>
-    ) : (effectiveMeetingsRoute || effectiveDigestRoute || effectiveBotsRoute || effectiveAnalyticsRoute || effectiveBackupsRoute || effectivePluginsRoute || effectiveSettingsRoute || effectiveIntegrationRoute || effectiveExtPageRoute || isExtPagePending || isOfficeHomeView) ? (
+    ) : (effectiveMeetingsRoute || effectiveDigestRoute || effectiveBotsRoute || effectiveAnalyticsRoute || effectiveBackupsRoute || effectivePluginsRoute || effectiveSettingsRoute || effectiveIntegrationRoute || effectiveExtPageRoute || isExtPagePending || isWorkspacePagePending || isOfficeHomeView) ? (
       <main className={`m-main ${effectiveMeetingsRoute || effectiveDigestRoute || isOfficeHomeView || effectiveExtPage?.mobileLayout === 'office' ? 'm-office-page-main' : 'm-module-page-main'}${effectiveSettingsRoute ? ' m-settings-page-main' : ''}${effectiveIntegrationRoute ? ' m-integration-page-main' : ''}`}>
           {effectiveMeetingsRoute && meetingsPage ? (
             <div className="m-office-page-scroll">
@@ -1834,6 +1913,8 @@ export function MobileWorkspace() {
               : content
           })() : isExtPagePending ? (
             <div className="m-office-page-loading" role="status" aria-label="正在加载扩展页面">正在加载扩展页面…</div>
+          ) : isWorkspacePagePending ? (
+            <div className="m-office-page-loading" role="status" aria-label="正在加载工作区页面">正在加载工作区页面…</div>
           ) : effectivePluginsRoute ? (
             <div className="m-office-page-scroll">
               <MobilePluginsPage />

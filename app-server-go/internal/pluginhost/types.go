@@ -19,14 +19,16 @@ const (
 	SDKBridgePath   = "/api/v1/ext/_sdk/bridge.js"
 	SDKESMDirPath   = "/api/v1/ext/_sdk/"
 
-	PermNetworkOutbound   = "network:outbound"
-	PermWorkspaceGitRead  = "workspace:git.read"
-	PermStorageKV         = "storage:kv"
-	PermStorageSecrets    = "storage:secrets"
-	PermAgentCapabilities = "agent:capabilities"
-	PermUISlots           = "ui:slots"
-	PermSignalsProvide    = "signals:provide"
-	PermDesktopControl    = "desktop:control"
+	PermNetworkOutbound    = "network:outbound"
+	PermWorkspaceGitRead   = "workspace:git.read"
+	PermWorkspaceFilesRead = "workspace:files.read"
+	PermWorkspaceFilesWrite = "workspace:files.write"
+	PermStorageKV          = "storage:kv"
+	PermStorageSecrets     = "storage:secrets"
+	PermAgentCapabilities  = "agent:capabilities"
+	PermUISlots            = "ui:slots"
+	PermSignalsProvide     = "signals:provide"
+	PermDesktopControl     = "desktop:control"
 
 	BackendTypeBuiltin = "builtin"
 	BackendTypeProcess = "process"
@@ -208,6 +210,7 @@ type PluginView struct {
 	Source             string          `json:"source"`
 	Enabled            bool            `json:"enabled"`
 	DefaultEnabled     bool            `json:"default_enabled"`
+	DependsOn          []string        `json:"depends_on,omitempty"`
 	Permissions        []string        `json:"permissions"`
 	GrantedPermissions []string        `json:"granted_permissions"`
 	PendingPermissions []string        `json:"pending_permissions"`

@@ -20,7 +20,7 @@ var sdkESMModuleSpecs = map[string]sdkESMModuleSpec{
 			"Children", "Component", "Fragment", "Profiler", "PureComponent", "StrictMode", "Suspense",
 			"act", "cache", "cloneElement", "createContext", "createElement", "createRef", "forwardRef",
 			"isValidElement", "lazy", "memo", "startTransition", "use", "useActionState", "useCallback",
-			"useContext", "useDebugValue", "useDeferredValue", "useEffect", "useId", "useImperativeHandle",
+			"useContext", "useDebugValue", "useDeferredValue", "useEffect", "useEffectEvent", "useId", "useImperativeHandle",
 			"useInsertionEffect", "useLayoutEffect", "useMemo", "useOptimistic", "useReducer", "useRef",
 			"useState", "useSyncExternalStore", "useTransition", "version",
 		},
@@ -75,10 +75,49 @@ var sdkESMModuleSpecs = map[string]sdkESMModuleSpec{
 		runtimeProp: "sdk",
 		label:       "@astrorder/sdk",
 		exports: []string{
-			"SDK_VERSION", "defineAstrorderPlugin", "downloadFile", "getActiveSession", "getHostRuntime",
-			"getSessions", "navigate", "notify", "openArtifact", "openDatabaseWorkbench", "openExternal",
-			"openPluginPanel", "openSettings", "quoteToComposer", "useAppProfile", "useCurrentSession",
-			"usePluginConfig", "useThemeMode",
+			"SDK_VERSION", "defineAstrorderPlugin", "downloadFile", "emitPluginEvent",
+			"getActiveSession", "getHostRuntime", "getService", "getSessions",
+			"listWorkspaceFiles", "navigate", "notify", "onHostEvent", "onPluginEvent",
+			"onSessionEvent", "openArtifact", "openDatabaseWorkbench", "openExternal",
+			"openPluginPanel", "openSettings", "quoteToComposer", "readWorkspaceFile",
+			"useAppProfile", "useCurrentSession", "usePluginConfig", "useService",
+			"useThemeMode", "writeWorkspaceFile",
+		},
+	},
+	"react-router-dom.js": {
+		runtimeProp: "reactRouterDom",
+		label:       "react-router-dom",
+		exports: []string{
+			"Link", "NavLink", "Navigate", "Outlet", "Route", "Routes",
+			"useInRouterContext", "useLocation", "useMatch", "useNavigate", "useParams", "useSearchParams",
+		},
+	},
+	"react-query.js": {
+		runtimeProp: "reactQuery",
+		label:       "@tanstack/react-query",
+		exports: []string{
+			"QueryClient", "QueryClientProvider", "QueryObserver", "keepPreviousData", "skipToken",
+			"useInfiniteQuery", "useIsFetching", "useIsMutating", "useMutation", "useQueries", "useQuery", "useQueryClient",
+		},
+	},
+	"workspace-bridge.js": {
+		runtimeProp: "workspaceBridge",
+		label:       "@astrorder/workspace-bridge",
+		exports: []string{
+			"AI_PROVIDERS_SYNC_KEY", "AgentBrandIcon", "AgentSessionFilter", "AgyQuotaRefreshProvider",
+			"ApprovalModeControl", "BlackboardItemRenderer", "BotGroupChatPage", "BrandedSelect",
+			"CreateBotGroupDialog", "EmptyState", "ExportMenu", "ForceAgentRestartDialog",
+			"GroupSidecarPanel", "LazyDetails", "MarkdownContent", "MessageBody",
+			"MobileLearningFeed", "PackSummary", "SessionModelControl", "ShinyText",
+			"ToolLineIcon", "accountPlatforms", "agentKindLabel", "api", "client",
+			"commandActions", "composerMedia", "describeTool", "displaySessionTitle",
+			"draftStorage", "groupSidecarKey", "isHiddenRailSession", "isUserIdle",
+			"learningApi", "localVoiceStream", "meetingSessionStore", "mobileOutbox",
+			"mobileOutboxStorage", "newCommandId", "resolveSessionDisplayTitle", "scopeKey",
+			"selectApprovals", "selectCommands", "selectMessages", "selectSessions",
+			"sharedServerOutbox", "subscribeUserIdle", "swarmTopology", "useAstrorderStore",
+			"useIsOfficeProfile", "usePluginSettingsStore", "useSessionResources",
+			"useSidecarStore", "useSpotlightSurface", "useUserIdle", "workbenchIcons",
 		},
 	},
 }
@@ -125,7 +164,7 @@ func serveSDKESMModule(w http.ResponseWriter, r *http.Request, name string) {
 	// Hardcode explicit JavaScript MIME type; never rely on OS/Windows registry mime.TypeByExtension.
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodGet {
 		_, _ = w.Write(body)

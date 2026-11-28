@@ -27,7 +27,9 @@ import { ShinyText } from '../../components/animations/ShinyText'
 import { StarBorder } from '../../components/animations/StarBorder'
 import { GlareHover } from '../../components/animations/GlareHover'
 import { AstrorderLoader } from '../../components/AnimatedStatus'
-import { artifactViewerRegistry } from '../sidecar/registry'
+import { artifactViewerRegistry, useViewerRegistryVersion } from '../sidecar/registry'
+import { extensionRegistry, useExtensionRegistryVersion } from '../extensions/extensionRegistry'
+import { PluginErrorBoundary } from '../extensions/PluginErrorBoundary'
 import { resolveArtifactFromPath } from '../sidecar/resolver'
 import { useSidecarStore } from '../sidecar/sidecarStore'
 import { LIVE_ACTIVITY_MS, useAstrorderStore } from '../../state/store'
@@ -80,6 +82,8 @@ export function AttachmentList({
   session?: Session | null
   onGalleryClick?: (url: string, allImages: string[]) => void
 }) {
+  const viewerRegistryVersion = useViewerRegistryVersion()
+  void viewerRegistryVersion
   const defaultSession = useAstrorderStore((state) => {
     if (session) return undefined
     for (const key in state.sessions) return state.sessions[key]
@@ -230,6 +234,7 @@ const MessageItem = memo(function MessageItem({
   isOfficeMode?: boolean
   forceOpenActivity?: boolean
 }) {
+  const extRegistryVersion = useExtensionRegistryVersion()
   const isUser = message.role === 'user'
   const isActivity = isMessageActivity(message)
   const isReviewMode = !isOfficeMode && isUser && (
@@ -402,6 +407,18 @@ const MessageItem = memo(function MessageItem({
       )}
     </span>
   )
+  const headerDecorators = useMemo(() => {
+    void extRegistryVersion
+    return extensionRegistry
+      .getActiveMessageDecorators('header')
+      .filter((dec) => !dec.match || dec.match(message, session))
+  }, [extRegistryVersion, message, session])
+  const footerDecorators = useMemo(() => {
+    void extRegistryVersion
+    return extensionRegistry
+      .getActiveMessageDecorators('footer')
+      .filter((dec) => !dec.match || dec.match(message, session))
+  }, [extRegistryVersion, message, session])
   return (
     <article
       className={`message-row message-${message.role} message-kind-${message.kind} ${isLatest ? 'is-latest-message' : ''}`}
@@ -413,6 +430,28 @@ const MessageItem = memo(function MessageItem({
         <span>{authorLabel}</span>
       </div>}
       <Paper className={`message-bubble ${inlineMeta ? 'message-bubble-inline' : ''} ${isUser ? 'message-bubble-user' : isActivity ? 'message-bubble-activity' : ''}`} withBorder={!isActivity} radius="lg">
+        {headerDecorators.length > 0 && (
+          <div className="message-plugin-decorators is-header">
+            {headerDecorators.map((dec) => {
+              const DecoratorComp = dec.component
+              return (
+                <PluginErrorBoundary
+                  key={`${dec.pluginId}:${dec.id}`}
+                  pluginId={dec.pluginId}
+                  pluginName={dec.id}
+                  resetKey={message.id}
+                >
+                  <DecoratorComp
+                    message={message}
+                    session={session}
+                    isLatest={isLatest}
+                    isOfficeMode={isOfficeMode}
+                  />
+                </PluginErrorBoundary>
+              )
+            })}
+          </div>
+        )}
         {asyncInput ? <AsyncUserInputCard message={message} {...asyncInput} /> : message.text && (
           <MessageBody
             value={message.text}
@@ -429,6 +468,28 @@ const MessageItem = memo(function MessageItem({
           <pre className="tool-payload">{JSON.stringify(message.tool, null, 2)}</pre>
         )}
         <AttachmentList attachments={message.attachments} onImageClick={onImageClick} onGalleryClick={onGalleryClick} session={session} />
+        {footerDecorators.length > 0 && (
+          <div className="message-plugin-decorators is-footer">
+            {footerDecorators.map((dec) => {
+              const DecoratorComp = dec.component
+              return (
+                <PluginErrorBoundary
+                  key={`${dec.pluginId}:${dec.id}`}
+                  pluginId={dec.pluginId}
+                  pluginName={dec.id}
+                  resetKey={message.id}
+                >
+                  <DecoratorComp
+                    message={message}
+                    session={session}
+                    isLatest={isLatest}
+                    isOfficeMode={isOfficeMode}
+                  />
+                </PluginErrorBoundary>
+              )
+            })}
+          </div>
+        )}
         {inlineMeta && metadata}
       </Paper>
       {!inlineMeta && metadata}
@@ -621,8 +682,7 @@ export const Transcript = memo(function Transcript({
   }, [visibleMessages])
 
   // Freeze the deferred-turn cutoff once initial history loads so live sends/streaming
-  // never toggle content-visibility:auto onto previously rendered turns (which would
-  // collapse their off-screen height from real px to contain-intrinsic-size and jump scroll).
+  // keep stable turn classes without churning styles across previously rendered turns.
   const [deferredCutoff, setDeferredCutoff] = useState<number | null>(null)
   const effectiveDeferredCutoff =
     deferredCutoff === null
@@ -1052,7 +1112,7 @@ export const Transcript = memo(function Transcript({
       msgEl.scrollIntoView({ behavior, block: 'center' })
     }
 
-    // Two-frame settle guarantees collapsed LazyDetails mounts and content-visibility: visible
+    // Two-frame settle guarantees collapsed LazyDetails mounts and layout settles
     // layout pass complete before measuring getBoundingClientRect().
     const frame1 = window.requestAnimationFrame(() => {
       frame2 = window.requestAnimationFrame(locateAndScroll)

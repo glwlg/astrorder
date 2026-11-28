@@ -36,6 +36,9 @@ export interface ViewerContribution {
   icon?: string
   priority?: number
   hide_in_office_mode?: boolean
+  ui_entry?: string
+  read_only?: boolean
+  default_for_extensions?: boolean
 }
 
 export interface BackendSpec {
@@ -160,6 +163,7 @@ export interface PluginView {
   content_digest?: string
   signature_verified?: boolean
   default_enabled?: boolean
+  depends_on?: string[]
   settings?: SettingsSpec
   contributes?: ContributesSpec
   ui_base_url?: string
@@ -190,6 +194,47 @@ export interface SetExtensionEnabledResult {
   requires_permission_grant?: boolean
   pending_permissions?: string[]
   detail?: string
+}
+
+export interface PluginRegistrySource {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  official?: boolean
+}
+
+export interface MarketplacePluginEntry {
+  id: string
+  name: string
+  version: string
+  category: string
+  description?: string
+  author?: string
+  homepage?: string
+  icon?: string
+  download_url?: string
+  sha256?: string
+  permissions?: string[]
+  extensions?: string[]
+  frontend_mode?: string
+  registry_id?: string
+  registry_name?: string
+  official?: boolean
+  installed?: boolean
+  installed_version?: string
+  update_available?: boolean
+}
+
+export interface MarketplaceResponse {
+  items: MarketplacePluginEntry[]
+  registries: PluginRegistrySource[]
+  errors?: string[]
+}
+
+export interface InstallRemotePluginPayload {
+  download_url: string
+  sha256?: string
 }
 
 function cleanSubpath(endpoint: string): string {
@@ -331,6 +376,26 @@ export const extensionsApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
+    }),
+
+  listRegistries: (): Promise<{ items: PluginRegistrySource[] }> =>
+    request<{ items: PluginRegistrySource[] }>('/extensions/registries'),
+
+  saveRegistries: (items: PluginRegistrySource[]): Promise<{ items: PluginRegistrySource[] }> =>
+    request<{ items: PluginRegistrySource[] }>('/extensions/registries', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    }),
+
+  getMarketplace: (): Promise<MarketplaceResponse> =>
+    request<MarketplaceResponse>('/extensions/marketplace'),
+
+  installRemotePlugin: (payload: InstallRemotePluginPayload): Promise<{ item: PluginView }> =>
+    request<{ item: PluginView }>('/extensions/install-remote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
 }
 

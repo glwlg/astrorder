@@ -14,14 +14,16 @@ import (
 var (
 	pluginIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
 	knownPerms      = map[string]struct{}{
-		PermNetworkOutbound:   {},
-		PermWorkspaceGitRead:  {},
-		PermStorageKV:         {},
-		PermStorageSecrets:    {},
-		PermAgentCapabilities: {},
-		PermUISlots:           {},
-		PermSignalsProvide:    {},
-		PermDesktopControl:    {},
+		PermNetworkOutbound:     {},
+		PermWorkspaceGitRead:    {},
+		PermWorkspaceFilesRead:  {},
+		PermWorkspaceFilesWrite: {},
+		PermStorageKV:           {},
+		PermStorageSecrets:      {},
+		PermAgentCapabilities:   {},
+		PermUISlots:             {},
+		PermSignalsProvide:      {},
+		PermDesktopControl:      {},
 	}
 )
 
@@ -45,6 +47,7 @@ type Manifest struct {
 	Homepage       string           `json:"homepage,omitempty"`
 	Icon           string           `json:"icon,omitempty"`
 	DefaultEnabled *bool            `json:"default_enabled,omitempty"`
+	DependsOn      []string         `json:"depends_on,omitempty"`
 	Permissions    []string         `json:"permissions,omitempty"`
 	Signature      *PluginSignature `json:"signature,omitempty"`
 	Frontend       *FrontendSpec    `json:"frontend,omitempty"`
@@ -126,17 +129,20 @@ type PageContribution struct {
 
 // ViewerContribution declares a Sidecar artifact viewer contributed by a plugin.
 type ViewerContribution struct {
-	ID               string   `json:"id"`
-	Title            string   `json:"title"`
-	Description      string   `json:"description,omitempty"`
-	Extensions       []string `json:"extensions,omitempty"`
-	MimeTypes        []string `json:"mime_types,omitempty"`
-	BadgeLabel       string   `json:"badge_label,omitempty"`
-	TabColor         string   `json:"tab_color,omitempty"`
-	Category         string   `json:"category,omitempty"`
-	Icon             string   `json:"icon,omitempty"`
-	Priority         int      `json:"priority,omitempty"`
-	HideInOfficeMode bool     `json:"hide_in_office_mode,omitempty"`
+	ID                   string   `json:"id"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description,omitempty"`
+	Extensions           []string `json:"extensions,omitempty"`
+	MimeTypes            []string `json:"mime_types,omitempty"`
+	BadgeLabel           string   `json:"badge_label,omitempty"`
+	TabColor             string   `json:"tab_color,omitempty"`
+	Category             string   `json:"category,omitempty"`
+	Icon                 string   `json:"icon,omitempty"`
+	Priority             int      `json:"priority,omitempty"`
+	HideInOfficeMode     bool     `json:"hide_in_office_mode,omitempty"`
+	UIEntry              string   `json:"ui_entry,omitempty"`
+	ReadOnly             bool     `json:"read_only,omitempty"`
+	DefaultForExtensions bool     `json:"default_for_extensions,omitempty"`
 }
 
 // UISlotContribution registers a declarative item into an Astrorder UI slot.
@@ -299,8 +305,26 @@ func (m *Manifest) Normalize() {
 		v.TabColor = strings.TrimSpace(v.TabColor)
 		v.Category = strings.TrimSpace(v.Category)
 		v.Icon = strings.TrimSpace(v.Icon)
-		v.Extensions = normalizeLowerStrings(v.Extensions)
+		v.UIEntry = strings.TrimSpace(v.UIEntry)
+		v.Extensions = normalizeFileExtensions(v.Extensions)
 		v.MimeTypes = normalizeLowerStrings(v.MimeTypes)
+	}
+
+	if len(m.DependsOn) > 0 {
+		seenDep := make(map[string]struct{}, len(m.DependsOn))
+		dedupDeps := make([]string, 0, len(m.DependsOn))
+		for _, dep := range m.DependsOn {
+			trimmed := strings.TrimSpace(dep)
+			if trimmed == "" {
+				continue
+			}
+			if _, dup := seenDep[trimmed]; dup {
+				continue
+			}
+			seenDep[trimmed] = struct{}{}
+			dedupDeps = append(dedupDeps, trimmed)
+		}
+		m.DependsOn = dedupDeps
 	}
 
 	seenPerm := make(map[string]struct{}, len(m.Permissions))
@@ -336,6 +360,14 @@ func (m Manifest) Validate() error {
 	for _, perm := range m.Permissions {
 		if !IsKnownPermission(perm) {
 			return fmt.Errorf("%w: unknown permission %q", ErrInvalid, perm)
+		}
+	}
+	for _, dep := range m.DependsOn {
+		if err := ValidatePluginID(dep); err != nil {
+			return fmt.Errorf("%w: invalid depends_on plugin id %q: %v", ErrInvalid, dep, err)
+		}
+		if dep == m.ID {
+			return fmt.Errorf("%w: plugin %q cannot depend on itself", ErrInvalid, m.ID)
 		}
 	}
 
@@ -543,6 +575,15 @@ func (m Manifest) Validate() error {
 		if strings.TrimSpace(viewer.Title) == "" {
 			return fmt.Errorf("%w: contributed viewer %q title is required", ErrInvalid, vid)
 		}
+		if strings.TrimSpace(viewer.UIEntry) != "" {
+			cleanEntry, err := ValidateRelativePluginPath(viewer.UIEntry)
+			if err != nil {
+				return fmt.Errorf("%w: invalid contributed viewer %q ui_entry: %v", ErrInvalid, vid, err)
+			}
+			if hasHiddenPathSegment(cleanEntry) {
+				return fmt.Errorf("%w: contributed viewer %q ui_entry must not reference hidden files", ErrInvalid, vid)
+			}
+		}
 	}
 
 	return nil
@@ -593,6 +634,32 @@ func hasHiddenPathSegment(cleanRel string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeFileExtensions(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		v := strings.ToLower(strings.TrimSpace(raw))
+		if v == "" {
+			continue
+		}
+		if !strings.HasPrefix(v, ".") {
+			v = "." + v
+		}
+		if v == "." {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 func normalizeLowerStrings(in []string) []string {

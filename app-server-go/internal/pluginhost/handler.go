@@ -464,6 +464,42 @@ func (m *Manager) serveAdminAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			m.handleAdminInstall(w, r)
 			return
+		case "install-remote":
+			if r.Method != http.MethodPost {
+				writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+				return
+			}
+			m.handleAdminInstallRemote(w, r)
+			return
+		case "marketplace":
+			if r.Method != http.MethodGet {
+				writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+				return
+			}
+			res, err := m.FetchMarketplace(r.Context())
+			if err != nil {
+				writePluginError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, res)
+			return
+		case "registries":
+			switch r.Method {
+			case http.MethodGet:
+				items, err := m.ListRegistries(r.Context())
+				if err != nil {
+					writePluginError(w, err)
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"items": items})
+				return
+			case http.MethodPut:
+				m.handleAdminPutRegistries(w, r)
+				return
+			default:
+				writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+				return
+			}
 		case "reload":
 			if r.Method != http.MethodPost {
 				writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -606,6 +642,46 @@ func (m *Manager) handleAdminInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"item": view})
+}
+
+func (m *Manager) handleAdminInstallRemote(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DownloadURL string `json:"download_url"`
+		SHA256      string `json:"sha256,omitempty"`
+		PluginID    string `json:"plugin_id,omitempty"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxAdminJSONBytes))
+	if err := dec.Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON request body")
+		return
+	}
+	if strings.TrimSpace(req.DownloadURL) == "" {
+		writeJSONError(w, http.StatusBadRequest, "download_url is required")
+		return
+	}
+	view, err := m.InstallFromRemote(r.Context(), req.DownloadURL, req.SHA256, req.PluginID)
+	if err != nil {
+		writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"item": view})
+}
+
+func (m *Manager) handleAdminPutRegistries(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Items []PluginRegistrySource `json:"items"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxAdminJSONBytes))
+	if err := dec.Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON request body")
+		return
+	}
+	saved, err := m.SaveRegistries(r.Context(), req.Items)
+	if err != nil {
+		writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": saved})
 }
 
 func (m *Manager) handleAdminEnable(w http.ResponseWriter, r *http.Request, pluginID string) {

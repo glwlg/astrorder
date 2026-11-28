@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "workspace-agent-accounts",
+  "name": "Agent 多账号与配额池",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "集中管理多账号切换与额度刷新（当前内置 Antigravity / Codex / Grok 平台）；关闭后隐藏导航并停止后台配额定时刷新",
+  "author": "Astrorder",
+  "icon": "id",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "agentAccounts",
+        "title": "Agent 账号管理",
+        "path": "/agent-accounts",
+        "icon": "id",
+        "category": "workspace",
+        "order": 80,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

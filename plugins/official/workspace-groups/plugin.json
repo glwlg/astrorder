@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "workspace-groups",
+  "name": "多 Agent 群聊协作",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "将多个 Agent 拉入同一群聊房间进行接力协作与共享上下文；专注单会话开发时可关闭以精简左侧导航",
+  "author": "Astrorder",
+  "icon": "users",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "groups",
+        "title": "群聊协作",
+        "path": "/groups",
+        "mobile_path": "/mobile/groups",
+        "icon": "users",
+        "category": "workspace",
+        "order": 50,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

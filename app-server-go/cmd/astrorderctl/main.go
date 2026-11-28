@@ -80,6 +80,8 @@ func run(args []string, output io.Writer) int {
 			return runSync(args[1:], output)
 		case "agent-skill":
 			return runAgentSkill(args[1:], output)
+		case "plugin":
+			return runPlugin(args[1:], output)
 		}
 	}
 	fail := func(message string) int {

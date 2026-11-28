@@ -289,6 +289,136 @@ export interface PluginNotifyOptions {
   autoClose?: number | boolean
 }
 
+export interface HostStreamEvent {
+  type: string
+  cursor?: number
+  agent_id?: string
+  session_id?: string
+  data?: Record<string, unknown>
+  timestamp?: string
+  [key: string]: unknown
+}
+
+export interface PluginEventMeta {
+  fromPluginId: string
+  topic: string
+  timestamp: number
+}
+
+export type HostEventHandler = (event: HostStreamEvent) => void
+export type PluginEventHandler<T = unknown> = (payload: T, meta: PluginEventMeta) => void
+
+export interface MessageSendContext {
+  session: Session
+  text: string
+  attachments: File[]
+  metadata: Record<string, unknown>
+}
+
+export interface MessageInterceptorResult {
+  text?: string
+  cancel?: boolean
+  reason?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface PluginMessageInterceptorContribution {
+  id: string
+  order?: number
+  beforeSend: (
+    ctx: MessageSendContext,
+  ) => void | MessageInterceptorResult | Promise<void | MessageInterceptorResult>
+}
+
+export interface MarkdownBlockRendererProps {
+  code: string
+  language: string
+  session?: Session | null
+}
+
+export interface PluginMarkdownBlockRendererContribution {
+  id: string
+  languages: string[]
+  priority?: number
+  title?: string
+  component: ComponentType<MarkdownBlockRendererProps>
+}
+
+export interface MessageDecoratorProps {
+  message: Record<string, unknown>
+  session?: Session | null
+  isLatest?: boolean
+  isOfficeMode?: boolean
+}
+
+export interface PluginMessageDecoratorContribution {
+  id: string
+  position: 'header' | 'footer'
+  order?: number
+  match?: (message: Record<string, unknown>, session?: Session | null) => boolean
+  component: ComponentType<MessageDecoratorProps>
+}
+
+export interface PluginFileHandlerContribution {
+  id?: string
+  title: string
+  description?: string
+  extensions: string[]
+  mimeTypes?: string[]
+  priority?: number
+  defaultForExtensions?: boolean
+  canEdit?: boolean
+  badgeLabel?: string
+  tabColor?: string
+  category?: PluginCategory
+  icon?: ViewerIconComponent
+  supports?: (artifact: ArtifactRef) => number
+  component: ArtifactViewerComponent
+  configOptions?: ViewerConfigOption[]
+  documentation?: PluginViewerContribution['documentation']
+}
+
+export interface WorkspaceFileEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size?: number
+  children?: WorkspaceFileEntry[]
+}
+
+export interface WorkspaceFileReadOptions {
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+  encoding?: 'utf8' | 'base64'
+}
+
+export interface WorkspaceFileReadResult {
+  path: string
+  content: string
+  encoding: 'utf8' | 'base64'
+  contentType: string
+}
+
+export interface WorkspaceFileWriteOptions {
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+}
+
+export interface WorkspaceFileListOptions {
+  path?: string
+  depth?: number
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+}
+
+export interface WorkspaceFileListResult {
+  root: string
+  items: WorkspaceFileEntry[]
+}
+
 export interface AstrorderHostRuntime {
   readonly apiVersion: 1
   readonly react: Record<string, unknown>
@@ -298,6 +428,9 @@ export interface AstrorderHostRuntime {
   readonly mantineCore: Record<string, unknown>
   readonly mantineNotifications: Record<string, unknown>
   readonly sdk: Record<string, unknown>
+  readonly reactRouterDom: Record<string, unknown>
+  readonly reactQuery: Record<string, unknown>
+  readonly workspaceBridge: Record<string, unknown>
 }
 
 export interface AstrorderPluginApi {
@@ -326,6 +459,15 @@ export interface AstrorderPluginApi {
   useAppProfile(): AppProfile
   useCurrentSession(): Session | null
   useThemeMode(): ThemeMode
+  onHostEvent(pattern: string, handler: HostEventHandler): Disposable
+  onSessionEvent(sessionId: string, handler: HostEventHandler): Disposable
+  emitPluginEvent(topic: string, payload?: unknown): void
+  onPluginEvent<T = unknown>(topic: string, handler: PluginEventHandler<T>): Disposable
+  getService<T = unknown>(serviceId: string): T | undefined
+  useService<T = unknown>(serviceId: string): T | undefined
+  readWorkspaceFile(filePath: string, opts?: WorkspaceFileReadOptions): Promise<WorkspaceFileReadResult>
+  writeWorkspaceFile(filePath: string, content: string, opts?: WorkspaceFileWriteOptions): Promise<void>
+  listWorkspaceFiles(opts?: WorkspaceFileListOptions): Promise<WorkspaceFileListResult>
 }
 
 export interface AstrorderPluginContext {
@@ -334,9 +476,14 @@ export interface AstrorderPluginContext {
   readonly subscriptions: Disposable[]
   registerPage(spec: PluginPageContribution): Disposable
   registerViewer(spec: PluginViewerContribution): Disposable
+  registerFileHandler(spec: PluginFileHandlerContribution): Disposable
   registerSlot(spec: PluginSlotContribution): Disposable
   registerCommand(spec: PluginCommandContribution): Disposable
   registerDatabaseTool(provider: DatabaseToolProvider): Disposable
+  registerMessageInterceptor(spec: PluginMessageInterceptorContribution): Disposable
+  registerMarkdownBlockRenderer(spec: PluginMarkdownBlockRendererContribution): Disposable
+  registerMessageDecorator(spec: PluginMessageDecoratorContribution): Disposable
+  registerService<T>(serviceId: string, impl: T): Disposable
   readonly api: AstrorderPluginApi
 }
 
@@ -347,11 +494,17 @@ export interface AstrorderPluginModule {
 
 export declare function defineAstrorderPlugin<T extends AstrorderPluginModule>(mod: T): T
 export declare function downloadFile(url: string, filename: string): Promise<void>
+export declare function emitPluginEvent(topic: string, payload?: unknown, fromPluginId?: string): void
 export declare function getActiveSession(): Session | null
 export declare function getHostRuntime(): AstrorderHostRuntime | undefined
+export declare function getService<T = unknown>(serviceId: string): T | undefined
 export declare function getSessions(): Session[]
+export declare function listWorkspaceFiles(opts?: WorkspaceFileListOptions): Promise<WorkspaceFileListResult>
 export declare function navigate(path: string): void
 export declare function notify(opts: PluginNotifyOptions): void
+export declare function onHostEvent(pattern: string, handler: HostEventHandler): Disposable
+export declare function onPluginEvent<T = unknown>(topic: string, handler: PluginEventHandler<T>): Disposable
+export declare function onSessionEvent(sessionId: string, handler: HostEventHandler): Disposable
 export declare function openArtifact(artifact: ArtifactRef, viewerId?: string): void
 export declare function openDatabaseWorkbench(
   mediaType: string,
@@ -368,6 +521,10 @@ export declare function openPluginPanel(
 ): void
 export declare function openSettings(opts?: PluginOpenSettingsOptions): void
 export declare function quoteToComposer(session: ComposerQuoteTarget, text: string): void
+export declare function readWorkspaceFile(
+  filePath: string,
+  opts?: WorkspaceFileReadOptions,
+): Promise<WorkspaceFileReadResult>
 export declare function useAppProfile(): AppProfile
 export declare function useCurrentSession(): Session | null
 export declare function usePluginConfig<T = unknown>(
@@ -375,4 +532,10 @@ export declare function usePluginConfig<T = unknown>(
   key: string,
   fallback: T,
 ): T
+export declare function useService<T = unknown>(serviceId: string): T | undefined
 export declare function useThemeMode(): ThemeMode
+export declare function writeWorkspaceFile(
+  filePath: string,
+  content: string,
+  opts?: WorkspaceFileWriteOptions,
+): Promise<void>

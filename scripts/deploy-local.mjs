@@ -1,6 +1,7 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { verifyBuiltPluginDist } from './build-official-plugins.mjs'
 import { verifyFrontendDist } from './verify-frontend-dist.mjs'
 import {
   assertDaemonServiceStatus,
@@ -14,6 +15,7 @@ import {
   sha256File,
   toWindowsPath,
   verifyLocalRelease,
+  verifyOfficialPluginsDir,
 } from './verify-local-release.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,30 +25,35 @@ function parseArgs(argv) {
     frontend: false,
     desktop: false,
     app: false,
+    plugins: false,
     dryRun: false,
     installDir: '',
     desktopExe: path.join(root, 'desktop-wails', 'bin', 'Astrorder.exe'),
     appExe: path.join(root, 'app-server-go', 'bin', 'astrorder-app.exe'),
     frontendDist: path.join(root, 'frontend', 'dist'),
+    officialPluginsDist: path.join(root, 'plugins', 'official-dist'),
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--frontend') opts.frontend = true
     else if (arg === '--desktop') opts.desktop = true
     else if (arg === '--app') opts.app = true
+    else if (arg === '--plugins') opts.plugins = true
     else if (arg === '--all') {
       opts.frontend = true
       opts.desktop = true
       opts.app = true
+      opts.plugins = true
     } else if (arg === '--dry-run') opts.dryRun = true
     else if (arg === '--install-dir') opts.installDir = argv[++i] || ''
     else if (arg === '--desktop-exe') opts.desktopExe = path.resolve(argv[++i] || '')
     else if (arg === '--app-exe') opts.appExe = path.resolve(argv[++i] || '')
     else if (arg === '--frontend-dist') opts.frontendDist = path.resolve(argv[++i] || '')
+    else if (arg === '--official-plugins-dist') opts.officialPluginsDist = path.resolve(argv[++i] || '')
     else throw new Error(`Unknown argument: ${arg}`)
   }
-  if (!opts.frontend && !opts.desktop && !opts.app) {
-    throw new Error('Usage: node scripts/deploy-local.mjs [--frontend] [--desktop] [--app] [--all] [--install-dir <dir>] [--dry-run]')
+  if (!opts.frontend && !opts.desktop && !opts.app && !opts.plugins) {
+    throw new Error('Usage: node scripts/deploy-local.mjs [--frontend] [--desktop] [--app] [--plugins] [--all] [--install-dir <dir>] [--official-plugins-dist <dir>] [--dry-run]')
   }
   return opts
 }
@@ -93,15 +100,102 @@ function syncFrontendVerified(srcDist, installDirHost) {
   return verifyFrontendDist(liveDist, { mode: 'browser' })
 }
 
+export function syncOfficialPluginsVerified(srcDir, installDirHost) {
+  if (!srcDir || !existsSync(srcDir) || !statSync(srcDir).isDirectory()) {
+    throw new Error(`Official plugins dist directory does not exist: ${srcDir}`)
+  }
+  const pluginDirs = readdirSync(srcDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => path.join(srcDir, entry.name))
+    .filter((dir) => existsSync(path.join(dir, 'plugin.json')))
+    .sort()
+  if (pluginDirs.length === 0) {
+    throw new Error(`No official plugins found in ${srcDir}`)
+  }
+
+  const expectedById = new Map()
+  for (const pluginDir of pluginDirs) {
+    const verified = verifyBuiltPluginDist(pluginDir)
+    if (expectedById.has(verified.id)) {
+      throw new Error(`Duplicate official plugin id "${verified.id}" in ${srcDir}`)
+    }
+    expectedById.set(verified.id, { srcPluginDir: pluginDir, verified })
+  }
+
+  const pluginsRoot = path.join(installDirHost, 'server', 'plugins')
+  const officialRoot = path.join(pluginsRoot, 'official')
+  const stagingRoot = path.join(pluginsRoot, '.official.staging')
+  const backupRoot = path.join(pluginsRoot, '.official.old')
+
+  mkdirSync(pluginsRoot, { recursive: true })
+  rmSync(stagingRoot, { recursive: true, force: true })
+  mkdirSync(stagingRoot, { recursive: true })
+
+  for (const [id, { srcPluginDir, verified }] of expectedById.entries()) {
+    const stagedPluginDir = path.join(stagingRoot, id)
+    cpSync(srcPluginDir, stagedPluginDir, { recursive: true })
+    const stagedVerified = verifyBuiltPluginDist(stagedPluginDir)
+    if (stagedVerified.entrySha256 !== verified.entrySha256) {
+      rmSync(stagingRoot, { recursive: true, force: true })
+      throw new Error(
+        `Staged official plugin "${id}" SHA-256 mismatch: got ${stagedVerified.entrySha256}, expected ${verified.entrySha256}`,
+      )
+    }
+  }
+
+  // Atomic swap when unobstructed; preserve server/plugins/external/ completely untouched.
+  rmSync(backupRoot, { recursive: true, force: true })
+  let swapped = false
+  try {
+    if (existsSync(officialRoot)) {
+      renameSync(officialRoot, backupRoot)
+    }
+    renameSync(stagingRoot, officialRoot)
+    rmSync(backupRoot, { recursive: true, force: true })
+    swapped = true
+  } catch {
+    if (!existsSync(officialRoot) && existsSync(backupRoot)) {
+      try {
+        renameSync(backupRoot, officialRoot)
+      } catch {
+        // Restore best-effort before falling through to in-place verified copy.
+      }
+    }
+  }
+
+  if (!swapped) {
+    mkdirSync(officialRoot, { recursive: true })
+    for (const entry of readdirSync(officialRoot, { withFileTypes: true })) {
+      if (!expectedById.has(entry.name)) {
+        rmSync(path.join(officialRoot, entry.name), { recursive: true, force: true })
+      }
+    }
+    for (const id of expectedById.keys()) {
+      const targetPluginDir = path.join(officialRoot, id)
+      rmSync(targetPluginDir, { recursive: true, force: true })
+      cpSync(path.join(stagingRoot, id), targetPluginDir, { recursive: true, force: true })
+    }
+    rmSync(stagingRoot, { recursive: true, force: true })
+    rmSync(backupRoot, { recursive: true, force: true })
+  }
+
+  return verifyOfficialPluginsDir(officialRoot, srcDir)
+}
+
 export function runDeploy(argv) {
   const opts = parseArgs(argv)
   const plan = { dryRun: opts.dryRun, components: [] }
 
   let desktopCandidate = null
   let appCandidate = null
+  let officialPluginsCheck = null
   if (opts.frontend) {
     verifyFrontendDist(opts.frontendDist, { mode: 'browser' })
     plan.components.push('frontend')
+  }
+  if (opts.plugins) {
+    officialPluginsCheck = verifyOfficialPluginsDir(opts.officialPluginsDist)
+    plan.components.push('plugins')
   }
   if (opts.app) {
     appCandidate = assertPeExecutable(opts.appExe, 'Candidate astrorder-app.exe')
@@ -118,6 +212,7 @@ export function runDeploy(argv) {
       components: plan.components,
       desktopSha: desktopCandidate?.sha256,
       appSha: appCandidate?.sha256,
+      officialPluginsCount: officialPluginsCheck?.count,
     }
   }
 
@@ -137,7 +232,12 @@ export function runDeploy(argv) {
     syncFrontendVerified(opts.frontendDist, env.installDirHost)
   }
 
-  // 2. App server update via astrorderctl ONLY (never raw kill/start)
+  // 2. Official ESM plugins sync BEFORE restarting astrorder-app.exe so the restarted app discovers updates immediately
+  if (opts.plugins) {
+    syncOfficialPluginsVerified(opts.officialPluginsDist, env.installDirHost)
+  }
+
+  // 3. App server update via astrorderctl ONLY (never raw kill/start)
   if (opts.app && appCandidate) {
     const installedAppHost = path.join(env.installDirHost, 'server', 'bin', 'astrorder-app.exe')
     runPowerShell(
@@ -153,7 +253,7 @@ export function runDeploy(argv) {
     )
   }
 
-  // 3. Packaged desktop update with pre-swap --check gate
+  // 4. Packaged desktop update with pre-swap --check gate
   if (opts.desktop && desktopCandidate) {
     const stagedDesktopHost = path.join(env.installDirHost, 'Astrorder.new.exe')
     const stagedDesktopWin = `${env.installDirWin}\\Astrorder.new.exe`
@@ -208,7 +308,7 @@ export function runDeploy(argv) {
     `)
   }
 
-  // 4. Mandatory end-to-end post-deploy gate (retries briefly while packaged client reconciles startup)
+  // 5. Mandatory end-to-end post-deploy gate (retries briefly while packaged client reconciles startup)
   let lastErr = null
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
@@ -217,6 +317,7 @@ export function runDeploy(argv) {
         expectDesktopSha: desktopCandidate?.sha256,
         expectAppSha: appCandidate?.sha256,
         expectDaemonPid: preDaemonPid,
+        expectOfficialPluginsDir: opts.plugins ? opts.officialPluginsDist : undefined,
       })
     } catch (err) {
       lastErr = err

@@ -37,7 +37,7 @@ import { copyFilesToClipboard, downloadFile } from '../../fileTransfer'
 import { resolveArtifactFromPath } from '../../resolver'
 import { useSidecarStore } from '../../sidecarStore'
 import type { ViewerContext } from '../../types'
-import { artifactViewerRegistry } from '../../registry'
+import { artifactViewerRegistry, useViewerRegistryVersion } from '../../registry'
 import { hasActiveDatabaseTool, isSqlFilePath, openSqlFileInDatabaseTool } from '../../databaseTool'
 
 function renderFileIcon(name: string) {
@@ -68,6 +68,24 @@ function renderFileIcon(name: string) {
   }
   if (/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(lower)) {
     return <IconPhoto size={14} color="#7c3aed" />
+  }
+  const matchedViewer = artifactViewerRegistry.findViewer({
+    id: `probe:${name}`,
+    sessionId: '',
+    agentId: '',
+    name,
+    kind: 'workspace_file',
+    readUrl: '',
+    mediaType: '',
+    writable: false,
+  })
+  if (matchedViewer && matchedViewer.id !== 'monaco-viewer') {
+    const ViewerIcon = matchedViewer.icon
+    return (
+      <span style={{ display: 'inline-flex', color: matchedViewer.tabColor || 'var(--astr-indigo, #6366f1)' }}>
+        <ViewerIcon size={14} />
+      </span>
+    )
   }
   return <IconFile size={14} color="var(--astr-muted)" />
 }
@@ -372,6 +390,8 @@ const FileTreeRow = memo(function FileTreeRow({
 })
 
 export function FileTreeViewer({ artifact, session, isActive = true }: ViewerContext) {
+  const viewerRegistryVersion = useViewerRegistryVersion()
+  void viewerRegistryVersion
   const isOffice = useIsOfficeExperience(session)
   const paneRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -1056,19 +1076,62 @@ export function FileTreeViewer({ artifact, session, isActive = true }: ViewerCon
 
         {contextMenu && (
           <Menu.Dropdown style={{ minWidth: 210 }}>
-            {!contextMenu.node.is_dir ? (
-              <Menu.Item
-                leftSection={<IconEye size={14} />}
-                style={{ whiteSpace: 'nowrap' }}
-                onClick={() => {
-                  const node = contextMenu.node
-                  setContextMenu(null)
-                  handleOpenNode(node)
-                }}
-              >
-                打开预览
-              </Menu.Item>
-            ) : (
+            {!contextMenu.node.is_dir ? (() => {
+              const targetArtifact = resolveArtifactFromPath(contextMenu.node.path, {
+                id: artifact.sessionId,
+                agent_id: artifact.agentId,
+                connection_id: artifact.connectionId,
+                workspace: null,
+                title: '',
+                status: 'idle',
+                updated_at: '',
+              })
+              const viewers = artifactViewerRegistry.findAllViewers(targetArtifact)
+              const preferredExt = artifactViewerRegistry.extractPreferredExtension(contextMenu.node.name)
+              const savedDefaultId = preferredExt
+                ? artifactViewerRegistry.getDefaultViewerIdForExtension(preferredExt)
+                : null
+              return (
+                <>
+                  <Menu.Item
+                    leftSection={<IconEye size={14} />}
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      const node = contextMenu.node
+                      setContextMenu(null)
+                      handleOpenNode(node)
+                    }}
+                  >
+                    打开预览
+                  </Menu.Item>
+                  {viewers.length > 1 && (
+                    <>
+                      <Menu.Divider />
+                      <Menu.Label>打开方式</Menu.Label>
+                      {viewers.map((candidate, idx) => {
+                        const CandidateIcon = candidate.icon
+                        const isPinned = savedDefaultId ? candidate.id === savedDefaultId : idx === 0
+                        return (
+                          <Menu.Item
+                            key={candidate.id}
+                            leftSection={<CandidateIcon size={14} />}
+                            style={{ whiteSpace: 'nowrap' }}
+                            onClick={() => {
+                              setContextMenu(null)
+                              openArtifact(targetArtifact, candidate.id)
+                            }}
+                          >
+                            {candidate.title}
+                            {isPinned ? (savedDefaultId ? '（已设默认）' : '（默认）') : ''}
+                          </Menu.Item>
+                        )
+                      })}
+                      <Menu.Divider />
+                    </>
+                  )}
+                </>
+              )
+            })() : (
               <>
                 <Menu.Item
                   leftSection={<IconFilePlus size={14} />}

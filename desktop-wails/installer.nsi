@@ -197,6 +197,8 @@ stage_daemon:
 fresh_daemon:
   File "build-package\server\bin\astrorder-sessiond.exe"
 daemon_ready:
+  ; Replace official plugins cleanly on upgrade while preserving server\plugins\external
+  RMDir /r "$INSTDIR\server\plugins\official"
   SetOutPath "$INSTDIR"
   File /r /x astrorder-sessiond.exe "build-package\*.*"
 

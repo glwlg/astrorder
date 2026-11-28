@@ -16,6 +16,7 @@ import { useSidecarStore } from '../sidecar/sidecarStore'
 import { extensionRegistry } from './extensionRegistry'
 import { useExtensionStore } from './extensionStore'
 import {
+  AUTH_READY_EVENT,
   buildEsmAssetUrl,
   createEsmPluginLoader,
   isEsmPluginHiddenInOfficeMode,
@@ -114,7 +115,7 @@ describe('Host Runtime Bridge (__ASTRORDER_PLUGIN_RUNTIME_V1__)', () => {
     expect(bridge.apiVersion).toBe(1)
 
     // Strict alignment with backend sdk_esm.go symbol counts
-    expect(Object.keys(bridge.react).sort()).toHaveLength(37)
+    expect(Object.keys(bridge.react).sort()).toHaveLength(38)
     expect(Object.keys(bridge.jsxRuntime).sort()).toEqual(['Fragment', 'jsx', 'jsxs'])
     expect(Object.keys(bridge.reactDom).sort()).toHaveLength(12)
     expect(Object.keys(bridge.reactDomClient).sort()).toEqual(['createRoot', 'hydrateRoot'])
@@ -124,22 +125,34 @@ describe('Host Runtime Bridge (__ASTRORDER_PLUGIN_RUNTIME_V1__)', () => {
       'SDK_VERSION',
       'defineAstrorderPlugin',
       'downloadFile',
+      'emitPluginEvent',
       'getActiveSession',
       'getHostRuntime',
+      'getService',
       'getSessions',
+      'listWorkspaceFiles',
       'navigate',
       'notify',
+      'onHostEvent',
+      'onPluginEvent',
+      'onSessionEvent',
       'openArtifact',
       'openDatabaseWorkbench',
       'openExternal',
       'openPluginPanel',
       'openSettings',
       'quoteToComposer',
+      'readWorkspaceFile',
       'useAppProfile',
       'useCurrentSession',
       'usePluginConfig',
+      'useService',
       'useThemeMode',
+      'writeWorkspaceFile',
     ])
+    expect(Object.keys(bridge.reactRouterDom).sort()).toHaveLength(12)
+    expect(Object.keys(bridge.reactQuery).sort()).toHaveLength(12)
+    expect(Object.keys(bridge.workspaceBridge).sort()).toHaveLength(56)
     expect('tablerIcons' in bridge).toBe(false)
 
     // Ensure zero undefined exports across every shared runtime namespace
@@ -151,6 +164,9 @@ describe('Host Runtime Bridge (__ASTRORDER_PLUGIN_RUNTIME_V1__)', () => {
       bridge.mantineCore,
       bridge.mantineNotifications,
       bridge.sdk,
+      bridge.reactRouterDom,
+      bridge.reactQuery,
+      bridge.workspaceBridge,
     ]) {
       for (const [key, value] of Object.entries(ns)) {
         expect(value, `missing runtime export ${key}`).toBeDefined()
@@ -944,6 +960,75 @@ describe('EsmPluginLoader lifecycle, rollback, hot-swap & serialization', () => 
       expect(artifactViewerRegistry.getViewerById('dbx-viewer')).toBeNull()
       expect(artifactViewerRegistry.getViewerById('gitlab-ci-viewer')).toBeNull()
       expect(deactivateCalls.sort()).toEqual(['dbx-viewer', 'gitlab-ci-viewer'])
+    } finally {
+      stop()
+      await loader.reset()
+    }
+  })
+
+  it('recovers ESM plugins that failed transiently (e.g. startup 401) once auth-ready fires with cache-busting', async () => {
+    let failAuth = true
+    const importer = vi.fn(async (): Promise<RawEsmPluginModule> => {
+      if (failAuth) {
+        throw new Error('Failed to fetch dynamically imported module (401)')
+      }
+      return {
+        activate(ctx) {
+          ctx.registerViewer({
+            id: 'three-viewer',
+            title: '3D Viewer',
+            extensions: ['.glb'],
+            component: () => null,
+          })
+        },
+      }
+    })
+    const loader = createEsmPluginLoader({ importer })
+    const stop = loader.start()
+
+    try {
+      const plugin = makeEsmPlugin({ enabled: true, content_digest: 'auth-race-1' })
+      useExtensionStore.setState({ items: [plugin], hydrated: true })
+      await vi.waitFor(() => expect(loader.getState('three-viewer')?.status).toBe('error'))
+      expect(importer).toHaveBeenCalledTimes(1)
+
+      // Duplicate sync without auth-ready does not loop infinitely
+      await loader.syncLoadedPlugins([plugin])
+      expect(importer).toHaveBeenCalledTimes(1)
+
+      // Once auth succeeds and dispatches AUTH_READY_EVENT, loader retries with cache-busting nonce
+      failAuth = false
+      window.dispatchEvent(new CustomEvent(AUTH_READY_EVENT))
+      await vi.waitFor(() => expect(loader.isLoaded('three-viewer')).toBe(true))
+      expect(importer).toHaveBeenCalledTimes(2)
+      expect(importer).toHaveBeenLastCalledWith(expect.stringMatching(/entry\.js\?v=auth-race-1&r=\d+/))
+      expect(artifactViewerRegistry.getViewerById('three-viewer')).not.toBeNull()
+    } finally {
+      stop()
+      await loader.reset()
+    }
+  })
+
+  it('does not endlessly retry non-retryable SyntaxError export mismatches on auth-ready', async () => {
+    const importer = vi.fn(async (): Promise<RawEsmPluginModule> => {
+      throw new SyntaxError(
+        "The requested module '/api/v1/ext/_sdk/react-router-dom.js' does not provide an export named 'missingExport'",
+      )
+    })
+    const loader = createEsmPluginLoader({ importer })
+    const stop = loader.start()
+
+    try {
+      const plugin = makeEsmPlugin({ enabled: true, content_digest: 'syntax-err-1' })
+      useExtensionStore.setState({ items: [plugin], hydrated: true })
+      await vi.waitFor(() => expect(loader.getState('three-viewer')?.status).toBe('error'))
+      expect(importer).toHaveBeenCalledTimes(1)
+
+      // Subsequent AUTH_READY_EVENT / online events must NOT refetch a broken SyntaxError plugin
+      window.dispatchEvent(new CustomEvent(AUTH_READY_EVENT))
+      window.dispatchEvent(new Event('online'))
+      await loader.retryFailed([plugin])
+      expect(importer).toHaveBeenCalledTimes(1)
     } finally {
       stop()
       await loader.reset()

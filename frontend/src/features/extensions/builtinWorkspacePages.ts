@@ -1,4 +1,5 @@
-import { lazy, type ComponentType } from 'react'
+import { createElement, lazy, Suspense, type ComponentType } from 'react'
+import { Route, Routes } from 'react-router-dom'
 import {
   IconArchive,
   IconChartBar,
@@ -49,7 +50,42 @@ function lazyPage<TModule extends Record<string, unknown>>(
   )
 }
 
-export const BUILTIN_WORKSPACE_PAGES: readonly ExtensionPageRegistration[] = [
+function createTestAgentAccountsPage(): ExtensionPageComponent {
+  const LazyLayout = lazyPage(() => import('../agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout')
+  const LazyAgy = lazyPage(() => import('../agentAccounts/AgyAccountsPage'), 'AgyAccountsPage')
+  const LazyCodex = lazyPage(() => import('../agentAccounts/AgyAccountsPage'), 'CodexAccountsPage')
+  const LazyGrok = lazyPage(() => import('../agentAccounts/AgyAccountsPage'), 'GrokAccountsPage')
+  const LazyUnavailable = lazyPage(
+    () => import('../agentAccounts/UnavailablePlatformPage'),
+    'UnavailablePlatformPage',
+  )
+  return function TestAgentAccountsRoutedPage() {
+    return createElement(
+      Suspense,
+      { fallback: null },
+      createElement(
+        Routes,
+        null,
+        createElement(
+          Route,
+          { element: createElement(LazyLayout) },
+          createElement(Route, { index: true, element: createElement(LazyAgy) }),
+          createElement(Route, { path: 'codex', element: createElement(LazyCodex) }),
+          createElement(Route, { path: 'grok', element: createElement(LazyGrok) }),
+          createElement(Route, { path: 'hermes', element: createElement(LazyUnavailable, { kind: 'hermes' } as ExtensionPageComponentProps) }),
+        ),
+      ),
+    )
+  }
+}
+
+// In production builds, all 8 workspace pages are delivered exclusively as
+// official hot-loaded ESM plugins (`plugins/official/workspace-*`). Guarding
+// the array with `import.meta.env.MODE === 'test'` guarantees Vite eliminates
+// all 8 page chunks from `frontend/dist` and `desktop-wails/assets/app`.
+export const BUILTIN_WORKSPACE_PAGES: readonly ExtensionPageRegistration[] =
+  import.meta.env.MODE === 'test'
+    ? [
   {
     pluginId: WORKSPACE_MONITOR_PLUGIN_ID,
     id: 'monitor',
@@ -170,12 +206,13 @@ export const BUILTIN_WORKSPACE_PAGES: readonly ExtensionPageRegistration[] = [
     icon: IdentificationCardIcon,
     mobileIcon: IconId,
     path: '/agent-accounts',
+    routePaths: ['/agent-accounts', '/agent-accounts/*'],
     order: 80,
     hideInOfficeMode: true,
     hasSecondaryPanel: false,
     showInSidebar: true,
     showInMobileApps: false,
-    component: lazyPage(() => import('../agentAccounts/AgentAccountsLayout'), 'AgentAccountsLayout'),
+    component: createTestAgentAccountsPage(),
     command: {
       id: 'route:accounts',
       title: 'Agent 账号管理',
@@ -284,8 +321,12 @@ export const BUILTIN_WORKSPACE_PAGES: readonly ExtensionPageRegistration[] = [
     source: 'builtin',
   },
 ]
+    : []
 
 export function registerBuiltinWorkspacePages(): Disposable[] {
+  if (import.meta.env.MODE !== 'test') {
+    return []
+  }
   const disposables: Disposable[] = []
   for (const page of BUILTIN_WORKSPACE_PAGES) {
     if (!extensionRegistry.getPageById(page.pluginId, page.id)) {

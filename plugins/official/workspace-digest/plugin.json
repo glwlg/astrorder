@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "workspace-digest",
+  "name": "智能工作复盘与周报",
+  "version": "1.0.0",
+  "category": "office",
+  "description": "按时间跨度自动汇总跨项目会话、Git 提交、任务检查点与 SQL 变更记录，套用多套汇报模板一键生成日报/周报/技术复盘并导出 Word、PPT 或 PDF",
+  "author": "Astrorder",
+  "icon": "notebook",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "digest",
+        "title": "工作复盘与周报",
+        "path": "/digest",
+        "mobile_path": "/mobile/digest",
+        "icon": "notebook",
+        "category": "office",
+        "order": 90,
+        "hide_in_office_mode": false
+      }
+    ]
+  }
+}

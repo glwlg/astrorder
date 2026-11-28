@@ -12,7 +12,6 @@ import { useServerOutboxSync } from '../hooks/useServerOutboxSync'
 import { useChatReturnPath } from '../hooks/useChatReturnPath'
 import { useEventStream } from '../hooks/useEventStream'
 import { ChatPage } from '../features/chat/ChatPage'
-import { accountPlatforms } from '../features/agentAccounts/accountPlatforms'
 import { AstrorderLoader } from '../components/AnimatedStatus'
 import { ShinyText } from '../components/animations/ShinyText'
 import { useShortcutHandlers } from '../features/shortcuts/shortcuts'
@@ -40,7 +39,6 @@ const ActionInboxPage = lazyNamed(() => import('../features/inbox/ActionInboxPag
 const PluginsPage = lazyNamed(() => import('../features/plugins/PluginsPage'), 'PluginsPage')
 const BotsPage = lazyNamed(() => import('../features/bots/BotsPage'), 'BotsPage')
 const IntegrationPage = lazyNamed(() => import('../features/integrations/IntegrationPage'), 'IntegrationPage')
-const UnavailablePlatformPage = lazyNamed(() => import('../features/agentAccounts/UnavailablePlatformPage'), 'UnavailablePlatformPage')
 const QrAuthorizePage = lazyNamed(() => import('../features/auth/QrAuthorizePage'), 'QrAuthorizePage')
 const QrScanPage = lazyNamed(() => import('../features/auth/QrScanPage'), 'QrScanPage')
 const StandaloneSettingsPage = lazyNamed(() => import('../features/settings/SettingsWorkbench'), 'StandaloneSettingsPage')
@@ -202,6 +200,46 @@ function checkIsMobileViewport(): boolean {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
 
+function WorkspacePendingOrRedirect() {
+  const location = useLocation()
+  const extensionsHydrated = useExtensionStore((s) => s.hydrated)
+  const extensionsError = useExtensionStore((s) => s.error)
+  const extensionItems = useExtensionStore((s) => s.items)
+  const esmStates = useExtensionStore((s) => s.esmStates)
+  const enabledPlugins = usePluginSettingsStore((s) => s.enabledPlugins)
+  const appProfile = useAppProfile()
+
+  // Wait while official ESM workspace plugins hydrate on direct URL refresh
+  // so refreshing `/digest`, `/backups`, `/groups/:id`, `/agent-accounts/*`, etc.
+  // never bounces prematurely to `/chat`.
+  if (!extensionsHydrated && !extensionsError) {
+    return <RouteSuspenseFallback />
+  }
+
+  const pathname = location.pathname
+  const pendingMatch = extensionItems.some((item) => {
+    if (item.frontend?.mode !== 'esm' || !item.enabled || item.permissions_granted === false) {
+      return false
+    }
+    if (enabledPlugins[item.id] === false) return false
+    const pages = item.contributes?.pages || []
+    const hitsPath = pages.some((p) => {
+      if (appProfile === 'office' && p.hide_in_office_mode) return false
+      if (!p.path) return false
+      return pathname === p.path || pathname.startsWith(`${p.path}/`)
+    })
+    if (!hitsPath) return false
+    const st = esmStates[item.id]
+    return !st || st.status === 'idle' || st.status === 'loading'
+  })
+
+  if (pendingMatch) {
+    return <RouteSuspenseFallback />
+  }
+
+  return <Navigate to="/chat" replace />
+}
+
 function toChildRoutePath(path: string): string {
   return path.replace(/^\/+/, '')
 }
@@ -254,6 +292,11 @@ function AuthenticatedApp() {
     if (!bootstrap.data) return
     void useExtensionStore.getState().hydrate()
   }, [bootstrap.data])
+  const isBootstrapped = Boolean(bootstrap.data)
+  useEffect(() => {
+    if (!isBootstrapped) return
+    window.dispatchEvent(new CustomEvent('astrorder:auth-ready'))
+  }, [isBootstrapped])
   useEffect(() => {
     if (isStandaloneSettings) return
     const onNavigate = (event: Event) => {
@@ -337,24 +380,12 @@ function AuthenticatedApp() {
         })}
         {accountsPage && (
           <Route
-            path="agent-accounts"
+            path="agent-accounts/*"
             element={renderRegisteredPage(accountsPage, registryVersion, 'desktop')}
-          >
-            {accountPlatforms.map(({ kind, path, Page }) => (
-              <Route
-                key={kind}
-                path={path}
-                element={
-                  <Suspense fallback={<RouteSuspenseFallback />}>
-                    {Page ? <Page /> : <UnavailablePlatformPage kind={kind} />}
-                  </Suspense>
-                }
-              />
-            ))}
-          </Route>
+          />
         )}
         <Route path="ext-page/:pluginId/:pageId" element={<DynamicExtensionPageRoute />} />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
+        <Route path="*" element={<WorkspacePendingOrRedirect />} />
       </Route>
     </Routes>
   )

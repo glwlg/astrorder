@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { notifications } from '@mantine/notifications'
 import { authenticatedApiFetch } from '../../api/client'
+import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
 import type { OpenPluginPanelEventDetail } from './types'
 import './extensions.css'
@@ -10,12 +11,14 @@ export interface SandboxedPluginFrameProps {
   src: string
   title: string
   session?: Session | null
+  artifact?: ArtifactRef | null
   params?: Record<string, unknown>
   autoResize?: boolean
   minHeight?: number
   maxHeight?: number
   className?: string
   onOpenPanel?: (panelId: string, params?: Record<string, unknown>) => void
+  onSave?: (content: string) => Promise<boolean>
 }
 
 interface BridgeMessage {
@@ -139,12 +142,14 @@ export function SandboxedPluginFrame({
   src,
   title,
   session,
+  artifact,
   params,
   autoResize = false,
   minHeight = 220,
   maxHeight = 1200,
   className,
   onOpenPanel,
+  onSave,
 }: SandboxedPluginFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const [frameHeight, setFrameHeight] = useState<number>(minHeight)
@@ -153,13 +158,31 @@ export function SandboxedPluginFrame({
     () => ({
       pluginId,
       theme: getCurrentTheme(),
-      sessionId: session?.id || null,
-      agentId: session?.agent_id || null,
+      sessionId: session?.id || artifact?.sessionId || null,
+      agentId: session?.agent_id || artifact?.agentId || null,
       workspace: session?.workspace || null,
-      connectionId: session?.connection_id || null,
+      connectionId: session?.connection_id || artifact?.connectionId || null,
+      artifact: artifact
+        ? {
+            id: artifact.id,
+            name: artifact.name,
+            path: artifact.path || null,
+            mediaType: artifact.mediaType,
+            kind: artifact.kind,
+            writable: Boolean(artifact.writable),
+          }
+        : null,
       params: params || {},
     }),
-    [pluginId, session?.id, session?.agent_id, session?.workspace, session?.connection_id, params],
+    [
+      pluginId,
+      session?.id,
+      session?.agent_id,
+      session?.workspace,
+      session?.connection_id,
+      artifact,
+      params,
+    ],
   )
 
   const pushContext = useCallback(() => {
@@ -313,6 +336,86 @@ export function SandboxedPluginFrame({
         return
       }
 
+      if (msg.type === 'astrorder:read-file') {
+        if (!artifact) {
+          reply({ ok: false, error: '当前面板未绑定可读取的工件文件' })
+          return
+        }
+        const rawEnc = typeof payload.encoding === 'string' ? payload.encoding.toLowerCase() : 'utf8'
+        const wantBase64 = rawEnc === 'base64'
+        const inlineContent =
+          artifact.metadata && typeof artifact.metadata.inlineContent === 'string'
+            ? artifact.metadata.inlineContent
+            : null
+        if (inlineContent !== null && !wantBase64) {
+          const data = {
+            name: artifact.name,
+            path: artifact.path || null,
+            mediaType: artifact.mediaType,
+            writable: Boolean(artifact.writable),
+            encoding: 'utf8',
+            content: inlineContent,
+          }
+          reply({ ok: true, data, result: data })
+          return
+        }
+        if (!artifact.readUrl) {
+          reply({ ok: false, error: '该文件没有可用的读取地址' })
+          return
+        }
+        void (async () => {
+          try {
+            const resp = await authenticatedApiFetch(artifact.readUrl)
+            if (!resp.ok) {
+              reply({ ok: false, error: `读取文件失败 (${resp.status})` })
+              return
+            }
+            const contentType = resp.headers.get('Content-Type') || artifact.mediaType || 'application/octet-stream'
+            let content: string
+            if (wantBase64) {
+              const bytes = new Uint8Array(await resp.arrayBuffer())
+              let binary = ''
+              const chunkSize = 0x8000
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+              }
+              content = btoa(binary)
+            } else {
+              content = await resp.text()
+            }
+            const data = {
+              name: artifact.name,
+              path: artifact.path || null,
+              mediaType: contentType,
+              writable: Boolean(artifact.writable),
+              encoding: wantBase64 ? 'base64' : 'utf8',
+              content,
+            }
+            reply({ ok: true, data, result: data })
+          } catch (err) {
+            reply({ ok: false, error: err instanceof Error ? err.message : '读取文件异常' })
+          }
+        })()
+        return
+      }
+
+      if (msg.type === 'astrorder:save-file') {
+        if (!artifact || !artifact.writable || !onSave) {
+          reply({ ok: false, error: '当前文件不可写或未启用保存回调' })
+          return
+        }
+        const content = typeof payload.content === 'string' ? payload.content : ''
+        void (async () => {
+          try {
+            const saved = await onSave(content)
+            reply({ ok: saved, data: { ok: saved }, result: { ok: saved }, ...(saved ? {} : { error: '保存文件失败' }) })
+          } catch (err) {
+            reply({ ok: false, error: err instanceof Error ? err.message : '保存文件异常' })
+          }
+        })()
+        return
+      }
+
       if (msg.type === 'astrorder:resize') {
         const nextHeight = typeof msg.height === 'number'
           ? msg.height
@@ -330,7 +433,7 @@ export function SandboxedPluginFrame({
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [pluginId, contextPayload, session, autoResize, minHeight, maxHeight, onOpenPanel])
+  }, [pluginId, contextPayload, session, artifact, onSave, autoResize, minHeight, maxHeight, onOpenPanel])
 
   return (
     <iframe

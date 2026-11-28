@@ -19,8 +19,10 @@ import {
   IconTerminal2,
   IconWorld,
 } from '@tabler/icons-react'
+import type { PluginView } from '../../api/extensions'
 import type { ArtifactRef } from '../../domain/artifact'
 import { extensionRegistry } from '../extensions/extensionRegistry'
+import { SandboxedPluginFrame } from '../extensions/SandboxedPluginFrame'
 import { PluginPanelViewer } from '../extensions/SlotRenderer'
 import {
   EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
@@ -706,12 +708,16 @@ const externalPluginPanelViewer: ArtifactViewer = {
 const NON_PREVIEWABLE_EXTENSIONS =
   /\.(?:exe|dll|msi|msix|appx|com|bin|so|dylib|a|o|obj|class|jar|war|wasm|zip|7z|rar|gz|bz2|xz|tar|woff2?|ttf|otf)$/i
 
+export const FILE_VIEWER_DEFAULTS_PLUGIN_ID = 'file-viewer-defaults'
+
 export function isNonPreviewableFile(fileNameOrPath: string): boolean {
   return NON_PREVIEWABLE_EXTENSIONS.test(fileNameOrPath.toLowerCase().split(/[?#]/)[0])
 }
 
 class ArtifactViewerRegistry {
   private viewers: ArtifactViewer[] = []
+  private declarativeIframeDisposables = new Map<string, Disposable>()
+  private declarativeIframeKeys = new Map<string, string>()
   private cachedExtensionRegex: RegExp | null = null
   private cachedEnabledPlugins: Record<string, boolean> | null = null
   private listeners = new Set<() => void>()
@@ -745,7 +751,11 @@ class ArtifactViewerRegistry {
 
     if (typeof usePluginSettingsStore.subscribe === 'function') {
       usePluginSettingsStore.subscribe((state, prevState) => {
-        if (state.enabledPlugins !== prevState.enabledPlugins) {
+        if (
+          state.enabledPlugins !== prevState.enabledPlugins ||
+          state.pluginConfigs[FILE_VIEWER_DEFAULTS_PLUGIN_ID] !==
+            prevState.pluginConfigs[FILE_VIEWER_DEFAULTS_PLUGIN_ID]
+        ) {
           this.invalidateExtensionCache()
           this.emit()
         }
@@ -874,64 +884,357 @@ class ArtifactViewerRegistry {
     return false
   }
 
-  findViewer(artifact: ArtifactRef): ArtifactViewer | null {
-    let bestViewer: ArtifactViewer | null = null
-    let maxPriority = 0
-
-    const lowerName = (artifact.name || '').toLowerCase()
+  private scoreViewer(viewer: ArtifactViewer, artifact: ArtifactRef): number {
+    const lowerName = (artifact.name || artifact.path || '').toLowerCase().split(/[?#]/)[0]
     const mime = (artifact.mediaType || '').toLowerCase()
 
+    // 1. 优先调用自定义打分支持
+    if (viewer.supports) {
+      return viewer.supports(artifact)
+    }
+
+    // 2. 默认自声明匹配：复合扩展名（如 .drawio.xml） > 专用单扩展名 > 通用文本编辑器 > MIME 匹配
+    const matchedExts =
+      viewer.extensions?.filter((ext) => {
+        const norm = ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`
+        return lowerName.endsWith(norm)
+      }) || []
+    if (matchedExts.length > 0) {
+      const maxExtLen = Math.max(...matchedExts.map((ext) => ext.length))
+      const hasCompoundExt = matchedExts.some((ext) => ext.replace(/^\./, '').includes('.'))
+      if (hasCompoundExt) {
+        return 85 + Math.min(10, maxExtLen)
+      }
+      return viewer.id === 'monaco-viewer' ? 80 : 82
+    }
+    if (viewer.mimeTypes?.some((m) => m.toLowerCase() === mime && mime !== 'text/plain')) {
+      return 40
+    }
+    return 0
+  }
+
+  private isInternalVirtualArtifact(artifact: ArtifactRef): boolean {
+    const id = artifact.id || ''
+    const mime = (artifact.mediaType || '').toLowerCase()
+    if (
+      id.startsWith('filetree:') ||
+      id.startsWith('terminal:') ||
+      id.startsWith('browser:') ||
+      id.startsWith('blackboard:') ||
+      id.startsWith('memory:') ||
+      id.startsWith('gitdifftree:') ||
+      id.startsWith('gitworktrees:') ||
+      id.startsWith('sidechat:') ||
+      id.startsWith('agentgraph:') ||
+      id.startsWith('database:') ||
+      id.startsWith('ext:')
+    ) {
+      return true
+    }
+    return mime.startsWith('application/x-')
+  }
+
+  extractPreferredExtension(fileNameOrPath: string): string {
+    const clean = (fileNameOrPath || '').toLowerCase().split(/[?#]/)[0]
+    const base = clean.split(/[\\/]/).pop() || clean
+    if (!base) return ''
+    // Prefer longest registered extension (supports compound extensions like .drawio.xml / .note.json).
+    let bestExt = ''
+    for (const ext of this.getAllRegisteredExtensions()) {
+      if (base.endsWith(ext) && ext.length > bestExt.length) {
+        bestExt = ext
+      }
+    }
+    if (bestExt) return bestExt
+    const dot = base.lastIndexOf('.')
+    return dot > 0 ? base.slice(dot) : ''
+  }
+
+  getDefaultViewerIdForExtension(ext: string): string | null {
+    const clean = ext.trim().toLowerCase()
+    if (!clean) return null
+    const normalized = clean.startsWith('.') ? clean : `.${clean}`
+    const map = usePluginSettingsStore.getState().pluginConfigs[FILE_VIEWER_DEFAULTS_PLUGIN_ID]
+    const saved = map && typeof map[normalized] === 'string' ? (map[normalized] as string).trim() : ''
+    return saved || null
+  }
+
+  setDefaultViewerForExtension(ext: string, viewerId: string | null): void {
+    const clean = ext.trim().toLowerCase()
+    if (!clean) return
+    const normalized = clean.startsWith('.') ? clean : `.${clean}`
+    usePluginSettingsStore
+      .getState()
+      .setPluginConfig(FILE_VIEWER_DEFAULTS_PLUGIN_ID, normalized, viewerId || '')
+  }
+
+  findAllViewers(artifact: ArtifactRef): ArtifactViewer[] {
+    const scored: Array<{ viewer: ArtifactViewer; priority: number }> = []
     for (const viewer of this.viewers) {
-      // 用户关闭开关则跳过
       if (!this.isViewerEnabled(viewer)) continue
+      const priority = this.scoreViewer(viewer, artifact)
+      if (priority > 0) {
+        scored.push({ viewer, priority })
+      }
+    }
 
-      let priority = 0
+    scored.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority
+      if (a.viewer.id === 'monaco-viewer' && b.viewer.id !== 'monaco-viewer') return 1
+      if (b.viewer.id === 'monaco-viewer' && a.viewer.id !== 'monaco-viewer') return -1
+      return 0
+    })
 
-      // 1. 优先调用自定义打分支持
-      if (viewer.supports) {
-        priority = viewer.supports(artifact)
-      } else {
-        // 2. 默认自声明匹配：复合扩展名（如 .drawio.xml） > 专用单扩展名 > 通用文本编辑器 > MIME 匹配
-        const matchedExts = viewer.extensions?.filter((ext) => lowerName.endsWith(ext.toLowerCase())) || []
-        if (matchedExts.length > 0) {
-          const maxExtLen = Math.max(...matchedExts.map((ext) => ext.length))
-          const hasCompoundExt = matchedExts.some((ext) => ext.replace(/^\./, '').includes('.'))
-          if (hasCompoundExt) {
-            priority = 85 + Math.min(10, maxExtLen)
-          } else {
-            priority = viewer.id === 'monaco-viewer' ? 80 : 82
-          }
-        } else if (
-          viewer.mimeTypes?.some((m) => m.toLowerCase() === mime && mime !== 'text/plain')
-        ) {
-          priority = 40
+    const result = scored.map((entry) => entry.viewer)
+    const lowerName = (artifact.name || artifact.path || '').toLowerCase().split(/[?#]/)[0]
+    const mime = (artifact.mediaType || '').toLowerCase()
+    const monaco = this.getViewerById('monaco-viewer')
+    const hasMonaco = result.some((v) => v.id === 'monaco-viewer')
+
+    if (monaco && !hasMonaco && this.isViewerEnabled(monaco) && !isNonPreviewableFile(lowerName)) {
+      const mayBeText = !mime || mime.startsWith('text/') || mime === 'application/octet-stream' || mime === 'application/json' || mime === 'application/xml'
+      const isBinaryOfficeOrMedia =
+        /\.(?:pdf|docx|xlsx|pptx|png|jpe?g|gif|webp|bmp|ico|mp4|m4v|webm|mov|mkv|ogv|mp3|wav|m4a|ogg|flac|aac|opus|glb|gltf|stl|fbx|3ds)$/i.test(lowerName)
+      if (result.length === 0) {
+        if (mayBeText) {
+          result.push(monaco)
+        }
+      } else if (!this.isInternalVirtualArtifact(artifact) && !isBinaryOfficeOrMedia) {
+        // Allow opening text-based or custom-extension artifacts in the code editor via "打开方式".
+        result.push(monaco)
+      }
+    }
+
+    // Honor persisted user default viewer preference for this file extension when enabled and matching.
+    if (result.length > 1 && !this.isInternalVirtualArtifact(artifact)) {
+      const preferredExt = this.extractPreferredExtension(artifact.name || artifact.path || '')
+      const preferredViewerId = preferredExt ? this.getDefaultViewerIdForExtension(preferredExt) : null
+      if (preferredViewerId) {
+        const idx = result.findIndex((v) => v.id === preferredViewerId)
+        if (idx > 0) {
+          const [picked] = result.splice(idx, 1)
+          result.unshift(picked)
         }
       }
-
-      if (priority > maxPriority) {
-        maxPriority = priority
-        bestViewer = viewer
-      }
     }
 
-    // 未知扩展名及无扩展名文件也允许尝试文本读取，由编辑器检查实际内容。
-    const monaco = this.getViewerById('monaco-viewer')
-    const mayBeText = !mime || mime.startsWith('text/') || mime === 'application/octet-stream'
-    if (
-      !bestViewer &&
-      monaco &&
-      this.isViewerEnabled(monaco) &&
-      !isNonPreviewableFile(lowerName) &&
-      mayBeText
-    ) {
-      return monaco
-    }
+    return result
+  }
 
-    return bestViewer
+  findViewer(artifact: ArtifactRef): ArtifactViewer | null {
+    return this.findAllViewers(artifact)[0] || null
   }
 
   getViewerById(id: string): ArtifactViewer | null {
     return this.viewers.find((v) => v.id === id) || null
+  }
+
+  getEnabledViewerById(id: string): ArtifactViewer | null {
+    const viewer = this.getViewerById(id)
+    if (!viewer) return null
+    return this.isViewerEnabled(viewer) ? viewer : null
+  }
+
+  /**
+   * Synchronizes declarative iframe file viewers declared in plugin manifests
+   * (`contributes.viewers[].ui_entry`). Plugins that only ship a static HTML/JS
+   * viewer page + `bridge.js` can register file extensions without ESM bundling.
+   */
+  syncDeclarativeIframeViewers(plugins: PluginView[]): void {
+    const desired = new Map<
+      string,
+      { key: string; plugin: PluginView; spec: NonNullable<NonNullable<PluginView['contributes']>['viewers']>[number] }
+    >()
+
+    for (const plugin of plugins) {
+      if (!plugin.enabled || plugin.permissions_granted === false || !plugin.ui_base_url) continue
+      const viewers = plugin.contributes?.viewers || []
+      for (const spec of viewers) {
+        const uiEntry = spec.ui_entry?.trim()
+        if (!uiEntry) continue
+        const viewerId = spec.id?.trim() || `${plugin.id}:viewer`
+        // If an ESM plugin already registered this exact viewer ID dynamically, do not overwrite it.
+        const existing = this.getViewerById(viewerId)
+        if (existing && existing.source === 'esm') continue
+        const signature = JSON.stringify([
+          plugin.id,
+          plugin.version,
+          plugin.content_digest || '',
+          plugin.ui_base_url,
+          uiEntry,
+          spec.title,
+          spec.extensions || [],
+          spec.mime_types || [],
+          spec.priority ?? null,
+          spec.read_only ?? false,
+          spec.default_for_extensions ?? false,
+        ])
+        desired.set(viewerId, { key: signature, plugin, spec })
+      }
+    }
+
+    for (const [viewerId, disposable] of Array.from(this.declarativeIframeDisposables.entries())) {
+      if (!desired.has(viewerId)) {
+        disposable.dispose()
+        this.declarativeIframeDisposables.delete(viewerId)
+        this.declarativeIframeKeys.delete(viewerId)
+      }
+    }
+
+    for (const [viewerId, { key, plugin, spec }] of desired.entries()) {
+      if (this.declarativeIframeKeys.get(viewerId) === key) continue
+      this.declarativeIframeDisposables.get(viewerId)?.dispose()
+
+      const baseUrl = plugin.ui_base_url!.replace(/\/+$/, '')
+      const cleanEntry = spec.ui_entry!.trim().replace(/^\/+/, '')
+      const frameSrc = `${baseUrl}/${cleanEntry}`
+      const normalizedExts = (spec.extensions || [])
+        .map((ext) => {
+          const t = ext.trim().toLowerCase()
+          if (!t) return ''
+          return t.startsWith('.') ? t : `.${t}`
+        })
+        .filter(Boolean)
+      const normalizedMimes = (spec.mime_types || [])
+        .map((m) => m.trim().toLowerCase())
+        .filter(Boolean)
+      const basePriority =
+        typeof spec.priority === 'number' && Number.isFinite(spec.priority) && spec.priority > 0
+          ? spec.priority
+          : spec.default_for_extensions
+            ? 96
+            : 86
+      const readOnly = Boolean(spec.read_only)
+
+      const IframeFileViewerComponent: ArtifactViewerComponent = ({
+        artifact,
+        session,
+        toolbarAction,
+        onSave,
+      }: ViewerContext) =>
+        createElement(
+          'div',
+          {
+            className: 'ext-panel-host ext-iframe-file-viewer',
+            style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+          },
+          createElement(
+            'div',
+            {
+              className: 'ext-iframe-viewer-header',
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '6px 10px',
+                borderBottom: '1px solid var(--astr-border)',
+                background: 'var(--astr-surface)',
+                flexShrink: 0,
+              },
+            },
+            createElement(
+              'div',
+              {
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                },
+              },
+              createElement(IconPuzzle, {
+                size: 15,
+                style: { color: spec.tab_color || 'var(--astr-indigo, #6366f1)', flexShrink: 0 },
+              }),
+              createElement(
+                'span',
+                {
+                  style: {
+                    fontSize: 12,
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  },
+                  title: artifact.path || artifact.name,
+                },
+                artifact.name || spec.title || plugin.name,
+              ),
+              spec.badge_label
+                ? createElement(
+                    'span',
+                    {
+                      style: {
+                        fontSize: 11,
+                        color: 'var(--astr-muted)',
+                        flexShrink: 0,
+                      },
+                    },
+                    spec.badge_label,
+                  )
+                : null,
+            ),
+            toolbarAction
+              ? createElement('div', { style: { flexShrink: 0 } }, toolbarAction)
+              : null,
+          ),
+          createElement(
+            'div',
+            { style: { flex: 1, minHeight: 0, position: 'relative' } },
+            createElement(SandboxedPluginFrame, {
+              pluginId: plugin.id,
+              src: frameSrc,
+              title: spec.title || plugin.name,
+              session,
+              artifact,
+              onSave: readOnly ? undefined : onSave,
+              params: {
+                viewerId,
+                artifactId: artifact.id,
+                artifactName: artifact.name,
+                artifactPath: artifact.path || '',
+                mediaType: artifact.mediaType,
+                writable: Boolean(artifact.writable) && !readOnly,
+              },
+            }),
+          ),
+        )
+
+      const viewer: ArtifactViewer = {
+        id: viewerId,
+        pluginId: plugin.id,
+        source: 'iframe',
+        title: spec.title || plugin.name,
+        description: spec.description || plugin.description,
+        version: plugin.version,
+        badgeLabel: spec.badge_label,
+        tabColor: spec.tab_color,
+        icon: IconPuzzle,
+        extensions: normalizedExts,
+        mimeTypes: normalizedMimes,
+        supports: (artifact: ArtifactRef): number => {
+          const lowerName = (artifact.name || artifact.path || '').toLowerCase().split(/[?#]/)[0]
+          const matched = normalizedExts.filter((ext) => lowerName.endsWith(ext))
+          if (matched.length > 0) {
+            const hasCompound = matched.some((ext) => ext.slice(1).includes('.'))
+            return hasCompound ? Math.max(basePriority, 95) + 2 : basePriority
+          }
+          const mime = (artifact.mediaType || '').toLowerCase()
+          if (mime && normalizedMimes.includes(mime)) {
+            return Math.min(basePriority, 60)
+          }
+          return 0
+        },
+        capabilities: { canEdit: !readOnly },
+        component: IframeFileViewerComponent,
+      }
+
+      const disposable = this.register(viewer)
+      this.declarativeIframeDisposables.set(viewerId, disposable)
+      this.declarativeIframeKeys.set(viewerId, key)
+    }
   }
 }
 

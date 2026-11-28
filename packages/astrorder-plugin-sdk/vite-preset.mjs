@@ -16,6 +16,9 @@ export const ASTRORDER_HOST_EXTERNALS = Object.freeze([
   '@mantine/core',
   '@mantine/notifications',
   '@astrorder/sdk',
+  'react-router-dom',
+  '@tanstack/react-query',
+  '@astrorder/workspace-bridge',
 ])
 
 function buildExternalMatcher(extraExternals = []) {

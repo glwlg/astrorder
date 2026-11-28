@@ -11,6 +11,11 @@ import {
   type ExtensionCommandRegistration,
   type ExtensionPageRegistration,
   type ExtensionQueryOptions,
+  type MarkdownBlockRendererRegistration,
+  type MessageDecoratorRegistration,
+  type MessageInterceptorRegistration,
+  type MessageInterceptorResult,
+  type MessageSendContext,
 } from './types'
 
 function resolveOfficeFilter(options?: ExtensionQueryOptions): boolean {
@@ -31,6 +36,9 @@ class ExtensionRegistry {
   private builtins = new Map<string, BuiltInExtensionRegistration>()
   private pages = new Map<string, ExtensionPageRegistration>()
   private commands = new Map<string, ExtensionCommandRegistration>()
+  private messageInterceptors = new Map<string, MessageInterceptorRegistration>()
+  private markdownBlockRenderers = new Map<string, MarkdownBlockRendererRegistration>()
+  private messageDecorators = new Map<string, MessageDecoratorRegistration>()
   private registeredViewerDisposables = new Map<string, Disposable>()
   private listeners = new Set<() => void>()
   private version = 0
@@ -188,15 +196,232 @@ class ExtensionRegistry {
     return removed
   }
 
+  registerMessageInterceptor(spec: MessageInterceptorRegistration): Disposable {
+    const key = `${spec.pluginId}:${spec.id}`
+    this.messageInterceptors.set(key, spec)
+    this.emit()
+    return {
+      dispose: () => {
+        if (this.messageInterceptors.get(key) === spec) {
+          this.messageInterceptors.delete(key)
+          this.emit()
+        }
+      },
+    }
+  }
+
+  unregisterMessageInterceptor(pluginId: string, id?: string): boolean {
+    if (id !== undefined) {
+      const removed = this.messageInterceptors.delete(`${pluginId}:${id}`)
+      if (removed) this.emit()
+      return removed
+    }
+    let removedAny = false
+    for (const [key, item] of Array.from(this.messageInterceptors.entries())) {
+      if (item.pluginId === pluginId) {
+        this.messageInterceptors.delete(key)
+        removedAny = true
+      }
+    }
+    if (removedAny) this.emit()
+    return removedAny
+  }
+
+  getActiveMessageInterceptors(options?: ExtensionQueryOptions): MessageInterceptorRegistration[] {
+    const enabledMap = resolveEnabledMap(options)
+    return Array.from(this.messageInterceptors.values())
+      .filter((item) => options?.includeDisabled || isPluginActive(item.pluginId, enabledMap))
+      .sort((a, b) => (a.order ?? 200) - (b.order ?? 200))
+  }
+
+  async runMessageInterceptors(
+    initialCtx: MessageSendContext,
+    options?: ExtensionQueryOptions & { timeoutMs?: number },
+  ): Promise<{
+    text: string
+    metadata: Record<string, unknown>
+    cancelled: boolean
+    reason?: string
+    cancelledBy?: string
+  }> {
+    const interceptors = this.getActiveMessageInterceptors(options)
+    let text = initialCtx.text
+    const metadata: Record<string, unknown> = { ...initialCtx.metadata }
+    const timeoutMs = options?.timeoutMs ?? 3000
+
+    for (const interceptor of interceptors) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const result = await Promise.race<void | MessageInterceptorResult>([
+          Promise.resolve(
+            interceptor.beforeSend({
+              session: initialCtx.session,
+              text,
+              attachments: initialCtx.attachments,
+              metadata: { ...metadata },
+            }),
+          ),
+          new Promise<void>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`interceptor timeout (${timeoutMs}ms)`)),
+              timeoutMs,
+            )
+          }),
+        ])
+        if (result && typeof result === 'object') {
+          if (result.metadata && typeof result.metadata === 'object') {
+            Object.assign(metadata, result.metadata)
+          }
+          if (result.cancel) {
+            return {
+              text,
+              metadata,
+              cancelled: true,
+              reason: result.reason,
+              cancelledBy: interceptor.pluginId,
+            }
+          }
+          if (typeof result.text === 'string') {
+            text = result.text
+          }
+        }
+      } catch (err) {
+        console.error(
+          `[extensionRegistry] message interceptor "${interceptor.pluginId}:${interceptor.id}" failed:`,
+          err,
+        )
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+    }
+
+    return { text, metadata, cancelled: false }
+  }
+
+  registerMarkdownBlockRenderer(spec: MarkdownBlockRendererRegistration): Disposable {
+    const key = `${spec.pluginId}:${spec.id}`
+    const normalized: MarkdownBlockRendererRegistration = {
+      ...spec,
+      languages: Array.from(
+        new Set(
+          (spec.languages || [])
+            .map((lang) => lang.trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ),
+    }
+    this.markdownBlockRenderers.set(key, normalized)
+    this.emit()
+    return {
+      dispose: () => {
+        if (this.markdownBlockRenderers.get(key) === normalized) {
+          this.markdownBlockRenderers.delete(key)
+          this.emit()
+        }
+      },
+    }
+  }
+
+  unregisterMarkdownBlockRenderer(pluginId: string, id?: string): boolean {
+    if (id !== undefined) {
+      const removed = this.markdownBlockRenderers.delete(`${pluginId}:${id}`)
+      if (removed) this.emit()
+      return removed
+    }
+    let removedAny = false
+    for (const [key, item] of Array.from(this.markdownBlockRenderers.entries())) {
+      if (item.pluginId === pluginId) {
+        this.markdownBlockRenderers.delete(key)
+        removedAny = true
+      }
+    }
+    if (removedAny) this.emit()
+    return removedAny
+  }
+
+  findMarkdownBlockRenderer(
+    language: string,
+    options?: ExtensionQueryOptions,
+  ): MarkdownBlockRendererRegistration | null {
+    const cleanLang = language.trim().toLowerCase()
+    if (!cleanLang) return null
+    const enabledMap = resolveEnabledMap(options)
+    let best: MarkdownBlockRendererRegistration | null = null
+    let bestPriority = -Infinity
+    for (const item of this.markdownBlockRenderers.values()) {
+      if (!options?.includeDisabled && !isPluginActive(item.pluginId, enabledMap)) {
+        continue
+      }
+      if (!item.languages.includes(cleanLang)) continue
+      const prio = item.priority ?? 100
+      if (prio > bestPriority) {
+        bestPriority = prio
+        best = item
+      }
+    }
+    return best
+  }
+
+  registerMessageDecorator(spec: MessageDecoratorRegistration): Disposable {
+    const key = `${spec.pluginId}:${spec.id}`
+    this.messageDecorators.set(key, spec)
+    this.emit()
+    return {
+      dispose: () => {
+        if (this.messageDecorators.get(key) === spec) {
+          this.messageDecorators.delete(key)
+          this.emit()
+        }
+      },
+    }
+  }
+
+  unregisterMessageDecorator(pluginId: string, id?: string): boolean {
+    if (id !== undefined) {
+      const removed = this.messageDecorators.delete(`${pluginId}:${id}`)
+      if (removed) this.emit()
+      return removed
+    }
+    let removedAny = false
+    for (const [key, item] of Array.from(this.messageDecorators.entries())) {
+      if (item.pluginId === pluginId) {
+        this.messageDecorators.delete(key)
+        removedAny = true
+      }
+    }
+    if (removedAny) this.emit()
+    return removedAny
+  }
+
+  getActiveMessageDecorators(
+    position: 'header' | 'footer',
+    options?: ExtensionQueryOptions,
+  ): MessageDecoratorRegistration[] {
+    const enabledMap = resolveEnabledMap(options)
+    return Array.from(this.messageDecorators.values())
+      .filter(
+        (item) =>
+          item.position === position &&
+          (options?.includeDisabled || isPluginActive(item.pluginId, enabledMap)),
+      )
+      .sort((a, b) => (a.order ?? 200) - (b.order ?? 200))
+  }
+
   clear(): void {
     const hadAny =
       this.builtins.size > 0 ||
       this.pages.size > 0 ||
       this.commands.size > 0 ||
+      this.messageInterceptors.size > 0 ||
+      this.markdownBlockRenderers.size > 0 ||
+      this.messageDecorators.size > 0 ||
       this.registeredViewerDisposables.size > 0
     this.builtins.clear()
     this.pages.clear()
     this.commands.clear()
+    this.messageInterceptors.clear()
+    this.markdownBlockRenderers.clear()
+    this.messageDecorators.clear()
     for (const id of Array.from(this.registeredViewerDisposables.keys())) {
       artifactViewerRegistry.unregister(id)
     }

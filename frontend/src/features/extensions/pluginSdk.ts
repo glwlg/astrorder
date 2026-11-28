@@ -1,6 +1,6 @@
 import { createElement, useSyncExternalStore, type ComponentType } from 'react'
 import { notifications } from '@mantine/notifications'
-import { authenticatedApiFetch } from '../../api/client'
+import { api as hostApi, authenticatedApiFetch } from '../../api/client'
 import { extensionsApi, type PluginView } from '../../api/extensions'
 import type { ArtifactRef } from '../../domain/artifact'
 import type { Session } from '../../domain/types'
@@ -23,6 +23,14 @@ import type {
   ViewerConfigOption,
 } from '../sidecar/types'
 import { extensionRegistry } from './extensionRegistry'
+import { useExtensionStore } from './extensionStore'
+import {
+  pluginEventBus,
+  type HostEventHandler,
+  type HostStreamEvent,
+  type PluginEventHandler,
+  type PluginEventMeta,
+} from './pluginEventBus'
 import type {
   BuiltInExtensionRegistration,
   BuiltInGitMenuItem,
@@ -33,12 +41,32 @@ import type {
   ExtensionPageComponent,
   ExtensionPageIcon,
   ExtensionPageRegistration,
+  MarkdownBlockRendererProps,
+  MarkdownBlockRendererRegistration,
+  MessageDecoratorProps,
+  MessageDecoratorRegistration,
+  MessageInterceptorRegistration,
+  MessageInterceptorResult,
+  MessageSendContext,
   StatusBarSlotContext,
 } from './types'
 
 export const SDK_VERSION = 1 as const
 
-export type { DatabaseToolProvider, Disposable, OpenSqlFileParams, OpenSqlSnippetParams }
+export type {
+  DatabaseToolProvider,
+  Disposable,
+  HostEventHandler,
+  HostStreamEvent,
+  MarkdownBlockRendererProps,
+  MessageDecoratorProps,
+  MessageInterceptorResult,
+  MessageSendContext,
+  OpenSqlFileParams,
+  OpenSqlSnippetParams,
+  PluginEventHandler,
+  PluginEventMeta,
+}
 
 export interface PluginNotifyOptions {
   message: string
@@ -101,6 +129,88 @@ export interface PluginViewerContribution {
   documentation?: ArtifactViewer['documentation']
 }
 
+export interface PluginFileHandlerContribution {
+  id?: string
+  title: string
+  description?: string
+  extensions: string[]
+  mimeTypes?: string[]
+  priority?: number
+  defaultForExtensions?: boolean
+  canEdit?: boolean
+  badgeLabel?: string
+  tabColor?: string
+  category?: PluginCategory
+  icon?: ComponentType<{ size?: number; className?: string }>
+  supports?: (artifact: ArtifactRef) => number
+  component: ArtifactViewerComponent
+  configOptions?: ViewerConfigOption[]
+  documentation?: ArtifactViewer['documentation']
+}
+
+export interface PluginMessageInterceptorContribution {
+  id: string
+  order?: number
+  beforeSend: MessageInterceptorRegistration['beforeSend']
+}
+
+export interface PluginMarkdownBlockRendererContribution {
+  id: string
+  languages: string[]
+  priority?: number
+  title?: string
+  component: MarkdownBlockRendererRegistration['component']
+}
+
+export interface PluginMessageDecoratorContribution {
+  id: string
+  position: 'header' | 'footer'
+  order?: number
+  match?: MessageDecoratorRegistration['match']
+  component: MessageDecoratorRegistration['component']
+}
+
+export interface WorkspaceFileEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size?: number
+  children?: WorkspaceFileEntry[]
+}
+
+export interface WorkspaceFileReadOptions {
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+  encoding?: 'utf8' | 'base64'
+}
+
+export interface WorkspaceFileReadResult {
+  path: string
+  content: string
+  encoding: 'utf8' | 'base64'
+  contentType: string
+}
+
+export interface WorkspaceFileWriteOptions {
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+}
+
+export interface WorkspaceFileListOptions {
+  path?: string
+  depth?: number
+  sessionId?: string
+  workspace?: string
+  connectionId?: string
+}
+
+export interface WorkspaceFileListResult {
+  root: string
+  items: WorkspaceFileEntry[]
+}
+
 export interface PluginCommandContribution
   extends Omit<ExtensionCommandRegistration, 'pluginId' | 'source' | 'keywords'> {
   id: string
@@ -145,6 +255,15 @@ export interface AstrorderPluginApi {
   useAppProfile(): AppProfile
   useCurrentSession(): Session | null
   useThemeMode(): 'light' | 'dark'
+  onHostEvent(pattern: string, handler: HostEventHandler): Disposable
+  onSessionEvent(sessionId: string, handler: HostEventHandler): Disposable
+  emitPluginEvent(topic: string, payload?: unknown): void
+  onPluginEvent<T = unknown>(topic: string, handler: PluginEventHandler<T>): Disposable
+  getService<T = unknown>(serviceId: string): T | undefined
+  useService<T = unknown>(serviceId: string): T | undefined
+  readWorkspaceFile(filePath: string, opts?: WorkspaceFileReadOptions): Promise<WorkspaceFileReadResult>
+  writeWorkspaceFile(filePath: string, content: string, opts?: WorkspaceFileWriteOptions): Promise<void>
+  listWorkspaceFiles(opts?: WorkspaceFileListOptions): Promise<WorkspaceFileListResult>
 }
 
 export interface AstrorderPluginContext {
@@ -153,9 +272,14 @@ export interface AstrorderPluginContext {
   readonly subscriptions: Disposable[]
   registerPage(spec: PluginPageContribution): Disposable
   registerViewer(spec: PluginViewerContribution): Disposable
+  registerFileHandler(spec: PluginFileHandlerContribution): Disposable
   registerSlot(spec: PluginSlotContribution): Disposable
   registerCommand(spec: PluginCommandContribution): Disposable
   registerDatabaseTool(provider: DatabaseToolProvider): Disposable
+  registerMessageInterceptor(spec: PluginMessageInterceptorContribution): Disposable
+  registerMarkdownBlockRenderer(spec: PluginMarkdownBlockRendererContribution): Disposable
+  registerMessageDecorator(spec: PluginMessageDecoratorContribution): Disposable
+  registerService<T>(serviceId: string, impl: T): Disposable
   readonly api: AstrorderPluginApi
 }
 
@@ -456,25 +580,190 @@ export function getHostRuntime(): unknown {
   return (globalThis as Record<string, unknown>).__ASTRORDER_PLUGIN_RUNTIME_V1__
 }
 
+export function onHostEvent(pattern: string, handler: HostEventHandler): Disposable {
+  return pluginEventBus.onHostEvent(pattern, handler)
+}
+
+export function onSessionEvent(sessionId: string, handler: HostEventHandler): Disposable {
+  return pluginEventBus.onSessionEvent(sessionId, handler)
+}
+
+export function emitPluginEvent(topic: string, payload?: unknown, fromPluginId = 'host'): void {
+  pluginEventBus.emitPluginEvent(fromPluginId, topic, payload)
+}
+
+export function onPluginEvent<T = unknown>(
+  topic: string,
+  handler: PluginEventHandler<T>,
+): Disposable {
+  return pluginEventBus.onPluginEvent<T>(topic, handler)
+}
+
+export function getService<T = unknown>(serviceId: string): T | undefined {
+  return pluginEventBus.getService<T>(serviceId)
+}
+
+export function useService<T = unknown>(serviceId: string): T | undefined {
+  useSyncExternalStore(
+    (onStoreChange) => pluginEventBus.subscribeServices(onStoreChange),
+    () => pluginEventBus.getServiceVersion(),
+    () => pluginEventBus.getServiceVersion(),
+  )
+  return pluginEventBus.getService<T>(serviceId)
+}
+
+function resolveWorkspaceTargetPath(filePath: string, workspace?: string | null): string {
+  const trimmed = filePath.trim()
+  if (!trimmed) return workspace?.trim() || ''
+  if (/^[a-zA-Z]:[/\\]/.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('\\\\')) {
+    return trimmed
+  }
+  const base = workspace?.trim()
+  if (!base) return trimmed
+  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/'
+  return `${base.replace(/[\\/]+$/, '')}${sep}${trimmed.replace(/^[\\/]+/, '')}`
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+export async function readWorkspaceFile(
+  filePath: string,
+  opts?: WorkspaceFileReadOptions,
+): Promise<WorkspaceFileReadResult> {
+  const active = getActiveSession()
+  const sessionId = opts?.sessionId ?? active?.id ?? ''
+  const workspace = opts?.workspace ?? active?.workspace ?? ''
+  const connectionId = opts?.connectionId ?? active?.connection_id ?? ''
+  const resolvedPath = resolveWorkspaceTargetPath(filePath, workspace)
+  if (!resolvedPath) {
+    throw new Error('缺少文件路径或当前会话未绑定工作区')
+  }
+  const params = new URLSearchParams({ path: resolvedPath })
+  if (sessionId) params.set('session_id', sessionId)
+  if (connectionId) params.set('connection_id', connectionId)
+  const resp = await authenticatedApiFetch(`/api/v1/files/raw?${params.toString()}`)
+  if (!resp.ok) {
+    throw new Error(`读取工作区文件失败 (${resp.status})`)
+  }
+  const contentType = resp.headers.get('Content-Type') || 'application/octet-stream'
+  if (opts?.encoding === 'base64') {
+    const buf = new Uint8Array(await resp.arrayBuffer())
+    return {
+      path: resolvedPath,
+      content: bytesToBase64(buf),
+      encoding: 'base64',
+      contentType,
+    }
+  }
+  const content = await resp.text()
+  return {
+    path: resolvedPath,
+    content,
+    encoding: 'utf8',
+    contentType,
+  }
+}
+
+export async function writeWorkspaceFile(
+  filePath: string,
+  content: string,
+  opts?: WorkspaceFileWriteOptions,
+): Promise<void> {
+  const active = getActiveSession()
+  const sessionId = opts?.sessionId ?? active?.id ?? ''
+  const workspace = opts?.workspace ?? active?.workspace ?? ''
+  const connectionId = opts?.connectionId ?? active?.connection_id ?? ''
+  const resolvedPath = resolveWorkspaceTargetPath(filePath, workspace)
+  if (!resolvedPath) {
+    throw new Error('缺少文件路径或当前会话未绑定工作区')
+  }
+  await hostApi.writeFile({
+    path: resolvedPath,
+    content,
+    session_id: sessionId,
+    connection_id: connectionId || undefined,
+  })
+}
+
+export async function listWorkspaceFiles(
+  opts?: WorkspaceFileListOptions,
+): Promise<WorkspaceFileListResult> {
+  const active = getActiveSession()
+  const sessionId = opts?.sessionId ?? active?.id ?? ''
+  const workspace = opts?.workspace ?? active?.workspace ?? ''
+  const connectionId = opts?.connectionId ?? active?.connection_id ?? ''
+  const targetPath = opts?.path ? resolveWorkspaceTargetPath(opts.path, workspace) : workspace
+  if (!targetPath) {
+    throw new Error('当前会话未绑定工作区目录')
+  }
+  const depth = Math.max(1, Math.min(6, Math.round(opts?.depth ?? 2)))
+  const params = new URLSearchParams({
+    path: targetPath,
+    depth: String(depth),
+  })
+  if (sessionId) params.set('session_id', sessionId)
+  if (connectionId) params.set('connection_id', connectionId)
+  const resp = await authenticatedApiFetch(`/api/v1/files/tree?${params.toString()}`)
+  if (!resp.ok) {
+    throw new Error(`列举工作区文件失败 (${resp.status})`)
+  }
+  const data = (await resp.json()) as { root?: string; items?: WorkspaceFileEntry[] }
+  return {
+    root: data.root || targetPath,
+    items: Array.isArray(data.items) ? data.items : [],
+  }
+}
+
+function normalizeHandlerExtensions(raw: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    let ext = item.trim().toLowerCase()
+    if (!ext) continue
+    if (!ext.startsWith('.')) ext = `.${ext}`
+    if (!seen.has(ext)) {
+      seen.add(ext)
+      out.push(ext)
+    }
+  }
+  return out
+}
+
 export const sdkRuntimeExports = Object.freeze({
   SDK_VERSION,
   defineAstrorderPlugin,
   downloadFile,
+  emitPluginEvent,
   getActiveSession,
   getHostRuntime,
+  getService,
   getSessions,
+  listWorkspaceFiles,
   navigate,
   notify,
+  onHostEvent,
+  onPluginEvent,
+  onSessionEvent,
   openArtifact,
   openDatabaseWorkbench,
   openExternal,
   openPluginPanel,
   openSettings,
   quoteToComposer,
+  readWorkspaceFile,
   useAppProfile,
   useCurrentSession,
   usePluginConfig,
+  useService,
   useThemeMode,
+  writeWorkspaceFile,
 })
 
 export type AstrorderSdkRuntimeExports = typeof sdkRuntimeExports
@@ -502,6 +791,38 @@ function validateExtSubpath(subpath: string): string {
     throw new Error(`Path traversal is not allowed in extension subpath: ${subpath}`)
   }
   return clean
+}
+
+const RESTRICTED_EXTERNAL_API_PREFIXES = [
+  '/api/v1/auth',
+  '/api/v1/extensions',
+  '/api/v1/credentials',
+  '/api/v1/settings',
+  '/api/v1/plugin-host',
+]
+
+function assertExternalPermission(pluginId: string, permission: string): void {
+  const plugin = useExtensionStore.getState().getById(pluginId)
+  if (!plugin || plugin.source !== 'external') return
+  const granted = plugin.granted_permissions || []
+  if (!granted.includes(permission)) {
+    throw new Error(`外部插件 "${pluginId}" 缺少所需权限 "${permission}"，请在插件管理中授权后重试`)
+  }
+}
+
+function assertExternalFetchAllowed(pluginId: string, rawPath: string): void {
+  const plugin = useExtensionStore.getState().getById(pluginId)
+  if (!plugin || plugin.source !== 'external') return
+  const normalized = rawPath.trim().split(/[?#]/)[0]
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(normalized) || normalized.startsWith('//')) {
+    throw new Error(`外部插件 "${pluginId}" 禁止通过 ctx.api.fetch 请求外部绝对 URL，请使用自身后端代理`)
+  }
+  const canonical = normalized.startsWith('/') ? normalized : `/${normalized}`
+  for (const prefix of RESTRICTED_EXTERNAL_API_PREFIXES) {
+    if (canonical === prefix || canonical.startsWith(`${prefix}/`)) {
+      throw new Error(`外部插件 "${pluginId}" 禁止直接访问宿主受保护接口 ${prefix}，请改用 ctx.api.fetchExt 或 SDK 授权接口`)
+    }
+  }
 }
 
 export interface ScopedPluginContextHandle {
@@ -534,7 +855,10 @@ export function createScopedPluginContextWithHandle(
   }
 
   const api: AstrorderPluginApi = {
-    fetch: (path: string, init?: RequestInit) => authenticatedApiFetch(path, init),
+    fetch: (path: string, init?: RequestInit) => {
+      assertExternalFetchAllowed(pluginId, path)
+      return authenticatedApiFetch(path, init)
+    },
 
     fetchExt: <T = unknown>(subpath: string, init?: RequestInit) => {
       const safeSubpath = validateExtSubpath(subpath)
@@ -589,6 +913,34 @@ export function createScopedPluginContextWithHandle(
     useAppProfile,
     useCurrentSession,
     useThemeMode,
+
+    onHostEvent: (pattern: string, handler: HostEventHandler): Disposable =>
+      track(pluginEventBus.onHostEvent(pattern, handler)),
+
+    onSessionEvent: (sessionId: string, handler: HostEventHandler): Disposable =>
+      track(pluginEventBus.onSessionEvent(sessionId, handler)),
+
+    emitPluginEvent: (topic: string, payload?: unknown): void => {
+      pluginEventBus.emitPluginEvent(pluginId, topic, payload)
+    },
+
+    onPluginEvent: <T = unknown>(topic: string, handler: PluginEventHandler<T>): Disposable =>
+      track(pluginEventBus.onPluginEvent<T>(topic, handler)),
+
+    getService,
+    useService,
+    readWorkspaceFile: (filePath: string, opts?: WorkspaceFileReadOptions) => {
+      assertExternalPermission(pluginId, 'workspace:files.read')
+      return readWorkspaceFile(filePath, opts)
+    },
+    writeWorkspaceFile: (filePath: string, content: string, opts?: WorkspaceFileWriteOptions) => {
+      assertExternalPermission(pluginId, 'workspace:files.write')
+      return writeWorkspaceFile(filePath, content, opts)
+    },
+    listWorkspaceFiles: (opts?: WorkspaceFileListOptions) => {
+      assertExternalPermission(pluginId, 'workspace:files.read')
+      return listWorkspaceFiles(opts)
+    },
   }
 
   const ctx: AstrorderPluginContext = {
@@ -634,6 +986,52 @@ export function createScopedPluginContextWithHandle(
       })
     },
 
+    registerFileHandler: (spec: PluginFileHandlerContribution): Disposable => {
+      const normalizedExts = normalizeHandlerExtensions(spec.extensions || [])
+      const normalizedMimes = (spec.mimeTypes || [])
+        .map((m) => m.trim().toLowerCase())
+        .filter(Boolean)
+      const basePriority =
+        typeof spec.priority === 'number' && Number.isFinite(spec.priority)
+          ? spec.priority
+          : spec.defaultForExtensions
+            ? 96
+            : 88
+
+      const supports: ArtifactViewer['supports'] =
+        spec.supports ??
+        ((artifact: ArtifactRef): number => {
+          const lowerName = (artifact.name || artifact.path || '').toLowerCase().split(/[?#]/)[0]
+          const matchedExts = normalizedExts.filter((ext) => lowerName.endsWith(ext))
+          if (matchedExts.length > 0) {
+            const hasCompound = matchedExts.some((ext) => ext.slice(1).includes('.'))
+            return hasCompound ? Math.max(basePriority, 95) + 2 : basePriority
+          }
+          const mime = (artifact.mediaType || '').toLowerCase()
+          if (mime && normalizedMimes.includes(mime)) {
+            return Math.min(basePriority, 60)
+          }
+          return 0
+        })
+
+      return ctx.registerViewer({
+        id: spec.id?.trim() || `${pluginId}:file-handler`,
+        title: spec.title,
+        description: spec.description,
+        category: spec.category,
+        badgeLabel: spec.badgeLabel,
+        tabColor: spec.tabColor,
+        icon: spec.icon,
+        extensions: normalizedExts,
+        mimeTypes: normalizedMimes,
+        supports,
+        component: spec.component,
+        capabilities: { canEdit: Boolean(spec.canEdit) },
+        configOptions: spec.configOptions,
+        documentation: spec.documentation,
+      })
+    },
+
     registerSlot: (spec: PluginSlotContribution): Disposable => {
       const registration: BuiltInExtensionRegistration = {
         ...spec,
@@ -661,6 +1059,37 @@ export function createScopedPluginContextWithHandle(
         id: provider.id?.trim() || pluginId,
       }
       const base = databaseToolRegistry.register(normalized)
+      return track(base)
+    },
+
+    registerMessageInterceptor: (spec: PluginMessageInterceptorContribution): Disposable => {
+      const base = extensionRegistry.registerMessageInterceptor({
+        ...spec,
+        pluginId,
+      })
+      return track(base)
+    },
+
+    registerMarkdownBlockRenderer: (
+      spec: PluginMarkdownBlockRendererContribution,
+    ): Disposable => {
+      const base = extensionRegistry.registerMarkdownBlockRenderer({
+        ...spec,
+        pluginId,
+      })
+      return track(base)
+    },
+
+    registerMessageDecorator: (spec: PluginMessageDecoratorContribution): Disposable => {
+      const base = extensionRegistry.registerMessageDecorator({
+        ...spec,
+        pluginId,
+      })
+      return track(base)
+    },
+
+    registerService: <T>(serviceId: string, impl: T): Disposable => {
+      const base = pluginEventBus.registerService(pluginId, serviceId, impl)
       return track(base)
     },
 

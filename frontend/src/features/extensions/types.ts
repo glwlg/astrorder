@@ -1,6 +1,6 @@
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
 import type { ArtifactRef } from '../../domain/artifact'
-import type { Session } from '../../domain/types'
+import type { Message, Session } from '../../domain/types'
 import type { AppProfile } from '../office/appProfile'
 
 export const EXTERNAL_PLUGIN_PANEL_VIEWER_ID = 'external-plugin-panel'
@@ -78,6 +78,7 @@ export interface ExtensionPageComponentProps {
   pluginId?: string
   pageId?: string
   surface?: 'desktop' | 'mobile'
+  [key: string]: unknown
 }
 
 export type ExtensionPageComponent =
@@ -166,6 +167,61 @@ export interface ExtensionCommandRegistration {
   run: () => void | Promise<void>
   /** 注册来源 */
   source?: 'builtin' | 'esm'
+}
+
+export interface MessageSendContext {
+  session: Session
+  text: string
+  attachments: File[]
+  metadata: Record<string, unknown>
+}
+
+export interface MessageInterceptorResult {
+  text?: string
+  cancel?: boolean
+  reason?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface MessageInterceptorRegistration {
+  pluginId: string
+  id: string
+  order?: number
+  beforeSend: (
+    ctx: MessageSendContext,
+  ) => void | MessageInterceptorResult | Promise<void | MessageInterceptorResult>
+}
+
+export interface MarkdownBlockRendererProps {
+  code: string
+  language: string
+  session?: Session | null
+}
+
+export interface MarkdownBlockRendererRegistration {
+  pluginId: string
+  id: string
+  /** Lowercase language identifiers, e.g. ['plantuml', 'puml', 'vega-lite'] */
+  languages: string[]
+  priority?: number
+  title?: string
+  component: ComponentType<MarkdownBlockRendererProps>
+}
+
+export interface MessageDecoratorProps {
+  message: Message
+  session?: Session | null
+  isLatest?: boolean
+  isOfficeMode?: boolean
+}
+
+export interface MessageDecoratorRegistration {
+  pluginId: string
+  id: string
+  position: 'header' | 'footer'
+  order?: number
+  match?: (message: Message, session?: Session | null) => boolean
+  component: ComponentType<MessageDecoratorProps>
 }
 
 export interface ExtensionQueryOptions {
@@ -293,6 +349,18 @@ export const PERMISSION_CATALOG: Record<string, PermissionMeta> = {
     label: '读取工作区 Git 信息',
     description: '允许读取当前会话工作区的远程仓库地址、分支名与提交哈希',
     risk: 'medium',
+  },
+  'workspace:files.read': {
+    id: 'workspace:files.read',
+    label: '读取工作区文件',
+    description: '允许通过宿主安全沙箱浏览、搜索与读取当前会话工作区内的文件（限工作区目录内）',
+    risk: 'medium',
+  },
+  'workspace:files.write': {
+    id: 'workspace:files.write',
+    label: '写入工作区文件',
+    description: '允许通过宿主安全沙箱在当前会话工作区内创建目录或原子写入文件（记录审计日志）',
+    risk: 'high',
   },
   'storage:kv': {
     id: 'storage:kv',

@@ -10,7 +10,7 @@ import {
 } from '@tabler/icons-react'
 import type { ArtifactViewer, PluginCategory } from '../sidecar/types'
 
-export type PluginTabId = 'all' | PluginCategory
+export type PluginTabId = 'all' | PluginCategory | 'marketplace'
 
 export interface PluginCategoryMeta {
   id: PluginCategory

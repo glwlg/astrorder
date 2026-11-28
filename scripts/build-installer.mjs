@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareWailsImeFix } from './wails-ime-fix.mjs'
 import { verifyFrontendDist } from './verify-frontend-dist.mjs'
+import { verifyOfficialPluginsDir } from './verify-local-release.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const desktop = path.join(root, 'desktop-wails')
@@ -56,6 +57,15 @@ async function verifyStage(stageDir) {
     checked.push({ file: relativeFile, hash: actualHash, size: statSync(fullPath).size })
   }
   return checked
+}
+
+export function stageOfficialPluginsForInstaller(srcDist, pkgDir) {
+  verifyOfficialPluginsDir(srcDist)
+  const destDir = path.join(pkgDir, 'server', 'plugins', 'official')
+  rmSync(destDir, { recursive: true, force: true })
+  mkdirSync(path.dirname(destDir), { recursive: true })
+  cpSync(srcDist, destDir, { recursive: true })
+  return verifyOfficialPluginsDir(destDir, srcDist)
 }
 
 async function main() {
@@ -161,6 +171,12 @@ async function main() {
   mkdirSync(path.dirname(favDest), { recursive: true })
   cpSync(path.join(root, 'frontend', 'public', 'favicon.ico'), favDest)
 
+  // 5.6 构建并编排官方 ESM 插件 (server/plugins/official)
+  run(node, ['scripts/build-official-plugins.mjs'], root)
+  const officialPluginsSrc = path.join(root, 'plugins', 'official-dist')
+  const verifiedPlugins = stageOfficialPluginsForInstaller(officialPluginsSrc, pkgDir)
+  console.log(`已成功编排并校验 ${verifiedPlugins.count} 个官方 ESM 插件。`)
+
   cpSync(path.join(root, 'tools', 'browser_extension'), path.join(pkgDir, 'server', 'tools', 'browser_extension'), {
     recursive: true, filter: source => !source.endsWith('.test.mjs'),
   })
@@ -192,6 +208,8 @@ async function main() {
     sha256: installerHash,
     executableSha256: exeHash,
     baseArtifactsCount: verifiedArtifacts.length,
+    officialPluginsCount: verifiedPlugins.count,
+    officialPlugins: verifiedPlugins.plugins.map((p) => p.id),
     timestamp: new Date().toISOString()
   }
 
@@ -202,7 +220,9 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2))
 }
 
-main().catch(err => {
-  console.error('Build installer error:', err)
-  process.exit(1)
-})
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error('Build installer error:', err)
+    process.exit(1)
+  })
+}

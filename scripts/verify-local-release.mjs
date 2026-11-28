@@ -1,11 +1,13 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, openSync, readFileSync, readSync, closeSync, statSync } from 'node:fs'
+import { existsSync, openSync, readdirSync, readFileSync, readSync, closeSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { verifyBuiltPluginDist } from './build-official-plugins.mjs'
 import { verifyFrontendDist } from './verify-frontend-dist.mjs'
 
 const WSL_POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 export function isWindowsHost(platform = process.platform) {
   return platform === 'win32'
@@ -372,11 +374,88 @@ export function queryLiveInstallation(installDirWin, stateDirWin) {
   return JSON.parse(runPowerShell(script))
 }
 
+function discoverBuiltPluginDirs(rootDir, label = 'Official plugins directory') {
+  if (!rootDir || !existsSync(rootDir)) {
+    throw new Error(`${label} does not exist: ${rootDir}`)
+  }
+  const stat = statSync(rootDir)
+  if (!stat.isDirectory()) {
+    throw new Error(`${label} is not a directory: ${rootDir}`)
+  }
+  const dirs = readdirSync(rootDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => path.join(rootDir, entry.name))
+    .filter((dir) => existsSync(path.join(dir, 'plugin.json')))
+    .sort()
+  if (dirs.length === 0) {
+    throw new Error(`No official plugins found in ${label}: ${rootDir}`)
+  }
+  return dirs
+}
+
+function verifyBuiltPluginMap(rootDir, label) {
+  const dirs = discoverBuiltPluginDirs(rootDir, label)
+  const byId = new Map()
+  for (const dir of dirs) {
+    const verified = verifyBuiltPluginDist(dir)
+    if (byId.has(verified.id)) {
+      throw new Error(`Duplicate official plugin id "${verified.id}" under ${rootDir}`)
+    }
+    byId.set(verified.id, verified)
+  }
+  return byId
+}
+
+export function verifyOfficialPluginsDir(installedOfficialDir, expectedSourceDistDir) {
+  const installedMap = verifyBuiltPluginMap(installedOfficialDir, 'Installed official plugins directory')
+
+  if (expectedSourceDistDir) {
+    const expectedMap = verifyBuiltPluginMap(expectedSourceDistDir, 'Expected official plugins dist directory')
+    for (const [id, expected] of expectedMap.entries()) {
+      const actual = installedMap.get(id)
+      if (!actual) {
+        throw new Error(`Official plugin "${id}" is missing from installed directory ${installedOfficialDir}`)
+      }
+      if (actual.entrySha256 !== expected.entrySha256) {
+        throw new Error(
+          `Official plugin "${id}" entry SHA-256 mismatch: installed=${actual.entrySha256}, expected=${expected.entrySha256}`,
+        )
+      }
+    }
+    for (const id of installedMap.keys()) {
+      if (!expectedMap.has(id)) {
+        throw new Error(
+          `Unexpected stale official plugin "${id}" found in installed directory ${installedOfficialDir}`,
+        )
+      }
+    }
+  }
+
+  const plugins = [...installedMap.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((item) => ({
+      id: item.id,
+      version: item.version,
+      entry: item.entry,
+      entrySize: item.entrySize,
+      entrySha256: item.entrySha256,
+      stylesCount: item.styles.length,
+    }))
+
+  return {
+    dir: installedOfficialDir,
+    expectedDir: expectedSourceDistDir || null,
+    count: plugins.length,
+    plugins,
+  }
+}
+
 export function verifyLocalRelease({
   installDir,
   expectDesktopSha,
   expectAppSha,
   expectDaemonPid,
+  expectOfficialPluginsDir,
   skipFrontend = false,
   skipDesktopWindow = false,
 } = {}) {
@@ -447,6 +526,13 @@ export function verifyLocalRelease({
     sessionCount: daemonStatus.session_count,
   }
 
+  // Gate F (Gate 6): Bundled official ESM plugins integrity & parity
+  const installedOfficialDir = path.join(env.installDirHost, 'server', 'plugins', 'official')
+  const defaultOfficialDist = path.join(REPO_ROOT, 'plugins', 'official-dist')
+  const resolvedExpectedOfficialDir =
+    expectOfficialPluginsDir || (existsSync(defaultOfficialDist) ? defaultOfficialDist : undefined)
+  report.gates.officialPlugins = verifyOfficialPluginsDir(installedOfficialDir, resolvedExpectedOfficialDir)
+
   report.ok = true
   return report
 }
@@ -460,6 +546,7 @@ function parseArgs(argv) {
     else if (arg === '--expect-desktop-sha') opts.expectDesktopSha = argv[++i]
     else if (arg === '--expect-app-sha') opts.expectAppSha = argv[++i]
     else if (arg === '--expect-daemon-pid') opts.expectDaemonPid = Number(argv[++i])
+    else if (arg === '--expect-official-plugins-dir') opts.expectOfficialPluginsDir = path.resolve(argv[++i] || '')
     else if (arg === '--expected-state-dir') opts.expectedStateDir = argv[++i]
     else if (arg === '--skip-frontend') opts.skipFrontend = true
     else if (arg === '--skip-desktop-window') opts.skipDesktopWindow = true

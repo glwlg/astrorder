@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "workspace-monitor",
+  "name": "多会话监控矩阵",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "在多窗格矩阵视图中同时观察并调度多个会话实时状态；关闭后隐藏左侧「矩阵」导航入口",
+  "author": "Astrorder",
+  "icon": "layout-grid",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "monitor",
+        "title": "矩阵",
+        "path": "/monitor",
+        "icon": "layout-grid",
+        "category": "workspace",
+        "order": 40,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

@@ -30,6 +30,7 @@ import { DraftShelfControl } from './DraftShelfControl'
 import { queueBlockReason } from './queueBlockReason'
 import { UNCOMMITTED_REVIEW_MESSAGE } from './reviewRelay'
 import { VOICE_INPUT_PLUGIN_ID } from '../plugins/builtinPlugins'
+import { extensionRegistry } from '../extensions/extensionRegistry'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIsOfficeExperience } from '../office/appProfile'
 import { OfficeSourcesBar, type PinnedOfficeSource } from '../office/OfficeSourcesBar'
@@ -530,9 +531,23 @@ export function ChatComposer({
   const submitDirectMessage = async (customText: string, options?: { preserveDraft?: boolean }) => {
     if (submitting || submittingRef.current || !canChat) return
     if (recoveryDraft) { setError('请先核对并恢复上一条消息，再发送新消息。'); return }
-    const originalDraft: DraftState = { text: customText, attachments: [], sessionRefs: [] }
+    let finalDirectText = customText
+    if (extensionRegistry.getActiveMessageInterceptors().length > 0) {
+      const intercepted = await extensionRegistry.runMessageInterceptors({
+        session,
+        text: customText,
+        attachments: [],
+        metadata: { direct: true },
+      })
+      if (intercepted.cancelled) {
+        setError(intercepted.reason || '发送已被扩展插件拦截')
+        return
+      }
+      finalDirectText = intercepted.text
+    }
+    const originalDraft: DraftState = { text: finalDirectText, attachments: [], sessionRefs: [] }
     const commandId = newCommandId()
-    const command = localCommand(session, commandId, 'send', customText)
+    const command = localCommand(session, commandId, 'send', finalDirectText)
     const store = useAstrorderStore.getState()
 
     const optimisticMessage: Message = {
@@ -541,7 +556,7 @@ export function ChatComposer({
       agent_id: session.agent_id,
       role: 'user',
       kind: 'message',
-      text: customText,
+      text: finalDirectText,
       attachments: [],
       created_at: new Date().toISOString(),
       command_id: commandId,
@@ -564,7 +579,7 @@ export function ChatComposer({
       const result = await submitBrowserCommand({
         commandId,
         session,
-        text: customText,
+        text: finalDirectText,
         files: [],
         action: 'send',
         targetId: null,
@@ -689,6 +704,20 @@ export function ChatComposer({
       if (personaBlock && !outgoing.includes('【个人办公偏好参考')) {
         outgoing = `${outgoing}\n\n${personaBlock}`
       }
+    }
+
+    if (action === 'send' && extensionRegistry.getActiveMessageInterceptors().length > 0) {
+      const intercepted = await extensionRegistry.runMessageInterceptors({
+        session,
+        text: outgoing,
+        attachments: files,
+        metadata: { isOfficeWorkspace },
+      })
+      if (intercepted.cancelled) {
+        setError(intercepted.reason || '发送已被扩展插件拦截')
+        return
+      }
+      outgoing = intercepted.text
     }
 
     if (action === 'send' && nativeBusy) {

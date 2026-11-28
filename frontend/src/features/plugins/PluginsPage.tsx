@@ -23,6 +23,7 @@ import { notifications } from '@mantine/notifications'
 import {
   IconAdjustments,
   IconArrowUpRight,
+  IconBuildingStore,
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
@@ -47,6 +48,7 @@ import { useExtensionStore, type EsmPluginRuntimeState } from '../extensions/ext
 import { InstallPluginModal } from '../extensions/InstallPluginModal'
 import { PermissionGrantModal } from '../extensions/PermissionGrantModal'
 import { PluginConfigDrawer } from '../extensions/PluginConfigDrawer'
+import { PluginMarketplaceView } from '../extensions/PluginMarketplaceView'
 import {
   EXTERNAL_PLUGIN_PANEL_VIEWER_ID,
   PENDING_PLUGIN_CONFIG_SESSION_KEY,
@@ -1578,7 +1580,7 @@ export function PluginsPage() {
           />
         ),
       },
-      ...BUILTIN_SYSTEM_PLUGINS.map((descriptor) => ({
+      ...BUILTIN_SYSTEM_PLUGINS.filter((descriptor) => !managedExtensionIds.has(descriptor.id)).map((descriptor) => ({
         id: descriptor.id,
         category: descriptor.category,
         searchText: [
@@ -1684,6 +1686,7 @@ export function PluginsPage() {
     viewerRegistryVersion,
     localToolchain,
     managedExtensions,
+    managedExtensionIds,
     esmStates,
     refreshLocalToolchain,
     handleToggleExternal,
@@ -1748,8 +1751,11 @@ export function PluginsPage() {
         label: cat.label,
         count: entriesByCategory[cat.id].length,
       })),
+      ...(!isOfficeLocked
+        ? [{ id: 'marketplace' as PluginTabId, label: '插件商店', count: null as number | null }]
+        : []),
     ],
-    [filteredEntries.length, entriesByCategory, visibleCategories, isBasicMode, normalizedQuery],
+    [filteredEntries.length, entriesByCategory, visibleCategories, isBasicMode, isOfficeLocked, normalizedQuery],
   )
 
   useEffect(() => {
@@ -1803,7 +1809,7 @@ export function PluginsPage() {
 
   const builtinToggleableIds = [
     ...BUILTIN_AGENT_PLUGINS.map((p) => p.id),
-    ...BUILTIN_SYSTEM_PLUGINS.map((p) => p.id),
+    ...BUILTIN_SYSTEM_PLUGINS.filter((p) => !managedExtensionIds.has(p.id)).map((p) => p.id),
     VOICE_INPUT_PLUGIN_ID,
     ...viewers.map((v) => v.id),
   ]
@@ -1906,8 +1912,9 @@ export function PluginsPage() {
                 {...(selected ? ({ focusgroupstart: '' } as Record<string, string>) : {})}
                 onClick={() => selectTab(tab.id, true)}
               >
+                {tab.id === 'marketplace' && <IconBuildingStore size={14} style={{ marginRight: 4 }} />}
                 <span>{tab.label}</span>
-                <span className="plugins-tab-count">{tab.count}</span>
+                {tab.count !== null && <span className="plugins-tab-count">{tab.count}</span>}
               </button>
             )
           })}
@@ -1935,6 +1942,35 @@ export function PluginsPage() {
         )}
         {tabs.map((tab) => {
           const isSelected = activeTab === tab.id
+          if (tab.id === 'marketplace') {
+            return (
+              <div
+                key={tab.id}
+                ref={(el) => { panelRefs.current[tab.id] = el }}
+                role="tabpanel"
+                className="plugins-tabpanel"
+                aria-labelledby={`plugins-tab-${tab.id}`}
+                hidden={isSelected ? undefined : ('until-found' as unknown as boolean)}
+              >
+                {isSelected && (
+                  <div className="plugins-panel-inner">
+                    <PluginMarketplaceView
+                      query={query}
+                      onInstalled={(plugin, requestEnable) => {
+                        if (requestEnable) {
+                          void handleToggleExternal(plugin, true)
+                        }
+                      }}
+                      onSelectInstalled={(pluginId) => {
+                        setQuery(pluginId)
+                        selectTab('all', true)
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          }
           const sectionsToRender =
             tab.id === 'all'
               ? PLUGIN_CATEGORIES.filter((cat) => entriesByCategory[cat.id].length > 0)

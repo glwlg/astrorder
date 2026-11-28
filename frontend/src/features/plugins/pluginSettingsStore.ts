@@ -28,6 +28,7 @@ export interface PluginSettingsState {
   togglePlugin: (pluginId: string, enabled?: boolean) => void
   setPluginConfig: (pluginId: string, key: string, value: unknown) => void
   setPluginConfigPatch: (pluginId: string, patch: Record<string, unknown>) => void
+  syncExtensionConfigLocal: (pluginId: string, values: Record<string, unknown>, broadcast?: boolean) => void
   isPluginEnabled: (pluginId: string) => boolean
   isAgentEnabled: (kind?: string | null) => boolean
   getPluginConfig: <T = unknown>(pluginId: string, key: string, fallback?: T) => T
@@ -154,6 +155,22 @@ export const usePluginSettingsStore = create<PluginSettingsState>((set, get) => 
         })
       }
     })
+  },
+
+  syncExtensionConfigLocal: (pluginId: string, values: Record<string, unknown>, broadcast = false) => {
+    if (!pluginId || !values || typeof values !== 'object') return
+    set((state) => ({
+      pluginConfigs: {
+        ...state.pluginConfigs,
+        [pluginId]: {
+          ...(state.pluginConfigs[pluginId] || {}),
+          ...values,
+        },
+      },
+    }))
+    if (broadcast) {
+      notifyPluginSettingsSync()
+    }
   },
 
   isPluginEnabled: (pluginId: string) => {

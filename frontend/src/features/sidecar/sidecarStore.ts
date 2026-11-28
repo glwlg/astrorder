@@ -77,6 +77,7 @@ export interface SidecarState {
   closeTabsToLeft: (referenceTabId: string) => void
   closeAllTabs: () => void
   setActiveTabId: (tabId: string) => void
+  setTabViewer: (tabId: string, viewerId: string) => void
   setIsOpen: (open: boolean) => void
   setTabDirty: (tabId: string, dirty: boolean) => void
   setSidecarWidth: (width: number) => void
@@ -914,12 +915,19 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
   },
 
   openArtifact: (artifact: ArtifactRef, viewerId: string) => {
-    const { tabs, activeSessionKey, sessionMemories } = get()
+    const { tabs, activeSessionKey, sessionMemories, mountedTabs } = get()
     const existingIndex = tabs.findIndex((t) => t.id === artifact.id)
     if (existingIndex >= 0) {
+      const existing = tabs[existingIndex]
+      const nextTabs =
+        viewerId && existing.viewerId !== viewerId
+          ? tabs.map((tab, idx) => (idx === existingIndex ? { ...tab, viewerId } : tab))
+          : tabs
       set({
         isOpen: true,
         activeTabId: artifact.id,
+        tabs: nextTabs,
+        mountedTabs: activeSessionKey ? { ...mountedTabs, [activeSessionKey]: nextTabs } : mountedTabs,
       })
     } else {
       const newTab: SidecarTab = {
@@ -935,6 +943,7 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         isOpen: true,
         activeTabId: artifact.id,
         tabs: nextTabs,
+        mountedTabs: activeSessionKey ? { ...mountedTabs, [activeSessionKey]: nextTabs } : mountedTabs,
       })
     }
     if (activeSessionKey) {
@@ -1071,6 +1080,21 @@ export const useSidecarStore = create<SidecarState>()(persist((set, get) => ({
         },
       })
     }
+  },
+
+  setTabViewer: (tabId: string, viewerId: string) => {
+    const { activeSessionKey, sessionMemories, tabs, activeTabId, isOpen, mountedTabs } = get()
+    const nextTabs = tabs.map((tab) => (tab.id === tabId ? { ...tab, viewerId } : tab))
+    set({
+      tabs: nextTabs,
+      mountedTabs: activeSessionKey ? { ...mountedTabs, [activeSessionKey]: nextTabs } : mountedTabs,
+      sessionMemories: activeSessionKey
+        ? {
+            ...sessionMemories,
+            [activeSessionKey]: { tabs: nextTabs, activeTabId, isOpen },
+          }
+        : sessionMemories,
+    })
   },
 
   setIsOpen: (open: boolean) => {

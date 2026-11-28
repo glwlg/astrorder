@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "workspace-learning-radar",
+  "name": "成长雷达（Bot 驱动主动学习）",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "每周定时或手动派发成长导师 Bot 扫描你的真实会话、Git 改动与 CI 失败痕迹，提炼 AI 代写黑盒与高频卡点，提供代码伴学、间隔复习与移动端竖滑刷卡信息流",
+  "author": "Astrorder",
+  "icon": "compass",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "learning",
+        "title": "成长雷达",
+        "path": "/learning",
+        "mobile_path": "/mobile/learning",
+        "icon": "compass",
+        "category": "workspace",
+        "order": 110,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

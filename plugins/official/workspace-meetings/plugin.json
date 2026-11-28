@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "workspace-meetings",
+  "name": "会议纪要与行动项",
+  "version": "1.0.0",
+  "category": "office",
+  "description": "本机离线实时边录边转写与独立悬浮胶囊，在会议页内自由选用已配置的 AI 供应商模型边听边总结，并与待办收件箱联动跟踪",
+  "author": "Astrorder",
+  "icon": "microphone",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "meetings",
+        "title": "会议纪要与录音",
+        "path": "/meetings",
+        "mobile_path": "/mobile/meetings",
+        "icon": "microphone",
+        "category": "office",
+        "order": 100,
+        "hide_in_office_mode": false
+      }
+    ]
+  }
+}

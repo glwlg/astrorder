@@ -44,13 +44,16 @@ func TestSDKESMShimsServeExplicitJSMIMEAndExactExports(t *testing.T) {
 		count   int
 		mustHit []string
 	}{
-		"react.js":                 {prop: "react", count: 37, mustHit: []string{"useState", "useEffect", "createElement", "Fragment", "version"}},
+		"react.js":                 {prop: "react", count: 38, mustHit: []string{"useState", "useEffect", "useEffectEvent", "createElement", "Fragment", "version"}},
 		"jsx-runtime.js":           {prop: "jsxRuntime", count: 3, mustHit: []string{"Fragment", "jsx", "jsxs"}},
 		"react-dom.js":             {prop: "reactDom", count: 12, mustHit: []string{"createPortal", "flushSync", "useFormStatus"}},
 		"react-dom-client.js":      {prop: "reactDomClient", count: 2, mustHit: []string{"createRoot", "hydrateRoot"}},
 		"mantine-core.js":          {prop: "mantineCore", count: 63, mustHit: []string{"ActionIcon", "Button", "Group", "LoadingOverlay", "Paper", "Text", "useComputedColorScheme", "Box", "Flex", "Skeleton", "Space"}},
 		"mantine-notifications.js": {prop: "mantineNotifications", count: 12, mustHit: []string{"notifications", "showNotification", "useNotifications"}},
-		"sdk.js":                   {prop: "sdk", count: 18, mustHit: []string{"SDK_VERSION", "defineAstrorderPlugin", "downloadFile", "getActiveSession", "getHostRuntime", "getSessions", "openArtifact", "openDatabaseWorkbench", "openExternal", "openPluginPanel", "openSettings", "quoteToComposer", "usePluginConfig", "useThemeMode"}},
+		"sdk.js":                   {prop: "sdk", count: 27, mustHit: []string{"SDK_VERSION", "defineAstrorderPlugin", "downloadFile", "emitPluginEvent", "getActiveSession", "getHostRuntime", "getService", "getSessions", "listWorkspaceFiles", "onHostEvent", "onPluginEvent", "onSessionEvent", "openArtifact", "openDatabaseWorkbench", "openExternal", "openPluginPanel", "openSettings", "quoteToComposer", "readWorkspaceFile", "usePluginConfig", "useService", "useThemeMode", "writeWorkspaceFile"}},
+		"react-router-dom.js":      {prop: "reactRouterDom", count: 12, mustHit: []string{"Link", "NavLink", "Outlet", "useInRouterContext", "useLocation", "useNavigate", "useParams", "useSearchParams"}},
+		"react-query.js":           {prop: "reactQuery", count: 12, mustHit: []string{"QueryClient", "QueryObserver", "skipToken", "useIsMutating", "useMutation", "useQuery", "useQueryClient"}},
+		"workspace-bridge.js":      {prop: "workspaceBridge", count: 56, mustHit: []string{"MarkdownContent", "ExportMenu", "api", "useAstrorderStore", "useSidecarStore", "useUserIdle", "workbenchIcons"}},
 	}
 
 	if len(sdkESMModuleSpecs) != len(expectedCounts) {

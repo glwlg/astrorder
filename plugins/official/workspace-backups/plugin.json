@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "workspace-backups",
+  "name": "定时备份与快照",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "按计划备份指定项目目录与文件并支持版本回滚和恢复钩子；不需要定时备份时可关闭以隐藏左侧导航",
+  "author": "Astrorder",
+  "icon": "archive",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "backups",
+        "title": "备份同步",
+        "path": "/backups",
+        "mobile_path": "/mobile/backups",
+        "icon": "archive",
+        "category": "workspace",
+        "order": 70,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

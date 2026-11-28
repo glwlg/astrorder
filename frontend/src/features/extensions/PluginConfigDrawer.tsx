@@ -25,6 +25,7 @@ import {
 import { extensionRegistry, useExtensionRegistryVersion } from './extensionRegistry'
 import { useExtensionStore } from './extensionStore'
 import { SandboxedPluginFrame } from './SandboxedPluginFrame'
+import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import './extensions.css'
 
 export interface PluginConfigDrawerProps {
@@ -122,7 +123,9 @@ function SchemaSettingsForm({
       .getExtensionConfig(plugin.id)
       .then((res) => {
         if (!active) return
-        setValues(buildInitialValues(schema, res?.values))
+        const resolved = buildInitialValues(schema, res?.values)
+        setValues(resolved)
+        usePluginSettingsStore.getState().syncExtensionConfigLocal(plugin.id, resolved, false)
         setSecretStatus(parseSecretMap(res))
         setLoading(false)
       })
@@ -183,17 +186,21 @@ function SchemaSettingsForm({
         ...(Object.keys(secrets).length > 0 ? { secrets } : {}),
       })
       if (updated) {
-        setValues(buildInitialValues(schema, updated.values ?? values))
+        const merged = buildInitialValues(schema, updated.values ?? values)
+        setValues(merged)
+        usePluginSettingsStore.getState().syncExtensionConfigLocal(plugin.id, merged, true)
         setSecretStatus((prev) => {
           const parsed = parseSecretMap(updated)
-          const merged = { ...prev, ...parsed }
+          const mergedSecrets = { ...prev, ...parsed }
           for (const key of Object.keys(secrets)) {
-            if (!merged[key]?.set) {
-              merged[key] = { set: true, masked: '••••••' }
+            if (!mergedSecrets[key]?.set) {
+              mergedSecrets[key] = { set: true, masked: '••••••' }
             }
           }
-          return merged
+          return mergedSecrets
         })
+      } else {
+        usePluginSettingsStore.getState().syncExtensionConfigLocal(plugin.id, values, true)
       }
       setSecretDrafts({})
       notifications.show({

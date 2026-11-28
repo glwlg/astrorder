@@ -58,6 +58,9 @@ func (m *Manager) serveHostAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		m.handleHostGitInfo(w, r)
 
+	case "workspace/files/list", "workspace/files/stat", "workspace/files/read", "workspace/files/search", "workspace/files/write", "workspace/files/mkdir":
+		m.serveHostWorkspaceFiles(w, r, pluginID, granted, strings.TrimPrefix(rest, "workspace/files/"))
+
 	case "storage/kv":
 		if !hasPermission(granted, PermStorageKV) {
 			writeJSONError(w, http.StatusForbidden, "Missing required permission: storage:kv")

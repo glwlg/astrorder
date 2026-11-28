@@ -133,6 +133,15 @@ const bridgeSDKJS = `(function () {
       sendFireAndForget('astrorder:insert-composer', { text: String(text || '') });
     },
 
+    readFile: function (options) {
+      var opts = (options && typeof options === 'object') ? options : {};
+      return sendRequest('astrorder:read-file', { encoding: opts.encoding || 'utf8' }, 30000);
+    },
+
+    saveFile: function (content) {
+      return sendRequest('astrorder:save-file', { content: String(content == null ? '' : content) }, 30000);
+    },
+
     notifyResize: function (height) {
       var h = typeof height === 'number' && isFinite(height) && height > 0
         ? Math.round(height)

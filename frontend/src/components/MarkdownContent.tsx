@@ -25,7 +25,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Session } from '../domain/types'
 import { api } from '../api/client'
-import { artifactViewerRegistry, isNonPreviewableFile } from '../features/sidecar/registry'
+import { extensionRegistry, useExtensionRegistryVersion } from '../features/extensions/extensionRegistry'
+import { PluginErrorBoundary } from '../features/extensions/PluginErrorBoundary'
+import { artifactViewerRegistry, isNonPreviewableFile, useViewerRegistryVersion } from '../features/sidecar/registry'
 import {
   hasActiveDatabaseTool,
   isSqlFilePath,
@@ -317,7 +319,90 @@ function mermaidSource(children: ReactNode): string | null {
   return /(?:^|\s)language-mermaid(?:\s|$)/.test(language) || looksLikeMermaid ? code : null
 }
 
+function extractFencedCodeBlock(children: ReactNode): { language: string; code: string } | null {
+  const child = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children : null
+  if (!child) return null
+  const className = child.props.className || ''
+  const match = className.match(/(?:^|\s)language-([a-zA-Z0-9_+-]+)(?:\s|$)/)
+  const language = match ? match[1].toLowerCase() : ''
+  const code = String(child.props.children || '').replace(/\n$/, '')
+  return { language, code }
+}
+
+function CustomMarkdownBlockWrapper({
+  pluginId,
+  title,
+  language,
+  code,
+  children,
+  rendererComponent: RendererComponent,
+}: {
+  pluginId: string
+  title?: string
+  language: string
+  code: string
+  children?: ReactNode
+  rendererComponent: import('react').ComponentType<import('../features/extensions/types').MarkdownBlockRendererProps>
+}) {
+  const session = useContext(MarkdownSessionContext)
+  const [showSource, setShowSource] = useState(false)
+  if (showSource) {
+    return (
+      <div className="markdown-plugin-block is-source">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+          <button
+            type="button"
+            className="markdown-code-copy-btn"
+            onClick={() => setShowSource(false)}
+          >
+            <span>切回{title || language}视图</span>
+          </button>
+        </div>
+        <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
+      </div>
+    )
+  }
+  return (
+    <div className="markdown-plugin-block" data-plugin-id={pluginId} data-language={language}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 11, color: 'var(--astr-muted)' }}>
+          {title || language.toUpperCase()}
+        </span>
+        <button
+          type="button"
+          className="markdown-code-copy-btn"
+          onClick={() => setShowSource(true)}
+        >
+          <span>查看源码</span>
+        </button>
+      </div>
+      <PluginErrorBoundary pluginId={pluginId} pluginName={title || pluginId} resetKey={`${language}:${code.length}`}>
+        <RendererComponent code={code} language={language} session={session} />
+      </PluginErrorBoundary>
+    </div>
+  )
+}
+
 function MarkdownPre({ children }: { children?: ReactNode }) {
+  const extVersion = useExtensionRegistryVersion()
+  void extVersion
+  const fenced = extractFencedCodeBlock(children)
+  if (fenced?.language) {
+    const customRenderer = extensionRegistry.findMarkdownBlockRenderer(fenced.language)
+    if (customRenderer) {
+      return (
+        <CustomMarkdownBlockWrapper
+          pluginId={customRenderer.pluginId}
+          title={customRenderer.title}
+          language={fenced.language}
+          code={fenced.code}
+          rendererComponent={customRenderer.component}
+        >
+          {children}
+        </CustomMarkdownBlockWrapper>
+      )
+    }
+  }
   const code = mermaidSource(children)
   return code ? <MermaidDiagram code={code} /> : <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
 }
@@ -643,13 +728,15 @@ export const MarkdownContent = memo(function MarkdownContent({
     }
     return `/api/v1/files/raw?path=${encodeURIComponent(fullPath)}`
   }
+  const viewerRegistryVersion = useViewerRegistryVersion()
   const pathKey = useMemo(() => {
+    void viewerRegistryVersion
     const extRegex = artifactViewerRegistry.getExtensionPattern()
     return JSON.stringify([...new Set(
       Array.from(extractPlainProseForPathCheck(value).matchAll(new RegExp(extRegex.source, 'gi')))
         .flatMap((match) => artifactSuffixes(match[1]).filter((candidate) => /[\\/]/.test(candidate))),
     )].slice(0, 100))
-  }, [value])
+  }, [value, viewerRegistryVersion])
   const checkKey = `${rootKey}:${pathKey}`
 
   useEffect(() => {
@@ -698,15 +785,15 @@ export const MarkdownContent = memo(function MarkdownContent({
   const visualizations = useMemo(() => extractVisualizations(value), [value])
   const effectiveRootFiles = rootFiles?.key === rootKey && rootKey ? rootFiles.names : null
   const effectiveCheckedPaths = checkedPaths?.key === checkKey && rootKey ? checkedPaths.names : null
-  const normalizedValue = useMemo(
-    () => autoLinkArtifacts(
+  const normalizedValue = useMemo(() => {
+    void viewerRegistryVersion
+    return autoLinkArtifacts(
       visualizations.text,
       effectiveRootFiles,
       effectiveCheckedPaths,
       fileSourceScope ? (path) => Boolean(findGroupFile(fileSourceScope.files, path)) : undefined,
-    ),
-    [effectiveCheckedPaths, effectiveRootFiles, fileSourceScope, visualizations.text],
-  )
+    )
+  }, [effectiveCheckedPaths, effectiveRootFiles, fileSourceScope, viewerRegistryVersion, visualizations.text])
 
   const resolvePathWithWorkspace = (raw: string): string => {
     const unquoted = raw.trim().replace(/^<|>$/g, '')

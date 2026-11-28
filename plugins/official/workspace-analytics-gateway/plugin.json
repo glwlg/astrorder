@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "workspace-analytics-gateway",
+  "name": "LLM 网关同步与用量统计",
+  "version": "1.0.0",
+  "category": "workspace",
+  "description": "对接模型中转网关同步多环境模型目录，并展示每日 Token 用量统计；直连官方模型时可关闭以停止后台轮询",
+  "author": "Astrorder",
+  "icon": "chart-bar",
+  "default_enabled": true,
+  "permissions": [],
+  "backend": {
+    "type": "none"
+  },
+  "settings": {
+    "mode": "none"
+  },
+  "frontend": {
+    "mode": "esm",
+    "entry": "ui/entry.js",
+    "styles": [
+      "ui/entry.css"
+    ],
+    "sdk_version": "^1.0"
+  },
+  "contributes": {
+    "pages": [
+      {
+        "id": "analytics",
+        "title": "用量统计",
+        "path": "/analytics",
+        "mobile_path": "/mobile/analytics",
+        "icon": "chart-bar",
+        "category": "workspace",
+        "order": 60,
+        "hide_in_office_mode": true
+      }
+    ]
+  }
+}

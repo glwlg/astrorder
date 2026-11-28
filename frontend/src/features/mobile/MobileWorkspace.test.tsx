@@ -15,6 +15,7 @@ import * as localVoiceStream from '../chat/localVoiceStream'
 import { clearStoredAppProfileForTest, getAppProfile, setAppProfile } from '../office/appProfile'
 import { usePluginSettingsStore } from '../plugins/pluginSettingsStore'
 import { useIntegrationsStore } from '../integrations/integrationStore'
+import { registerBuiltinWorkspacePages } from '../extensions/builtinWorkspacePages'
 import { extensionRegistry } from '../extensions/extensionRegistry'
 import { useExtensionStore } from '../extensions/extensionStore'
 import type { ExtensionPageComponentProps } from '../extensions/types'
@@ -1692,6 +1693,95 @@ describe('independent mobile composer', () => {
     } finally {
       while (disposables.length) disposables.pop()?.dispose()
       useExtensionStore.getState().reset()
+    }
+  })
+
+  it('keeps deep-linked standard workspace route /mobile/digest pending during ESM hydration instead of bouncing to chat', async () => {
+    function LocationProbe() {
+      const loc = useLocation()
+      return <output data-testid="loc">{`${loc.pathname}${loc.search}`}</output>
+    }
+
+    useExtensionStore.getState().reset()
+    extensionRegistry.unregisterPage('workspace-digest', 'digest')
+    const disposables: Array<{ dispose(): void }> = []
+    try {
+      render(
+        <MantineProvider>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <MemoryRouter initialEntries={['/mobile/digest?view=mobile']}>
+              <LocationProbe />
+              <MobileWorkspace />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </MantineProvider>,
+      )
+
+      // 1. Before extensionStore hydrates: stays on /mobile/digest and displays pending status (NO bounce to chat!)
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/digest?view=mobile')
+      expect(screen.getByRole('status', { name: '正在加载工作区页面' })).toBeInTheDocument()
+      expect(document.querySelector('.mobile-workspace')).toHaveAttribute('data-mobile-mode', 'digest')
+
+      // 2. Hydrated with workspace-digest official ESM still loading: stays pending on /mobile/digest
+      act(() => {
+        useExtensionStore.setState({
+          hydrated: true,
+          items: [
+            {
+              id: 'workspace-digest',
+              name: '工作复盘',
+              version: '1.0.0',
+              category: 'office',
+              source: 'official',
+              enabled: true,
+              permissions_granted: true,
+              runtime_state: 'ready',
+              backend_type: 'none',
+              frontend: { mode: 'esm', entry: 'ui/entry.js' },
+            },
+          ],
+          esmStates: {
+            'workspace-digest': { status: 'loading', updatedAt: Date.now() },
+          },
+        })
+      })
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/digest?view=mobile')
+      expect(screen.getByRole('status', { name: '正在加载工作区页面' })).toBeInTheDocument()
+
+      // 3. Official ESM finishes activate() and registers digest page: renders directly on /mobile/digest
+      act(() => {
+        disposables.push(
+          extensionRegistry.registerPage({
+            pluginId: 'workspace-digest',
+            id: 'digest',
+            title: '复盘',
+            component: ({ surface }: ExtensionPageComponentProps) => (
+              <div data-testid="async-digest-page">{`digest:${surface}`}</div>
+            ),
+            source: 'esm',
+          }),
+        )
+        useExtensionStore.getState().setEsmRuntimeState('workspace-digest', { status: 'loaded', updatedAt: Date.now() })
+      })
+      expect(await screen.findByTestId('async-digest-page')).toHaveTextContent('digest:mobile')
+      expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/digest?view=mobile')
+
+      // 4. Once plugin is disabled/unregistered and settled, route redirects cleanly to chat
+      act(() => {
+        while (disposables.length) disposables.pop()?.dispose()
+        useExtensionStore.setState((state) => ({
+          items: state.items.map((item) =>
+            item.id === 'workspace-digest' ? { ...item, enabled: false } : item,
+          ),
+        }))
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId('loc')).toHaveTextContent('/mobile/chat/native-test?agent_id=inert&view=mobile'),
+      )
+    } finally {
+      while (disposables.length) disposables.pop()?.dispose()
+      useExtensionStore.getState().reset()
+      registerBuiltinWorkspacePages()
     }
   })
 })

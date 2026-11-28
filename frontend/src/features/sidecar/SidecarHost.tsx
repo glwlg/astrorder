@@ -1,8 +1,8 @@
 import { Suspense, useEffect } from 'react'
 import { api } from '../../api/client'
 import { notifications } from '@mantine/notifications'
-import { ActionIcon, Center, Group, Loader, Tooltip } from '@mantine/core'
-import { IconFolderSearch, IconQuote } from '@tabler/icons-react'
+import { ActionIcon, Center, Group, Loader, Menu, Tooltip } from '@mantine/core'
+import { IconArrowsExchange, IconCheck, IconFolderSearch, IconQuote } from '@tabler/icons-react'
 import { SidecarHeader } from './SidecarHeader'
 import { displaySessionTitle } from '../../components/sessionRailModel'
 import { SidecarWelcomeMenu } from './SidecarWelcomeMenu'
@@ -139,6 +139,7 @@ export function SidecarHost({
   const activeTabId = useSidecarStore((state) => state.activeTabId)
   const dirtyTabs = useSidecarStore((state) => state.dirtyTabs)
   const setActiveTabId = useSidecarStore((state) => state.setActiveTabId)
+  const setTabViewer = useSidecarStore((state) => state.setTabViewer)
   const closeTab = useSidecarStore((state) => state.closeTab)
   const setTabDirty = useSidecarStore((state) => state.setTabDirty)
   const hasDatabaseTool = useHasDatabaseTool()
@@ -370,7 +371,11 @@ export function SidecarHost({
         )}
         {retainedTabs.filter(([, tab]) => tab.type === 'artifact' && tab.artifact).map(([ownerSessionKey, tab]) => {
             const artifact = tab.artifact!
-            const viewer = artifactViewerRegistry.findViewer(artifact)
+            const explicitViewer =
+              tab.viewerId && typeof artifactViewerRegistry.getEnabledViewerById === 'function'
+                ? artifactViewerRegistry.getEnabledViewerById(tab.viewerId)
+                : null
+            const viewer = explicitViewer || artifactViewerRegistry.findViewer(artifact)
             const isActive = isVisible && ownerSessionKey === currentSessionKey && tab.id === activeTabId
             return (
               <div
@@ -406,8 +411,90 @@ export function SidecarHost({
                     tab.viewerId === EXTERNAL_PLUGIN_PANEL_VIEWER_ID ||
                     artifact.id.startsWith('ext:') ||
                     Boolean(artifact.mediaType?.startsWith('application/x-astrorder-ext.'))
+                  const matchingViewers =
+                    isPluginPanelArtifact || typeof artifactViewerRegistry.findAllViewers !== 'function'
+                      ? []
+                      : artifactViewerRegistry.findAllViewers(artifact)
+                  const preferredExt =
+                    matchingViewers.length > 1 &&
+                    typeof artifactViewerRegistry.extractPreferredExtension === 'function'
+                      ? artifactViewerRegistry.extractPreferredExtension(artifact.name || artifact.path || '')
+                      : ''
+                  const savedDefaultViewerId =
+                    preferredExt &&
+                    typeof artifactViewerRegistry.getDefaultViewerIdForExtension === 'function'
+                      ? artifactViewerRegistry.getDefaultViewerIdForExtension(preferredExt)
+                      : null
                   const toolbarAction = (
                     <Group gap={4} wrap="nowrap">
+                      {matchingViewers.length > 1 && (
+                        <Menu position="bottom-end" withinPortal shadow="md">
+                          <Menu.Target>
+                            <Tooltip label="打开方式 / 切换查看器">
+                              <ActionIcon
+                                variant="subtle"
+                                size="sm"
+                                color="gray"
+                                aria-label="打开方式"
+                              >
+                                <IconArrowsExchange size={15} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Menu.Target>
+                          <Menu.Dropdown>
+                            <Menu.Label>打开方式</Menu.Label>
+                            {matchingViewers.map((candidate) => {
+                              const CandidateIcon = candidate.icon
+                              const selected = candidate.id === viewer.id
+                              const isSavedDefault = candidate.id === savedDefaultViewerId
+                              return (
+                                <Menu.Item
+                                  key={candidate.id}
+                                  leftSection={<CandidateIcon size={14} />}
+                                  rightSection={selected ? <IconCheck size={13} /> : undefined}
+                                  onClick={() => setTabViewer(tab.id, candidate.id)}
+                                >
+                                  {candidate.title}
+                                  {isSavedDefault ? '（默认）' : ''}
+                                </Menu.Item>
+                              )
+                            })}
+                            {preferredExt &&
+                              typeof artifactViewerRegistry.setDefaultViewerForExtension === 'function' && (
+                                <>
+                                  <Menu.Divider />
+                                  {savedDefaultViewerId !== viewer.id && (
+                                    <Menu.Item
+                                      onClick={() => {
+                                        artifactViewerRegistry.setDefaultViewerForExtension(preferredExt, viewer.id)
+                                        notifications.show({
+                                          color: 'teal',
+                                          message: `已将「${viewer.title}」设为 ${preferredExt} 的默认打开方式`,
+                                        })
+                                      }}
+                                    >
+                                      始终用「{viewer.title}」打开 {preferredExt}
+                                    </Menu.Item>
+                                  )}
+                                  {savedDefaultViewerId && (
+                                    <Menu.Item
+                                      color="gray"
+                                      onClick={() => {
+                                        artifactViewerRegistry.setDefaultViewerForExtension(preferredExt, null)
+                                        notifications.show({
+                                          color: 'blue',
+                                          message: `已恢复 ${preferredExt} 的自动查看器选择`,
+                                        })
+                                      }}
+                                    >
+                                      恢复 {preferredExt} 自动选择
+                                    </Menu.Item>
+                                  )}
+                                </>
+                              )}
+                          </Menu.Dropdown>
+                        </Menu>
+                      )}
                       <Tooltip label="引用到输入框追问（选中片段可带代码引用）">
                         <ActionIcon
                           variant="subtle"

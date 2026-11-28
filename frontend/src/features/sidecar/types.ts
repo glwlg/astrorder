@@ -44,7 +44,7 @@ export interface ArtifactViewer {
   title: string
   description?: string
   version?: string
-  source?: 'builtin' | 'esm'
+  source?: 'builtin' | 'esm' | 'iframe'
   pluginId?: string
   category?: PluginCategory
   capabilitySlot?: string

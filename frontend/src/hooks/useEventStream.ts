@@ -14,6 +14,8 @@ import {
 } from "../domain/islandNotifications";
 import { useAstrorderStore } from "../state/store";
 import { useExtensionStore } from "../features/extensions/extensionStore";
+import { extensionsApi } from "../api/extensions";
+import { pluginEventBus } from "../features/extensions/pluginEventBus";
 import { usePluginSettingsStore } from "../features/plugins/pluginSettingsStore";
 import { api } from "../api/client";
 import { nativeActivityEvent } from "./useSessionOrder";
@@ -323,6 +325,7 @@ export function useEventStream(
         }
       },
       onEvent: (event) => {
+        pluginEventBus.emitHostEvent(event as unknown as import("../features/extensions/pluginEventBus").HostStreamEvent);
         if (event.type === "message.delta" && event.cursor === 0) {
           const store = useAstrorderStore.getState();
           const { id, agent_id: agentId, session_id: sessionId } = event.data;
@@ -709,6 +712,14 @@ export function useEventStream(
           void useExtensionStore.getState().refresh();
           if (event.data?.action === "settings_updated") {
             void usePluginSettingsStore.getState().hydrate(true);
+            const changedId = typeof event.data?.plugin_id === "string" ? event.data.plugin_id : "";
+            if (changedId) {
+              void extensionsApi.getExtensionConfig(changedId).then((res) => {
+                if (res?.values) {
+                  usePluginSettingsStore.getState().syncExtensionConfigLocal(changedId, res.values, false);
+                }
+              }).catch(() => {});
+            }
           }
         }
         if (useAstrorderStore.getState().resyncRequired) {
